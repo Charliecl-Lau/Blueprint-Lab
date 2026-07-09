@@ -1,0 +1,41 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, sans-serif; margin: 40px; font-size: 12pt; }
+  h1 { font-size: 16pt; }
+  .meta { color: #555; font-size: 10pt; margin-bottom: 24px; }
+  .question { margin-bottom: 24px; }
+  .question-label { font-weight: bold; }
+  .options { margin-left: 24px; margin-top: 8px; }
+  .option { margin-bottom: 6px; }
+  .correct { font-weight: bold; color: #1a7a3c; }
+  .model-answer { background: #f5f5f5; padding: 10px; margin-top: 8px; font-size: 11pt; }
+  .answer-key-badge { background: #c00; color: white; padding: 2px 8px; font-size: 10pt; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>{{ topic }} <span class="answer-key-badge">ANSWER KEY</span></h1>
+<div class="meta">Framework: {{ framework }} | Control Set: {{ control_summary }}</div>
+
+{% for question in questions %}
+<div class="question">
+  <div class="question-label">Q{{ loop.index }}. [{{ question.type | upper }}] {{ question.body }}</div>
+  {% if question.type == "mcq" %}
+  <div class="options">
+    {% for option in question.options %}
+    <div class="option {% if option.is_correct %}correct{% endif %}">
+      {% if option.is_correct %}&#10003;{% else %}&#9675;{% endif %} {{ option.body }}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  {% if question.model_answer %}
+  <div class="model-answer">{{ question.model_answer.body }}</div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+</body>
+</html>

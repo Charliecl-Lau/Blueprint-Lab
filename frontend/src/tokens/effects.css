@@ -1,0 +1,55 @@
+:root {
+  --radius-none: 0;
+  --radius-xs:   4px;
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-xl:   18px;
+  --radius-2xl:  24px;
+  --radius-3xl:  32px;
+  --radius-full: 9999px;
+
+  --shadow-none: none;
+  --shadow-xs:   0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:   0 4px 12px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg:   0 8px 24px rgba(0,0,0,0.08), 0 4px 8px rgba(0,0,0,0.04);
+  --shadow-xl:   0 16px 48px rgba(0,0,0,0.10), 0 8px 16px rgba(0,0,0,0.05);
+  --shadow-2xl:  0 32px 64px rgba(0,0,0,0.14), 0 16px 32px rgba(0,0,0,0.06);
+  --shadow-inset-sm: inset 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-inset-md: inset 0 2px 4px rgba(0,0,0,0.08);
+
+  --focus-ring-blue:  0 0 0 3px rgba(26,86,219,0.18);
+  --focus-ring-error: 0 0 0 3px rgba(255,59,48,0.18);
+  --focus-ring-green: 0 0 0 3px rgba(48,197,89,0.18);
+
+  --border-subtle: 1px solid var(--color-border-subtle);
+  --border-base:   1px solid var(--color-border);
+  --border-strong: 1px solid var(--color-border-strong);
+
+  --ease-linear: linear;
+  --ease-out:    cubic-bezier(0.0, 0.0, 0.2, 1);
+  --ease-in:     cubic-bezier(0.4, 0.0, 1.0, 1);
+  --ease-inout:  cubic-bezier(0.4, 0.0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.40, 0.64, 1);
+
+  --duration-instant:  50ms;
+  --duration-fast:    100ms;
+  --duration-base:    180ms;
+  --duration-slow:    280ms;
+  --duration-slower:  400ms;
+  --duration-slowest: 600ms;
+
+  --transition-fast:   var(--duration-fast)   var(--ease-out);
+  --transition-base:   var(--duration-base)   var(--ease-out);
+  --transition-slow:   var(--duration-slow)   var(--ease-out);
+  --transition-spring: var(--duration-slow)   var(--ease-spring);
+  --transition-bounce: var(--duration-slower) var(--ease-bounce);
+
+  --blur-sm:  blur(4px);
+  --blur-md:  blur(8px);
+  --blur-lg:  blur(16px);
+  --blur-xl:  blur(24px);
+  --blur-2xl: blur(40px);
+}

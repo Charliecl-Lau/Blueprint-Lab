@@ -1,0 +1,36 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, sans-serif; margin: 40px; font-size: 12pt; }
+  h1 { font-size: 16pt; }
+  .meta { color: #555; font-size: 10pt; margin-bottom: 24px; }
+  .question { margin-bottom: 24px; }
+  .question-label { font-weight: bold; }
+  .options { margin-left: 24px; margin-top: 8px; }
+  .option { margin-bottom: 6px; }
+  .long-answer-box { border: 1px solid #ccc; min-height: 80px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h1>{{ topic }}</h1>
+<div class="meta">Framework: {{ framework }} | Control Set: {{ control_summary }}</div>
+
+{% for question in questions %}
+<div class="question">
+  <div class="question-label">Q{{ loop.index }}. [{{ question.type | upper }}] {{ question.body }}</div>
+  {% if question.type == "mcq" %}
+  <div class="options">
+    {% for option in question.options %}
+    <div class="option">&#9675; {{ option.body }}</div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="long-answer-box"></div>
+  <div style="font-size:10pt; color:#777; margin-top:4px;">Word guide: ~{{ answer_word_guide }}</div>
+  {% endif %}
+</div>
+{% endfor %}
+</body>
+</html>
