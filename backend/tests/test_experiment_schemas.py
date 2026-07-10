@@ -16,9 +16,11 @@ def test_experiment_create_defaults_to_openai_and_all_factors_off():
 
     assert payload.prompt_structure == "openai"
     assert payload.factors == PromptFactors()
-    assert payload.factors.course_bridge is False
+    assert payload.estimated_time_minutes == 30
+    assert payload.factors.concept_bridge is False
     assert payload.factors.few_shot is False
-    assert payload.factors.documents is False
+    assert payload.factors.reference_content is False
+    assert payload.factors.reasoning_guidance is False
 
 
 def test_experiment_create_accepts_anthropic_prompt_structure():
@@ -30,11 +32,17 @@ def test_experiment_create_accepts_anthropic_prompt_structure():
         difficulty="intermediate",
         number_of_questions=2,
         prompt_structure="anthropic",
-        factors={"course_bridge": True, "few_shot": True, "documents": False},
+        factors={"concept_bridge": True, "few_shot": True, "reference_content": False, "reasoning_guidance": False},
+        factor_inputs={"concept_bridge": "Connect signals to vectors.", "few_shot": "Q: Example? A: Example."},
     )
 
     assert payload.prompt_structure == "anthropic"
-    assert payload.factors.course_bridge is True
+    assert payload.factors.concept_bridge is True
+
+
+def test_enabled_factor_requires_content():
+    with pytest.raises(ValidationError):
+        ExperimentCreate(course="ENGR", topic="Statics", learning_objectives="Resolve forces", difficulty="medium", factors={"reasoning_guidance": True})
 
 
 def test_experiment_create_rejects_removed_frameworks():

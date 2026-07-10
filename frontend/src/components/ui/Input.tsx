@@ -1,4 +1,5 @@
-import { useState, ReactNode, InputHTMLAttributes } from 'react'
+import { useState } from 'react'
+import type { ReactNode, InputHTMLAttributes } from 'react'
 
 interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size' | 'prefix'> {
   label?: string

@@ -1,4 +1,5 @@
-import { useState, ReactNode } from 'react'
+import { useState } from 'react'
+import type { ReactNode } from 'react'
 
 export interface TabItem { id: string; label: string; icon?: ReactNode; count?: number }
 

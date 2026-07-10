@@ -1,7 +1,4 @@
-import json
-
 from backend.schemas.assessment_schema import AssessmentGenerationResponse
-from backend.schemas.planner_schema import PlannerResponse
 from backend.services.llm_client import LLMClient
 
 
@@ -19,8 +16,3 @@ def generate_questions(llm: LLMClient, generated_prompt: str) -> AssessmentGener
         user_message=generated_prompt,
     )
     return AssessmentGenerationResponse(**raw)
-
-
-def generate_assessment(llm: LLMClient, plan: PlannerResponse) -> AssessmentGenerationResponse:
-    """Compatibility adapter for the legacy worker until its migration task is executed."""
-    return generate_questions(llm, json.dumps(plan.model_dump(), indent=2))

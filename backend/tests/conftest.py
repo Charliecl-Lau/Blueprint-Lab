@@ -6,9 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend.database import Base, get_db
 from backend.main import app
-import backend.models.run  # noqa: F401
-import backend.models.assessment  # noqa: F401
-import backend.models.question  # noqa: F401
+import backend.models.experiment  # noqa: F401
 
 TEST_DATABASE_URL = "sqlite://"
 

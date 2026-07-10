@@ -1,4 +1,5 @@
-import { useState, SelectHTMLAttributes } from 'react'
+import { useState } from 'react'
+import type { SelectHTMLAttributes } from 'react'
 
 interface SelectOption { value: string; label: string; disabled?: boolean }
 

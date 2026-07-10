@@ -2,13 +2,13 @@ import { useEffect } from 'react'
 import type { SSEEvent } from '../types'
 
 export function useSSE(
-  runId: number | null,
+  experimentId: number | null,
   onEvent: (event: SSEEvent) => void,
   onDone?: () => void,
 ) {
   useEffect(() => {
-    if (!runId) return
-    const es = new EventSource(`/api/runs/${runId}/events`)
+    if (!experimentId) return
+    const es = new EventSource(`/api/experiments/${experimentId}/progress`)
 
     es.onmessage = (e) => {
       const data: SSEEvent = JSON.parse(e.data)
@@ -23,5 +23,5 @@ export function useSSE(
     es.onerror = () => es.close()
 
     return () => es.close()
-  }, [runId])
+  }, [experimentId, onEvent, onDone])
 }

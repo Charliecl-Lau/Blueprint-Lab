@@ -21,6 +21,7 @@ class Experiment(Base):
     assessment_type: Mapped[str] = mapped_column(String, nullable=False)
     difficulty: Mapped[str] = mapped_column(String, nullable=False)
     number_of_questions: Mapped[int] = mapped_column(Integer, nullable=False)
+    estimated_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     conditions: Mapped[list["Condition"]] = relationship("Condition", back_populates="experiment")
@@ -33,9 +34,11 @@ class Condition(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     experiment_id: Mapped[int] = mapped_column(Integer, ForeignKey("experiments.id"), nullable=False)
     prompt_structure: Mapped[str] = mapped_column(String, nullable=False)
-    course_bridge_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    concept_bridge_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     few_shot_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    documents_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reference_content_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reasoning_guidance_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    factor_inputs: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     condition_label: Mapped[str] = mapped_column(String, nullable=False)
 
     experiment: Mapped["Experiment"] = relationship("Experiment", back_populates="conditions")

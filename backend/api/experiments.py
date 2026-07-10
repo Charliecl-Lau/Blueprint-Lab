@@ -50,6 +50,7 @@ def create_experiment(payload: ExperimentCreate, db: Session = Depends(get_db)):
         assessment_type=payload.assessment_type,
         difficulty=payload.difficulty,
         number_of_questions=payload.number_of_questions,
+        estimated_time_minutes=payload.estimated_time_minutes,
     )
     db.add(experiment)
     db.flush()
@@ -57,9 +58,11 @@ def create_experiment(payload: ExperimentCreate, db: Session = Depends(get_db)):
     condition = Condition(
         experiment_id=experiment.id,
         prompt_structure=payload.prompt_structure,
-        course_bridge_enabled=payload.factors.course_bridge,
+        concept_bridge_enabled=payload.factors.concept_bridge,
         few_shot_enabled=payload.factors.few_shot,
-        documents_enabled=payload.factors.documents,
+        reference_content_enabled=payload.factors.reference_content,
+        reasoning_guidance_enabled=payload.factors.reasoning_guidance,
+        factor_inputs=payload.factor_inputs.model_dump(exclude_none=True),
         condition_label=build_condition_label(payload.factors),
     )
     db.add(condition)

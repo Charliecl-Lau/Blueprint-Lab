@@ -17,10 +17,12 @@ def make_generation(test_db):
     condition = Condition(
         experiment_id=experiment.id,
         prompt_structure="openai",
-        course_bridge_enabled=False,
+        concept_bridge_enabled=False,
         few_shot_enabled=False,
-        documents_enabled=False,
-        condition_label="CourseBridge=OFF; FewShot=OFF; Documents=OFF",
+        reference_content_enabled=False,
+        reasoning_guidance_enabled=False,
+        factor_inputs={},
+        condition_label="ConceptBridge=OFF; FewShot=OFF; ReferenceContent=OFF; ReasoningGuidance=OFF",
     )
     test_db.add(condition)
     test_db.flush()
@@ -53,7 +55,7 @@ def test_get_generation_detail(client, test_db):
 
     assert response.status_code == 200
     assert response.json()["prompt_text"] == "Prompt"
-    assert response.json()["condition"]["condition_label"] == "CourseBridge=OFF; FewShot=OFF; Documents=OFF"
+    assert response.json()["condition"]["condition_label"] == "ConceptBridge=OFF; FewShot=OFF; ReferenceContent=OFF; ReasoningGuidance=OFF"
 
 
 def test_export_docx_returns_word_artifact(client, test_db):

@@ -3,8 +3,8 @@ from backend.services.prompt_factors import build_condition_label, build_researc
 
 
 def test_condition_label_records_each_factor_state():
-    label = build_condition_label(PromptFactors(course_bridge=True, documents=True))
-    assert label == "CourseBridge=ON; FewShot=OFF; Documents=ON"
+    label = build_condition_label(PromptFactors(concept_bridge=True, reference_content=True))
+    assert label == "ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF"
 
 
 def test_openai_prompt_uses_markdown_structure_and_enabled_factors():
@@ -13,14 +13,16 @@ def test_openai_prompt_uses_markdown_structure_and_enabled_factors():
         topic="Gibbs free energy and phase equilibrium",
         learning_objectives="Connect chemical potential to phase stability.",
         assessment_type="mixed", difficulty="intermediate", number_of_questions=1,
-        factors=PromptFactors(course_bridge=True, documents=True),
+        factors=PromptFactors(concept_bridge=True, reference_content=True, reasoning_guidance=True),
+        factor_inputs={"concept_bridge": "Vectors", "reference_content": "Use SI", "reasoning_guidance": "Show key steps"},
     )
     assert "# Role" in prompt
     assert "# Goal" in prompt
-    assert "## Course Bridge" in prompt
+    assert "## Concept Bridge" in prompt
     assert "## Few-shot Examples" not in prompt
-    assert "## Instructor Examples / Attached Documents" in prompt
-    assert "CourseBridge=ON; FewShot=OFF; Documents=ON" in prompt
+    assert "## Reference Content" in prompt
+    assert "## Reasoning Guidance" in prompt
+    assert "Show key steps" in prompt
     assert "Return only valid JSON" in prompt
 
 

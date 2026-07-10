@@ -8,8 +8,10 @@ PAYLOAD = {
     "assessment_type": "mixed",
     "difficulty": "introductory",
     "number_of_questions": 2,
+    "estimated_time_minutes": 30,
     "prompt_structure": "openai",
-    "factors": {"course_bridge": True, "few_shot": False, "documents": True},
+    "factors": {"concept_bridge": True, "few_shot": False, "reference_content": True, "reasoning_guidance": False},
+    "factor_inputs": {"concept_bridge": "Connect vectors to equilibrium.", "reference_content": "Use SI units."},
 }
 
 
@@ -20,7 +22,9 @@ def test_create_experiment_creates_condition_and_generation(client):
     assert response.status_code == 200
     data = response.json()
     assert data["course"] == "ENGR 101"
-    assert data["conditions"][0]["condition_label"] == "CourseBridge=ON; FewShot=OFF; Documents=ON"
+    assert data["estimated_time_minutes"] == 30
+    assert data["conditions"][0]["factor_inputs"]["reference_content"] == "Use SI units."
+    assert data["conditions"][0]["condition_label"] == "ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF"
     assert data["generations"][0]["status"] == "pending"
     delay.assert_called_once_with(data["generations"][0]["id"])
 

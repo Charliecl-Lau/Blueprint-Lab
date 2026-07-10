@@ -1,4 +1,5 @@
-import { useState, ReactNode, ButtonHTMLAttributes } from 'react'
+import { useState } from 'react'
+import type { ReactNode, ButtonHTMLAttributes } from 'react'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'destructive'

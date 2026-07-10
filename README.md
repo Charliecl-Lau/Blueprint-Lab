@@ -1,69 +1,51 @@
-# Blueprint
+# Blueprint Lab
 
-An AI-powered assessment generator that creates structured question sets from curriculum topics. Teachers specify a topic, difficulty, and framework (e.g. Bloom's Taxonomy), and Blueprint generates a full assessment with answer keys exportable to PDF.
+Blueprint Lab is a controlled research platform for prompt-engineering experiments on undergraduate engineering assessment generation. It prioritizes reproducibility, experimental control, metadata logging, and research usability over production flexibility.
 
-## Features
+## Research workflow
 
-- Generate assessments from a topic, grade level, and learning framework
-- Real-time progress streaming via Server-Sent Events (SSE)
-- PDF export for both student and answer key variants
-- Regenerate individual assessments without re-running the full pipeline
-- Celery-backed async worker with idempotent retry support
-
-## Tech Stack
-
-- **Backend:** FastAPI, SQLAlchemy, Celery, Redis
-- **Frontend:** React, TypeScript, Vite
-- **AI:** LLM-based multi-stage generation pipeline (plan → validate → generate)
-- **Export:** WeasyPrint for PDF rendering
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- Redis (for Celery broker)
-
-### Backend
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn backend.main:app --reload
+```text
+Prompt Generation -> Question Generation -> Word Document Generation -> Metadata Logging -> Persistence
 ```
 
-Start the Celery worker:
+Researchers configure course context, assessment requirements, estimated student completion time, a fixed provider prompt structure, and independently selectable prompt design factors. Every condition records the exact factor content, generated prompt, model metadata, generated questions, and Word artifact.
 
-```bash
-celery -A backend.celery_app worker --loglevel=info
+Prompt design factors include Concept Bridge, Few-shot Examples, Reference Content, and Reasoning Guidance. Reasoning Guidance requests concise visible rationale or structured solution steps; it does not request or expose hidden private model reasoning.
+
+## Technology
+
+- FastAPI, SQLAlchemy, Pydantic
+- Celery and Redis progress events
+- React, TypeScript, Vite, Zustand
+- `python-docx` Word generation
+- pytest and Vitest
+
+## Development
+
+Install backend dependencies and run the API from the repository root:
+
+```powershell
+python -m pip install -r backend/requirements.txt
+python -m uvicorn backend.main:app --reload
 ```
 
-### Frontend
+Run the worker and Redis using the project’s configured environment. Then start the frontend:
 
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-The frontend runs at `http://localhost:5173` and the API at `http://localhost:8000`.
+The frontend runs at `http://localhost:5173`; the API runs at `http://localhost:8000`.
 
-## Project Structure
+## Verification
 
-```
-backend/
-  api/          # FastAPI route handlers
-  models/       # SQLAlchemy ORM models
-  schemas/      # Pydantic request/response schemas
-  services/     # LLM pipeline: planner, validator, generator
-  workers/      # Celery task definitions
-frontend/
-  src/
-    pages/      # InputPanelPage, ProgressPage, AssessmentViewerPage
-    api/        # API client functions
-    store/      # Zustand run store
-    hooks/      # useSSE and other hooks
+```powershell
+python -m pytest backend/tests -v
+cd frontend
+npm test -- --run
+npm run build
 ```
 
 ## License

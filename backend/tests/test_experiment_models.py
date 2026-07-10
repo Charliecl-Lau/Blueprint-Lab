@@ -23,10 +23,12 @@ def test_experiment_condition_generation_metadata_round_trip(test_db):
     condition = Condition(
         experiment_id=experiment.id,
         prompt_structure="openai",
-        course_bridge_enabled=True,
+        concept_bridge_enabled=True,
         few_shot_enabled=False,
-        documents_enabled=True,
-        condition_label="CourseBridge=ON; FewShot=OFF; Documents=ON",
+        reference_content_enabled=True,
+        reasoning_guidance_enabled=False,
+        factor_inputs={"concept_bridge": "Vectors", "reference_content": "SI units"},
+        condition_label="ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF",
     )
     test_db.add(condition)
     test_db.flush()
@@ -64,7 +66,7 @@ def test_experiment_condition_generation_metadata_round_trip(test_db):
     test_db.commit()
 
     saved = test_db.get(Generation, generation.id)
-    assert saved.condition.condition_label == "CourseBridge=ON; FewShot=OFF; Documents=ON"
+    assert saved.condition.condition_label == "ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF"
     assert saved.prompt_record.full_prompt == "Generate an assessment."
     assert saved.document_artifact.filename == "assessment.docx"
     assert saved.rubric_results[0].rubric_score == 4.5

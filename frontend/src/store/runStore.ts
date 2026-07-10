@@ -1,48 +1,34 @@
 import { create } from 'zustand'
-import type { Run, Assessment, SSEEvent } from '../types'
+import type { Experiment, Generation, SSEEvent } from '../types'
 
-interface RunStore {
-  run: Run | null
-  assessments: Record<number, Assessment>
-  selectedAssessmentId: number | null
-
-  setRun: (run: Run) => void
+interface ExperimentStore {
+  experiment: Experiment | null
+  generations: Record<number, Generation>
+  selectedGenerationId: number | null
+  setExperiment: (experiment: Experiment) => void
   applySSEEvent: (event: SSEEvent) => void
-  setAssessment: (assessment: Assessment) => void
-  selectAssessment: (id: number) => void
+  setGeneration: (generation: Generation) => void
+  selectGeneration: (id: number) => void
   reset: () => void
 }
 
-export const useRunStore = create<RunStore>((set) => ({
-  run: null,
-  assessments: {},
-  selectedAssessmentId: null,
-
-  setRun: (run) => {
-    const assessments: Record<number, Assessment> = {}
-    run.assessments.forEach(a => { assessments[a.id] = a })
-    set({ run, assessments, selectedAssessmentId: null })
+export const useRunStore = create<ExperimentStore>((set) => ({
+  experiment: null,
+  generations: {},
+  selectedGenerationId: null,
+  setExperiment: (experiment) => {
+    const generations = Object.fromEntries(experiment.generations.map((generation) => [generation.id, generation]))
+    set({ experiment, generations, selectedGenerationId: null })
   },
-
   applySSEEvent: (event) => set((state) => {
-    const existing = Object.values(state.assessments).find(
-      a => a.framework === event.framework && a.control_set_id === event.control_set
-    )
+    const existing = state.generations[event.generation_id]
     if (!existing) return state
-    const updated = { ...existing, status: event.stage }
-    const assessments = { ...state.assessments, [existing.id]: updated }
-    const selectedAssessmentId =
-      state.selectedAssessmentId === null && event.stage === 'complete'
-        ? existing.id
-        : state.selectedAssessmentId
-    return { assessments, selectedAssessmentId }
+    return {
+      generations: { ...state.generations, [existing.id]: { ...existing, status: event.stage } },
+      selectedGenerationId: state.selectedGenerationId ?? (event.stage === 'complete' ? existing.id : null),
+    }
   }),
-
-  setAssessment: (assessment) => set((state) => ({
-    assessments: { ...state.assessments, [assessment.id]: assessment },
-  })),
-
-  selectAssessment: (id) => set({ selectedAssessmentId: id }),
-
-  reset: () => set({ run: null, assessments: {}, selectedAssessmentId: null }),
+  setGeneration: (generation) => set((state) => ({ generations: { ...state.generations, [generation.id]: generation } })),
+  selectGeneration: (id) => set({ selectedGenerationId: id }),
+  reset: () => set({ experiment: null, generations: {}, selectedGenerationId: null }),
 }))
