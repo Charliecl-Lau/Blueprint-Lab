@@ -1,62 +1,14 @@
-from unittest.mock import MagicMock
-import pytest
+from backend.schemas.experiment_schema import PromptFactors
 from backend.services.prompt_generator import generate_prompt
 
 
-@pytest.fixture
-def mock_llm():
-    client = MagicMock()
-    client.generate_json.return_value = {"generated_prompt": "You are an assessment generator. Topic: TCP/IP..."}
-    return client
-
-
-def test_generate_prompt_returns_string(mock_llm):
+def test_generate_prompt_builds_selected_provider_structure():
     result = generate_prompt(
-        llm=mock_llm,
-        topic="TCP/IP Networking",
-        expectations="Test understanding of the three-way handshake",
-        framework="forge",
-        personality="formal",
-        prompt_length="medium",
-        result_length="medium",
-        action_word_count=3,
-        mcq_count=10,
-        long_answer_count=3,
+        course="MSE302", topic="Phase equilibrium",
+        learning_objectives="Relate Gibbs energy to phase stability.",
+        assessment_type="mcq", difficulty="intermediate", number_of_questions=2,
+        prompt_structure="anthropic", factors=PromptFactors(course_bridge=True),
     )
-    assert isinstance(result, str)
-    assert len(result) > 0
-
-
-def test_generate_prompt_calls_llm_with_framework_system_prompt(mock_llm):
-    generate_prompt(
-        llm=mock_llm,
-        topic="TCP/IP Networking",
-        expectations="Test handshake understanding",
-        framework="forge",
-        personality="formal",
-        prompt_length="medium",
-        result_length="medium",
-        action_word_count=3,
-        mcq_count=10,
-        long_answer_count=3,
-    )
-    call_args = mock_llm.generate_json.call_args
-    assert "<context>" in call_args.kwargs["system_prompt"]
-    assert "TCP/IP Networking" in call_args.kwargs["user_message"]
-
-
-def test_generate_prompt_raises_on_missing_key(mock_llm):
-    mock_llm.generate_json.return_value = {"wrong_key": "value"}
-    with pytest.raises(ValueError, match="generated_prompt"):
-        generate_prompt(
-            llm=mock_llm,
-            topic="TCP/IP",
-            expectations="test",
-            framework="forge",
-            personality="formal",
-            prompt_length="medium",
-            result_length="medium",
-            action_word_count=3,
-            mcq_count=10,
-            long_answer_count=3,
-        )
+    assert result.startswith("<context>")
+    assert "Number of Questions: 2" in result
+    assert "CourseBridge=ON; FewShot=OFF; Documents=OFF" in result

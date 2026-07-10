@@ -1,43 +1,26 @@
 import json
-from backend.schemas.planner_schema import PlannerResponse
+
 from backend.schemas.assessment_schema import AssessmentGenerationResponse
+from backend.schemas.planner_schema import PlannerResponse
 from backend.services.llm_client import LLMClient
 
-_GENERATOR_SYSTEM_PROMPT = """You are an expert educational assessment writer. Given a structured assessment plan, write all questions in full.
 
-For MCQ questions:
-- Write a clear, unambiguous question body
-- Provide exactly 4 options: exactly one must be correct (is_correct: true), three must be plausible distractors
-- Set model_answer to null
+_QUESTION_GENERATOR_SYSTEM_PROMPT = """Execute the provided generated research prompt directly.
 
-For long answer questions:
-- Write a clear, open-ended question body
-- Set options to an empty array []
-- Write a complete model answer appropriate to the answer_scope in the plan
+Generate the assessment without an intermediate planning stage. Do not add, remove, or reinterpret
+provider-specific prompt sections. Follow the JSON schema embedded in the generated prompt and return
+only valid JSON.
+"""
 
-Return only valid JSON matching this schema:
-{
-  "questions": [
-    {
-      "type": "mcq",
-      "body": "...",
-      "options": [{"body": "...", "is_correct": false}, ...],
-      "model_answer": null
-    },
-    {
-      "type": "long_answer",
-      "body": "...",
-      "options": [],
-      "model_answer": "..."
-    }
-  ]
-}
 
-Generate questions in the same order as the plan. Do not skip any question."""
+def generate_questions(llm: LLMClient, generated_prompt: str) -> AssessmentGenerationResponse:
+    raw = llm.generate_json(
+        system_prompt=_QUESTION_GENERATOR_SYSTEM_PROMPT,
+        user_message=generated_prompt,
+    )
+    return AssessmentGenerationResponse(**raw)
 
 
 def generate_assessment(llm: LLMClient, plan: PlannerResponse) -> AssessmentGenerationResponse:
-    plan_text = json.dumps(plan.model_dump(), indent=2)
-    user_message = f"Assessment plan to execute:\n\n{plan_text}"
-    raw = llm.generate_json(system_prompt=_GENERATOR_SYSTEM_PROMPT, user_message=user_message)
-    return AssessmentGenerationResponse(**raw)
+    """Compatibility adapter for the legacy worker until its migration task is executed."""
+    return generate_questions(llm, json.dumps(plan.model_dump(), indent=2))
