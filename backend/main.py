@@ -6,6 +6,7 @@ from backend.database import Base, engine
 import backend.models.run  # noqa: F401
 import backend.models.assessment  # noqa: F401
 import backend.models.question  # noqa: F401
+import backend.models.experiment  # noqa: F401
 
 app = FastAPI(title="Assessment Generator")
 
