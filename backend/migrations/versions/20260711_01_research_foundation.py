@@ -13,9 +13,35 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # digest() is supplied by pgcrypto. IF NOT EXISTS is idempotent, but the
-    # migration role must have permission to install an available extension.
+    # Fail before any schema mutation when pgcrypto cannot be provisioned.
+    op.execute("""
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto') THEN
+            IF NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pgcrypto') THEN
+              RAISE EXCEPTION 'pgcrypto is unavailable; install the PostgreSQL contrib package and provision pgcrypto before retrying';
+            END IF;
+            IF NOT has_database_privilege(current_user, current_database(), 'CREATE')
+               OR NOT has_schema_privilege(current_user, current_schema(), 'CREATE') THEN
+              RAISE EXCEPTION 'pgcrypto is not installed and the migration role cannot create it; run CREATE EXTENSION pgcrypto as an authorized role before retrying';
+            END IF;
+          END IF;
+        END $$
+    """)
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    op.execute("""
+        CREATE FUNCTION blueprint_canonical_json(value jsonb) RETURNS text
+        LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+          SELECT CASE jsonb_typeof(value)
+            WHEN 'object' THEN '{' || COALESCE((
+              SELECT string_agg(to_jsonb(entry.key)::text || ':' || blueprint_canonical_json(entry.value), ',' ORDER BY entry.key)
+              FROM jsonb_each(value) AS entry(key, value)), '') || '}'
+            WHEN 'array' THEN '[' || COALESCE((
+              SELECT string_agg(blueprint_canonical_json(element.value), ',' ORDER BY element.ordinality)
+              FROM jsonb_array_elements(value) WITH ORDINALITY AS element(value, ordinality)), '') || ']'
+            ELSE value::text
+          END
+        $$
+    """)
     op.rename_table("generations", "runs")
 
     # Experiment descriptors required by the canonical model are deliberately
@@ -92,8 +118,8 @@ def upgrade() -> None:
     op.execute("UPDATE prompts SET prompt_hash = encode(digest(convert_to(final_prompt, 'UTF8'), 'sha256'), 'hex')")
     op.execute("""
         INSERT INTO assessments (run_id, raw_response_text, parsed_json, output_hash, schema_version, created_at)
-        SELECT id, generated_json::jsonb::text, generated_json,
-          encode(digest(convert_to(generated_json::jsonb::text, 'UTF8'), 'sha256'), 'hex'),
+        SELECT id, blueprint_canonical_json(generated_json::jsonb), generated_json,
+          encode(digest(convert_to(blueprint_canonical_json(generated_json::jsonb), 'UTF8'), 'sha256'), 'hex'),
           'legacy-unknown', created_at
         FROM runs WHERE generated_json IS NOT NULL
     """)
@@ -151,7 +177,7 @@ def upgrade() -> None:
             WHERE r.generated_json IS NOT NULL AND
               (a.run_id IS NULL OR a.raw_response_text IS NULL OR a.parsed_json IS NULL OR
                a.output_hash IS NULL OR
-               a.raw_response_text <> r.generated_json::jsonb::text OR
+               a.raw_response_text <> blueprint_canonical_json(r.generated_json::jsonb) OR
                a.parsed_json::jsonb <> r.generated_json::jsonb OR
                a.output_hash <> encode(digest(convert_to(a.raw_response_text, 'UTF8'), 'sha256'), 'hex'));
           IF source_count <> target_count OR invalid_count <> 0 THEN
@@ -160,6 +186,7 @@ def upgrade() -> None:
         END $$
     """)
     op.drop_column("runs", "generated_json")
+    op.execute("DROP FUNCTION blueprint_canonical_json(jsonb)")
 
 
 def downgrade() -> None:
