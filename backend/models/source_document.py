@@ -1,7 +1,16 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
@@ -10,6 +19,7 @@ from backend.models.experiment import utc_now
 
 class SourceDocument(Base):
     __tablename__ = "source_documents"
+    __table_args__ = (CheckConstraint("length(content_hash) = 64"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     document_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -28,7 +38,11 @@ class SourceDocument(Base):
 class RunSourceDocument(Base):
     __tablename__ = "run_source_documents"
     __table_args__ = (
-        CheckConstraint("role IN ('course_syllabus','bridge_map','few_shot_example','rubric','reference_content','instructor_example')"),
+        CheckConstraint(
+            "role IN ('course_syllabus','bridge_map','few_shot_example','rubric',"
+            "'reference_content','instructor_example')"
+        ),
+        CheckConstraint("length(included_text_hash) = 64"),
         UniqueConstraint("run_id", "role", "ordinal"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)

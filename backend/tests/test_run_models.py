@@ -1,3 +1,6 @@
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 from backend.models import Assessment, Condition, Experiment, Prompt, Run
 
 
@@ -28,7 +31,14 @@ def test_immutable_research_run_round_trip(test_db):
         factor_inputs={"concept_bridge": "Vectors"},
         condition_label="Concept bridge only",
     )
-    run = Run(experiment=experiment, condition=condition, run_number=1, status="completed")
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="complete",
+        provider="google",
+        model_name="gemini-2.0-flash",
+    )
     run.prompt = Prompt(
         prompt_structure="openai",
         system_prompt="You are an assessment designer.",
@@ -50,3 +60,37 @@ def test_immutable_research_run_round_trip(test_db):
     assert saved.condition.condition_code == "C100"
     assert saved.prompt.final_prompt == "Generate three questions."
     assert saved.assessment.parsed_json == {"questions": []}
+    assert saved.provider == "google"
+    assert saved.model == "gemini-2.0-flash"
+
+
+def test_prompt_hash_rejects_non_sha256_length(test_db):
+    experiment = Experiment(
+        name="Hash validation",
+        description="Validate evidence hashes.",
+        topic_area="Testing",
+        research_question="Are malformed hashes rejected?",
+        status="draft",
+        course="ENGR 101",
+        topic="Hashes",
+        learning_objectives="Validate provenance.",
+        assessment_type="mixed",
+        difficulty="introductory",
+        number_of_questions=1,
+    )
+    condition = Condition(
+        experiment=experiment,
+        condition_code="C100",
+        prompt_structure="openai",
+        condition_label="Baseline",
+    )
+    run = Run(experiment=experiment, condition=condition, run_number=1)
+    run.prompt = Prompt(
+        prompt_structure="openai",
+        final_prompt="Generate one question.",
+        prompt_hash="too-short",
+    )
+    test_db.add(experiment)
+
+    with pytest.raises(IntegrityError):
+        test_db.commit()
