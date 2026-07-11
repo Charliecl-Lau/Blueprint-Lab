@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import dataclass
 from typing import Optional
 
 from google import genai
@@ -8,24 +9,50 @@ from google.genai import types
 from backend.config import settings
 
 
+@dataclass(frozen=True)
+class LLMResult:
+    raw_text: str
+    provider_request_id: Optional[str]
+    model_name: str
+    model_version: Optional[str]
+    finish_reason: Optional[str]
+
+
 class LLMClient:
     def __init__(self, model: Optional[str] = None):
         self.model = model or settings.llm_model
         self._client = genai.Client(api_key=settings.google_api_key)
 
-    def generate(self, system_prompt: str, user_message: str) -> str:
+    def generate(self, system_prompt: str, user_message: str) -> LLMResult:
+        config_kwargs = {
+            "system_instruction": system_prompt,
+            "temperature": settings.llm_temperature,
+            "top_p": settings.llm_top_p,
+            "max_output_tokens": settings.llm_max_output_tokens,
+        }
+        if settings.llm_seed is not None:
+            config_kwargs["seed"] = settings.llm_seed
         response = self._client.models.generate_content(
             model=self.model,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-            ),
+            config=types.GenerateContentConfig(**config_kwargs),
             contents=user_message,
         )
-        return response.text
+        finish_reason = None
+        candidates = getattr(response, "candidates", None)
+        if candidates:
+            finish_reason = getattr(candidates[0], "finish_reason", None)
+            finish_reason = getattr(finish_reason, "value", finish_reason)
+        return LLMResult(
+            raw_text=response.text,
+            provider_request_id=getattr(response, "response_id", None),
+            model_name=self.model,
+            model_version=getattr(response, "model_version", None),
+            finish_reason=finish_reason,
+        )
 
     def generate_json(self, system_prompt: str, user_message: str) -> dict:
-        text = self.generate(system_prompt, user_message)
-        return _parse_json(text)
+        result = self.generate(system_prompt, user_message)
+        return _parse_json(result.raw_text)
 
 
 def _parse_json(text: str) -> dict:
