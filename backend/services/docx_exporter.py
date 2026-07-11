@@ -14,14 +14,15 @@ def _add_word_equation(paragraph, expression: str) -> None:
     paragraph._p.append(math)
 
 
-def build_assessment_docx(*, assessment_id: int, prompt_id: int,
-                          condition_label: str, course: str, topic: str,
+def build_assessment_docx(*, run_id: int, prompt_id: int,
+                          condition_code: str, run_number: int, course: str, topic: str,
                           questions: list[dict]) -> bytes:
     document = Document()
     document.add_heading("Blueprint Lab Assessment", level=1)
-    document.add_paragraph(f"Assessment ID: {assessment_id}")
+    document.add_paragraph(f"Run ID: {run_id}")
     document.add_paragraph(f"Prompt ID: {prompt_id}")
-    document.add_paragraph(f"Experiment Condition: {condition_label}")
+    document.add_paragraph(f"Condition Code: {condition_code}")
+    document.add_paragraph(f"Run Number: {run_number}")
     document.add_paragraph(f"Course: {course}")
     document.add_paragraph(f"Topic: {topic}")
 

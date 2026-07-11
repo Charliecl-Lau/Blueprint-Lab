@@ -1,5 +1,5 @@
 from backend.schemas.assessment_schema import AssessmentGenerationResponse
-from backend.services.llm_client import LLMClient
+from backend.services.llm_client import _parse_json
 
 
 _QUESTION_GENERATOR_SYSTEM_PROMPT = """Execute the provided generated research prompt directly.
@@ -10,9 +10,5 @@ only valid JSON.
 """
 
 
-def generate_questions(llm: LLMClient, generated_prompt: str) -> AssessmentGenerationResponse:
-    raw = llm.generate_json(
-        system_prompt=_QUESTION_GENERATOR_SYSTEM_PROMPT,
-        user_message=generated_prompt,
-    )
-    return AssessmentGenerationResponse(**raw)
+def generate_questions(raw_text: str) -> AssessmentGenerationResponse:
+    return AssessmentGenerationResponse(**_parse_json(raw_text))

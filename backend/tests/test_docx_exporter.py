@@ -8,8 +8,7 @@ from backend.services.docx_exporter import build_assessment_docx
 
 def test_docx_contains_rich_research_content_and_native_word_equation():
     content = build_assessment_docx(
-        assessment_id=12, prompt_id=34,
-        condition_label="CourseBridge=ON; FewShot=OFF; Documents=ON",
+        run_id=12, prompt_id=34, condition_code="C101", run_number=2,
         course="MSE302", topic="Phase equilibrium",
         questions=[{
             "type": "mcq",
@@ -32,9 +31,10 @@ def test_docx_contains_rich_research_content_and_native_word_equation():
 
     document = Document(BytesIO(content))
     text = "\n".join(p.text for p in document.paragraphs)
-    assert "Assessment ID: 12" in text
+    assert "Run ID: 12" in text
     assert "Prompt ID: 34" in text
-    assert "CourseBridge=ON; FewShot=OFF; Documents=ON" in text
+    assert "Condition Code: C101" in text
+    assert "Run Number: 2" in text
     assert "Connects MSE202 free energy to MSE302 phase stability." in text
     assert "Chemical potentials are equal at equilibrium." in text
     assert "Assessment Quality Check" in text
