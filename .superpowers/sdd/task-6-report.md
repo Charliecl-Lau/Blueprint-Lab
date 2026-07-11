@@ -10,3 +10,10 @@ Verification:
 - Full backend suite: `58 passed, 3 skipped`
 
 Known note: pytest emits an existing `pytest-asyncio` configuration deprecation warning.
+
+## Review follow-up
+
+Retry now carries the exact original source-binding snapshot hash rather than recomputing it from mutable source metadata. Run insertion attempts use nested transactions so allocation conflicts can retry without discarding flushed parent records, while non-conflict failures clean the transaction. Canonical route tests cover create, detail, raw-response opt-in/default exclusion, retry, and export; compatibility tests cover dual experiment keys and immutable regeneration.
+
+- Focused follow-up: `14 passed`
+- Full backend follow-up: `61 passed, 3 skipped`

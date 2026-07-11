@@ -10,6 +10,7 @@ class SourceBinding(BaseModel):
     source_document_id: int
     role: SourceRole
     ordinal: int = Field(ge=0)
+    included_text_hash: Optional[str] = Field(default=None, min_length=64, max_length=64)
 
 
 class ModelSettings(BaseModel):

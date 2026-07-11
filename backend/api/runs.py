@@ -21,6 +21,7 @@ def post_run(condition_id: int, payload: RunCreate, db: Session = Depends(get_db
 
 @router.get("/runs/{run_id}")
 def get_run(run_id: int, include_raw_response: bool = False, db: Session = Depends(get_db)):
+    """Return run provenance; raw model output is opt-in research retrieval for this single-user deployment."""
     run = db.get(Run, run_id)
     if run is None: raise HTTPException(404, "Run not found")
     return run_detail(run, include_raw_response)
