@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 
 revision = "20260711_01"
@@ -13,35 +16,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Fail before any schema mutation when pgcrypto cannot be provisioned.
-    op.execute("""
-        DO $$ BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto') THEN
-            IF NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pgcrypto') THEN
-              RAISE EXCEPTION 'pgcrypto is unavailable; install the PostgreSQL contrib package and provision pgcrypto before retrying';
-            END IF;
-            IF NOT has_database_privilege(current_user, current_database(), 'CREATE')
-               OR NOT has_schema_privilege(current_user, current_schema(), 'CREATE') THEN
-              RAISE EXCEPTION 'pgcrypto is not installed and the migration role cannot create it; run CREATE EXTENSION pgcrypto as an authorized role before retrying';
-            END IF;
-          END IF;
-        END $$
-    """)
-    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
-    op.execute("""
-        CREATE FUNCTION blueprint_canonical_json(value jsonb) RETURNS text
-        LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
-          SELECT CASE jsonb_typeof(value)
-            WHEN 'object' THEN '{' || COALESCE((
-              SELECT string_agg(to_jsonb(entry.key)::text || ':' || blueprint_canonical_json(entry.value), ',' ORDER BY entry.key)
-              FROM jsonb_each(value) AS entry(key, value)), '') || '}'
-            WHEN 'array' THEN '[' || COALESCE((
-              SELECT string_agg(blueprint_canonical_json(element.value), ',' ORDER BY element.ordinality)
-              FROM jsonb_array_elements(value) WITH ORDINALITY AS element(value, ordinality)), '') || ']'
-            ELSE value::text
-          END
-        $$
-    """)
+    if context.is_offline_mode():
+        raise RuntimeError(
+            "offline SQL migration is refused because exact legacy JSON canonicalization "
+            "requires Python; run `python -m alembic upgrade head` online with DATABASE_URL set"
+        )
     op.rename_table("generations", "runs")
 
     # Experiment descriptors required by the canonical model are deliberately
@@ -115,14 +94,17 @@ def upgrade() -> None:
         sa.CheckConstraint("length(output_hash) = 64", name="ck_assessments_output_hash"),
     )
 
-    op.execute("UPDATE prompts SET prompt_hash = encode(digest(convert_to(final_prompt, 'UTF8'), 'sha256'), 'hex')")
-    op.execute("""
+    connection = op.get_bind()
+    for row in connection.execute(sa.text("SELECT id, final_prompt FROM prompts")).mappings():
+        digest = hashlib.sha256(row["final_prompt"].encode("utf-8")).hexdigest()
+        connection.execute(sa.text("UPDATE prompts SET prompt_hash=:digest WHERE id=:id"), {"digest": digest, "id": row["id"]})
+    assessment_insert = sa.text("""
         INSERT INTO assessments (run_id, raw_response_text, parsed_json, output_hash, schema_version, created_at)
-        SELECT id, blueprint_canonical_json(generated_json::jsonb), generated_json,
-          encode(digest(convert_to(blueprint_canonical_json(generated_json::jsonb), 'UTF8'), 'sha256'), 'hex'),
-          'legacy-unknown', created_at
-        FROM runs WHERE generated_json IS NOT NULL
-    """)
+        VALUES (:run_id, :raw, :parsed_json, :output_hash, 'legacy-unknown', :created_at)
+    """).bindparams(sa.bindparam("parsed_json", type_=sa.JSON()))
+    for row in connection.execute(sa.text("SELECT id, generated_json, created_at FROM runs WHERE generated_json IS NOT NULL")).mappings():
+        raw = json.dumps(row["generated_json"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        connection.execute(assessment_insert, {"run_id": row["id"], "raw": raw, "parsed_json": row["generated_json"], "output_hash": hashlib.sha256(raw.encode("utf-8")).hexdigest(), "created_at": row["created_at"]})
 
     for column in ("system_prompt", "template_version", "generator_version", "prompt_hash"):
         op.alter_column("prompts", column, nullable=False)
@@ -141,7 +123,9 @@ def upgrade() -> None:
           END IF;
         END $$
     """)
-    op.execute("UPDATE document_artifacts SET content_hash = encode(digest(content, 'sha256'), 'hex')")
+    for row in connection.execute(sa.text("SELECT id, content FROM document_artifacts")).mappings():
+        digest = hashlib.sha256(bytes(row["content"])).hexdigest()
+        connection.execute(sa.text("UPDATE document_artifacts SET content_hash=:digest WHERE id=:id"), {"digest": digest, "id": row["id"]})
     op.alter_column("document_artifacts", "content_hash", nullable=False)
     op.create_unique_constraint("uq_document_artifacts_run_id", "document_artifacts", ["run_id"])
     op.create_check_constraint("ck_document_artifacts_content_hash", "document_artifacts", "length(content_hash) = 64")
@@ -166,27 +150,17 @@ def upgrade() -> None:
     op.create_check_constraint("ck_runs_status", "runs", "status IN ('pending','prompting','generating','documenting','complete','error')")
     for column in ("experiment_id", "condition_id", "status", "created_at"):
         op.create_index(f"ix_runs_{column}", "runs", [column])
-    op.execute("""
-        DO $$ DECLARE source_count bigint; target_count bigint; invalid_count bigint;
-        BEGIN
-          SELECT count(*) INTO source_count FROM runs WHERE generated_json IS NOT NULL;
-          SELECT count(*) INTO target_count FROM assessments a
-            JOIN runs r ON r.id = a.run_id WHERE r.generated_json IS NOT NULL;
-          SELECT count(*) INTO invalid_count FROM runs r
-            LEFT JOIN assessments a ON a.run_id = r.id
-            WHERE r.generated_json IS NOT NULL AND
-              (a.run_id IS NULL OR a.raw_response_text IS NULL OR a.parsed_json IS NULL OR
-               a.output_hash IS NULL OR
-               a.raw_response_text <> blueprint_canonical_json(r.generated_json::jsonb) OR
-               a.parsed_json::jsonb <> r.generated_json::jsonb OR
-               a.output_hash <> encode(digest(convert_to(a.raw_response_text, 'UTF8'), 'sha256'), 'hex'));
-          IF source_count <> target_count OR invalid_count <> 0 THEN
-            RAISE EXCEPTION 'assessment backfill evidence validation failed: source %, target %, invalid %; generated_json retained', source_count, target_count, invalid_count;
-          END IF;
-        END $$
-    """)
+    source_rows = list(connection.execute(sa.text("SELECT id, generated_json FROM runs WHERE generated_json IS NOT NULL")).mappings())
+    target_rows = {row["run_id"]: row for row in connection.execute(sa.text("SELECT run_id, raw_response_text, parsed_json, output_hash FROM assessments")).mappings()}
+    invalid_ids = []
+    for source in source_rows:
+        target = target_rows.get(source["id"])
+        raw = json.dumps(source["generated_json"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        if target is None or target["raw_response_text"] != raw or target["parsed_json"] != source["generated_json"] or target["output_hash"] != hashlib.sha256(raw.encode("utf-8")).hexdigest():
+            invalid_ids.append(source["id"])
+    if len(target_rows) != len(source_rows) or invalid_ids:
+        raise RuntimeError(f"assessment backfill evidence validation failed: source {len(source_rows)}, target {len(target_rows)}, invalid run IDs {invalid_ids}; generated_json retained")
     op.drop_column("runs", "generated_json")
-    op.execute("DROP FUNCTION blueprint_canonical_json(jsonb)")
 
 
 def downgrade() -> None:

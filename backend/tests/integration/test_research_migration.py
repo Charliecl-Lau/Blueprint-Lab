@@ -34,7 +34,7 @@ def alembic_config(url: str) -> Config:
     return config
 
 
-def test_revision_renders_offline_postgresql_sql():
+def test_revision_refuses_offline_sql_with_actionable_message():
     env = os.environ | {"DATABASE_URL": "postgresql+psycopg://unused:unused@localhost/unused"}
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head", "--sql"],
@@ -43,31 +43,20 @@ def test_revision_renders_offline_postgresql_sql():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
-    assert "ALTER TABLE generations RENAME TO runs" in result.stdout
-    assert "CREATE TABLE assessments" in result.stdout
-    assert "populated by the online migration" not in result.stdout
-    prompt_update = result.stdout.index("UPDATE prompts SET prompt_hash")
-    prompt_not_null = result.stdout.index("ALTER TABLE prompts ALTER COLUMN prompt_hash SET NOT NULL")
-    artifact_update = result.stdout.index("UPDATE document_artifacts SET content_hash")
-    artifact_not_null = result.stdout.index("ALTER TABLE document_artifacts ALTER COLUMN content_hash SET NOT NULL")
-    assert prompt_update < prompt_not_null
-    assert artifact_update < artifact_not_null
-    assert "CREATE EXTENSION IF NOT EXISTS pgcrypto" in result.stdout
-    assert "assessment backfill evidence validation failed" in result.stdout
-    assert "duplicate prompt_records for run IDs" in result.stdout
-    assert "duplicate document_artifacts for run IDs" in result.stdout
-    assert "CREATE FUNCTION blueprint_canonical_json" in result.stdout
-    assert "blueprint_canonical_json(generated_json::jsonb)" in result.stdout
-    assert result.stdout.index("CREATE FUNCTION blueprint_canonical_json") < result.stdout.index("INSERT INTO assessments")
-    assert result.stdout.index("INSERT INTO assessments") < result.stdout.index("DROP FUNCTION blueprint_canonical_json(jsonb)")
-    assert result.stdout.index("pgcrypto is unavailable") < result.stdout.index("ALTER TABLE generations RENAME TO runs")
+    assert result.returncode != 0
+    assert "offline SQL migration is refused" in result.stderr
+    assert "python -m alembic upgrade head" in result.stderr
+    assert "ALTER TABLE generations RENAME TO runs" not in result.stdout
 
 
 def test_upgrade_preserves_exact_legacy_evidence(postgres_url):
     engine = create_engine(postgres_url)
-    legacy_json = {"z": [True, None, {"β": "café", "a": "quote: \""}], "a": {"n": 1, "empty": []}}
-    expected_raw = '{"a":{"empty":[],"n":1},"z":[true,null,{"a":"quote: \\\"","β":"café"}]}'
+    legacy_json = {
+        "β": "unicode", "a": {"exp": 1e-7, "decimal": 1.25}, "A": "upper",
+        "!": "punct", "é": "accent", "esc": "backslash\\ newline\n tab\t control\x01",
+        "array": [True, None, {"z": 2, "a": 1}],
+    }
+    expected_raw = '{"!":"punct","A":"upper","a":{"decimal":1.25,"exp":1e-07},"array":[true,null,{"a":1,"z":2}],"esc":"backslash\\\\ newline\\n tab\\t control\\u0001","é":"accent","β":"unicode"}'
     second_json = {"questions": [{"text": "What is strain?", "points": 6}]}
     artifact = b"PK\x03\x04legacy-docx-bytes"
     with engine.begin() as connection:

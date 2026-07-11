@@ -24,11 +24,9 @@ Prompt design factors include Concept Bridge, Few-shot Examples, Reference Conte
 
 Install backend dependencies and run the API from the repository root:
 
-The migration uses PostgreSQL's `pgcrypto` extension for reproducible SHA-256
-backfills. Provision it ahead of time with `CREATE EXTENSION pgcrypto;` using a
-database role with `CREATE` privilege on the database and target schema. The
-migration performs a preflight check and otherwise stops before schema changes
-with an actionable error.
+The research migration must run online because it uses Python's exact canonical
+JSON serializer to preserve legacy evidence hashes. Offline `--sql` mode refuses
+the migration; set `DATABASE_URL` and run the online command below.
 
 ```powershell
 python -m pip install -r backend/requirements.txt
