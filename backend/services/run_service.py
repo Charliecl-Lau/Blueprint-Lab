@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -19,7 +20,19 @@ def _validate(bindings):
         raise ValueError("Duplicate source binding role and ordinal")
 
 
+@dataclass(frozen=True)
+class _SnapshotBinding:
+    source_document_id: int
+    role: str
+    ordinal: int
+    included_text_hash: str
+
+
 def create_run(db: Session, condition_id: int, source_bindings: list[SourceBinding], model_settings: ModelSettings | None = None) -> Run:
+    return _create_run(db, condition_id, source_bindings, model_settings)
+
+
+def _create_run(db: Session, condition_id: int, source_bindings, model_settings: ModelSettings | None = None) -> Run:
     _validate(source_bindings)
     settings = model_settings or ModelSettings()
     for attempt in range(3):
@@ -40,7 +53,7 @@ def create_run(db: Session, condition_id: int, source_bindings: list[SourceBindi
                     if source is None:
                         raise HTTPException(status_code=404, detail=f"Source document {binding.source_document_id} not found")
                     included = (source.extracted_text or "").encode() if source.extracted_text is not None else source.content
-                    snapshot_hash = binding.included_text_hash or hashlib.sha256(included).hexdigest()
+                    snapshot_hash = binding.included_text_hash if isinstance(binding, _SnapshotBinding) else hashlib.sha256(included).hexdigest()
                     db.add(RunSourceDocument(run_id=run.id, source_document_id=source.id, role=binding.role, ordinal=binding.ordinal, included_text_hash=snapshot_hash))
                 db.flush()
             db.commit(); db.refresh(run)
@@ -59,5 +72,5 @@ def retry_run(db: Session, run_id: int) -> Run:
     original = db.get(Run, run_id)
     if original is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    bindings = [SourceBinding(source_document_id=item.source_document_id, role=item.role, ordinal=item.ordinal, included_text_hash=item.included_text_hash) for item in original.source_documents]
-    return create_run(db, original.condition_id, bindings, ModelSettings(**original.model_settings))
+    bindings = [_SnapshotBinding(source_document_id=item.source_document_id, role=item.role, ordinal=item.ordinal, included_text_hash=item.included_text_hash) for item in original.source_documents]
+    return _create_run(db, original.condition_id, bindings, ModelSettings(**original.model_settings))

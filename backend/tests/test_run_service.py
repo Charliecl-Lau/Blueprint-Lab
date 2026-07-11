@@ -47,6 +47,14 @@ def test_retry_copies_source_binding_snapshot(test_db):
     assert [(b.source_document_id, b.role, b.ordinal, b.included_text_hash) for b in retried.source_documents] == [(source.id, "reference_content", 0, original_hash)]
 
 
+def test_public_binding_always_hashes_persisted_extracted_text(test_db):
+    item = condition(test_db)
+    source = SourceDocument(name="S2", document_type="reference", version="1", original_filename="s2.txt", media_type="text/plain", content=b"different bytes", content_hash=hashlib.sha256(b"different bytes").hexdigest(), extracted_text="trusted extracted text")
+    test_db.add(source); test_db.flush()
+    run = create_run(test_db, item.id, [SourceBinding(source_document_id=source.id, role="reference_content", ordinal=0)])
+    assert run.source_documents[0].included_text_hash == hashlib.sha256(b"trusted extracted text").hexdigest()
+
+
 def test_create_rejects_duplicate_role_ordinal(test_db):
     item = condition(test_db)
     bindings = [SourceBinding(source_document_id=1, role="rubric", ordinal=0), SourceBinding(source_document_id=2, role="rubric", ordinal=0)]

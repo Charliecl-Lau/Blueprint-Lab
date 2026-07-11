@@ -17,3 +17,10 @@ Retry now carries the exact original source-binding snapshot hash rather than re
 
 - Focused follow-up: `14 passed`
 - Full backend follow-up: `61 passed, 3 skipped`
+
+## Provenance boundary follow-up
+
+Public `SourceBinding` input now forbids extra fields and has no snapshot-hash member. New runs always hash persisted extracted text; immutable retries use a private frozen snapshot binding carrying the trusted original hash.
+
+- Focused provenance/API suite: `16 passed`
+- Full backend at verification: `60 passed, 3 skipped, 4 failed`; the four failures are outside Task 6 in concurrently changed generator, exporter, and worker interfaces (`test_docx_exporter`, `test_generator`, and two `test_worker` cases).
