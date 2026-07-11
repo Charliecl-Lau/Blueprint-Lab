@@ -66,10 +66,15 @@ export function InputPanelPage() {
 
   const index = sections.findIndex((item) => item.id === section), current = sections[index]
   const goToMissing = (item: { section: Section }) => { setSection(item.section); setMissing([]) }
+  const isSectionComplete = (id: Section) => {
+    if (id === 'details') return course.trim() !== '' && topic.trim() !== '' && objectives.trim() !== ''
+    if (id === 'factors') { const keys = Object.keys(enabled) as FactorKey[]; return keys.some((key) => enabled[key]) && keys.every((key) => !enabled[key] || content[key].trim() !== '') }
+    return false
+  }
   return <main className="experiment-page wizard-page">
     <header><strong>Blueprint Lab</strong><span>Controlled assessment research</span></header>
     <div className="wizard-layout">
-      <nav aria-label="Experiment sections" className="wizard-nav"><h1 className="nav-eyebrow">New Experiment</h1>{sections.map((item) => <button aria-label={item.label} aria-current={section === item.id ? 'step' : undefined} key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}><span className="step-icon"><StepIcon section={item.id} /></span><div><strong>{item.label}</strong><small>{item.subtitle}</small></div></button>)}</nav>
+      <nav aria-label="Experiment sections" className="wizard-nav"><h1 className="nav-eyebrow">New Experiment</h1>{sections.map((item) => <button aria-label={item.label} aria-current={section === item.id ? 'step' : undefined} key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}><span className="step-icon"><StepIcon section={item.id} /></span><strong>{item.label}</strong>{isSectionComplete(item.id) && <span className="step-dot" aria-hidden="true" />}</button>)}</nav>
       <div className="wizard-content"><div className="section-heading"><h2>{section === 'review' ? 'Review Experiment' : current.label}</h2><p>{current.subtitle}</p></div>
         {section === 'details' && <section className="section-card"><div className="form-grid">
           <label>Course name<input value={course} onChange={(e) => setCourse(e.target.value)} />{errors.course && <em>{errors.course}</em>}</label><label>Topic<input value={topic} onChange={(e) => setTopic(e.target.value)} />{errors.topic && <em>{errors.topic}</em>}</label>
