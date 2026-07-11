@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, test, vi } from 'vitest'
+import { axe, toHaveNoViolations } from 'jest-axe'
 import App from './App'
+
+expect.extend(toHaveNoViolations)
 
 beforeEach(() => {
   vi.restoreAllMocks()
@@ -82,4 +86,41 @@ test('opens an incomplete experiment modal and links to missing sections', () =>
 test('keeps the run action in a fixed bottom-right action bar', () => {
   render(<App />)
   expect(screen.getByTestId('fixed-run-action')).toHaveClass('fixed-run-action')
+})
+
+test('uses valid ARIA semantics and no inappropriate state attributes', async () => {
+  const { container } = render(<App />)
+  expect(await axe(container)).toHaveNoViolations()
+  const detailsStep = screen.getByRole('button', { name: 'Assessment Details' })
+  expect(detailsStep).toHaveAttribute('aria-current', 'step')
+  expect(detailsStep).not.toHaveAttribute('aria-selected')
+  fireEvent.click(screen.getByRole('button', { name: 'Prompt Design Factors' }))
+  const factor = screen.getByRole('checkbox', { name: 'Concept Bridge' })
+  expect(factor).not.toHaveAttribute('aria-expanded')
+  expect(factor).not.toHaveAttribute('aria-checked')
+})
+
+test('uses icons instead of numbered markers and supports native keyboard activation', async () => {
+  const user = userEvent.setup()
+  render(<App />)
+  const factorsStep = screen.getByRole('button', { name: 'Prompt Design Factors' })
+  expect(screen.queryByTestId('step-number')).not.toBeInTheDocument()
+  expect(factorsStep.querySelector('svg')).toBeInTheDocument()
+  factorsStep.focus()
+  await user.keyboard('{Enter}')
+  expect(screen.getByRole('heading', { name: 'Prompt Design Factors' })).toBeInTheDocument()
+  const factor = screen.getByRole('checkbox', { name: 'Concept Bridge' })
+  factor.focus()
+  await user.keyboard(' ')
+  expect(factor).toBeChecked()
+})
+
+test('uses compact wide run action and chevron section navigation', () => {
+  render(<App />)
+  expect(screen.queryByText(/Section 1 of 3/)).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Run Experiment' })).toHaveClass('run-button')
+  const next = screen.getByRole('button', { name: 'Next: Prompt Design Factors' })
+  expect(next.querySelector('svg')).toBeInTheDocument()
+  fireEvent.click(next)
+  expect(screen.getByRole('button', { name: 'Previous' }).querySelector('svg')).toBeInTheDocument()
 })

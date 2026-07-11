@@ -19,7 +19,7 @@ export function PromptFactorFields({ enabled, content, errors, onToggle, onConte
   return <><div className="factor-grid" role="group" aria-label="Prompt factor selection">
     {PROMPT_FACTORS.map((factor) => (
       <label className={`factor-card ${enabled[factor.key] ? 'selected' : ''}`} key={factor.key}>
-        <input type="checkbox" aria-label={factor.label} checked={enabled[factor.key]} onChange={() => onToggle(factor.key)} aria-expanded={enabled[factor.key]} />
+        <input type="checkbox" aria-label={factor.label} checked={enabled[factor.key]} onChange={() => onToggle(factor.key)} />
         <span><strong>{factor.label}</strong><small>{factor.help}</small></span>
       </label>
     ))}

@@ -15,6 +15,16 @@ const factorLabels = Object.fromEntries(PROMPT_FACTORS.map((factor) => [factor.k
 const initialEnabled: Record<FactorKey, boolean> = { conceptBridge: false, fewShot: false, referenceContent: false, reasoningGuidance: false }
 const initialContent: Record<FactorKey, string> = { conceptBridge: '', fewShot: '', referenceContent: '', reasoningGuidance: '' }
 
+function StepIcon({ section }: { section: Section }) {
+  if (section === 'details') return <svg aria-hidden="true" viewBox="0 0 18 18"><path d="M4 4h10M4 9h10M4 14h7" /></svg>
+  if (section === 'factors') return <svg aria-hidden="true" viewBox="0 0 18 18"><path d="M3 5h12M3 9h9M3 13h11" /></svg>
+  return <svg aria-hidden="true" viewBox="0 0 18 18"><path d="M4 2.5h7l3 3v10H4zM7 10l1.5 1.5L12 8" /></svg>
+}
+
+function Chevron({ direction }: { direction: 'left' | 'right' }) {
+  return <svg aria-hidden="true" viewBox="0 0 16 16"><path d={direction === 'left' ? 'M10 3 5 8l5 5' : 'm6 3 5 5-5 5'} /></svg>
+}
+
 export function InputPanelPage() {
   const navigate = useNavigate(), reset = useRunStore((state) => state.reset)
   const [section, setSection] = useState<Section>('details')
@@ -59,7 +69,7 @@ export function InputPanelPage() {
   return <main className="experiment-page wizard-page">
     <header><strong>Blueprint Lab</strong><span>Controlled assessment research</span></header>
     <div className="wizard-layout">
-      <nav aria-label="Experiment sections" className="wizard-nav"><h1 className="nav-eyebrow">New Experiment</h1>{sections.map((item, itemIndex) => <button aria-label={item.label} key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}><span>{itemIndex + 1}</span><div><strong>{item.label}</strong><small>{item.subtitle}</small></div></button>)}</nav>
+      <nav aria-label="Experiment sections" className="wizard-nav"><h1 className="nav-eyebrow">New Experiment</h1>{sections.map((item) => <button aria-label={item.label} aria-current={section === item.id ? 'step' : undefined} key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}><span className="step-icon"><StepIcon section={item.id} /></span><div><strong>{item.label}</strong><small>{item.subtitle}</small></div></button>)}</nav>
       <div className="wizard-content"><div className="section-heading"><h2>{section === 'review' ? 'Review Experiment' : current.label}</h2><p>{current.subtitle}</p></div>
         {section === 'details' && <section className="section-card"><div className="form-grid">
           <label>Course name<input value={course} onChange={(e) => setCourse(e.target.value)} />{errors.course && <em>{errors.course}</em>}</label><label>Topic<input value={topic} onChange={(e) => setTopic(e.target.value)} />{errors.topic && <em>{errors.topic}</em>}</label>
@@ -72,10 +82,10 @@ export function InputPanelPage() {
         </div></section>}
         {section === 'factors' && <section className="section-card"><PromptFactorFields enabled={enabled} content={content} errors={errors} onToggle={(key) => setEnabled((value) => ({ ...value, [key]: !value[key] }))} onContent={(key, value) => setContent((currentContent) => ({ ...currentContent, [key]: value }))} /></section>}
         {section === 'review' && <section className="section-card"><dl className="summary"><div><dt>Course</dt><dd>{course || 'Not set'}</dd></div><div><dt>Topic</dt><dd>{topic || 'Not set'}</dd></div><div><dt>Format</dt><dd>{assessmentType}</dd></div><div><dt>Difficulty</dt><dd>{difficulty}</dd></div><div><dt>Estimated student time</dt><dd>{estimatedTime} minutes</dd></div><div><dt>Factors</dt><dd>{(Object.keys(enabled) as FactorKey[]).filter((key) => enabled[key]).map((key) => factorLabels[key]).join(', ') || 'None'}</dd></div></dl></section>}
-        <div className="section-navigation">{index > 0 && <button onClick={() => setSection(sections[index - 1].id)}>Previous</button>}{index < sections.length - 1 && <button className="next" onClick={() => setSection(sections[index + 1].id)}>Next: {sections[index + 1].label}</button>}</div>
+        <div className="section-navigation">{index > 0 && <button aria-label="Previous" onClick={() => setSection(sections[index - 1].id)}><Chevron direction="left" />Previous</button>}{index < sections.length - 1 && <button aria-label={`Next: ${sections[index + 1].label}`} className="next" onClick={() => setSection(sections[index + 1].id)}>Next: {sections[index + 1].label}<Chevron direction="right" /></button>}</div>
       </div>
     </div>
-    <div className="fixed-run-action" data-testid="fixed-run-action"><span>Section {index + 1} of 3</span><button className="primary" disabled={loading} onClick={submit}>{loading ? 'Starting…' : 'Run Experiment'}</button></div>
+    <div className="fixed-run-action" data-testid="fixed-run-action"><button className="primary run-button" disabled={loading} onClick={submit}>{loading ? 'Starting…' : 'Run Experiment'}</button></div>
     {missing.length > 0 && <div className="modal-backdrop"><div role="dialog" aria-modal="true" aria-labelledby="incomplete-title" className="incomplete-modal"><h2 id="incomplete-title">Your experiment isn’t ready yet</h2><p>Complete the following items before running the experiment.</p><div>{missing.map((item, itemIndex) => <button key={`${item.label}-${itemIndex}`} onClick={() => goToMissing(item)}><strong>{sections.find((entry) => entry.id === item.section)?.label}:</strong> {item.label}</button>)}</div><button className="modal-close" onClick={() => setMissing([])}>Close</button></div></div>}
   </main>
 }
