@@ -26,6 +26,8 @@ Install backend dependencies and run the API from the repository root:
 
 ```powershell
 python -m pip install -r backend/requirements.txt
+$env:DATABASE_URL = "postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_lab"
+python -m alembic upgrade head
 python -m uvicorn backend.main:app --reload
 ```
 
