@@ -7,7 +7,9 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     llm_model: str = "gemma-4-31b"
     redis_url: str = "redis://localhost:6379/0"
-    database_url: str = "sqlite:///./assessment_generator.db"
+    database_url: str = (
+        "postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_lab"
+    )
 
 @lru_cache
 def get_settings() -> Settings:
