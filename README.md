@@ -1,32 +1,27 @@
 # Blueprint Lab
 
-Blueprint Lab is a controlled research platform for prompt-engineering experiments on undergraduate engineering assessment generation. It prioritizes reproducibility, experimental control, metadata logging, and research usability over production flexibility.
+Blueprint Lab is a controlled research platform for prompt-engineering experiments on undergraduate engineering assessment generation. It prioritizes reproducibility, experimental control, provenance, and research usability.
 
-## Research workflow
+## Research guarantees
 
-```text
-Prompt Generation -> Question Generation -> Word Document Generation -> Metadata Logging -> Persistence
-```
+Each immutable run records its condition and run number, ordered source-document bindings, canonical model settings, exact prompt and hash, untouched provider response and hash, parsed assessment, provider metadata, sanitized errors, and generated Word artifact and hash. Retrying a completed or failed run creates the next run number and never overwrites the original evidence.
 
-Researchers configure course context, assessment requirements, estimated student completion time, a fixed provider prompt structure, and independently selectable prompt design factors. Every condition records the exact factor content, generated prompt, model metadata, generated questions, and Word artifact.
+Hashes use SHA-256. Source and artifact hashes cover exact stored bytes; output hashes cover the exact UTF-8 provider response; prompt hashes cover canonical JSON containing the system and final prompts, prompt structure and versions, model settings, and source hashes in binding order.
 
-Prompt design factors include Concept Bridge, Few-shot Examples, Reference Content, and Reasoning Guidance. Reasoning Guidance requests concise visible rationale or structured solution steps; it does not request or expose hidden private model reasoning.
+## Stage boundaries
+
+Stage 1 provides immutable source snapshots, reproducible generation runs, provenance retrieval, compatibility APIs, and DOCX export. Stage 2 evaluation is intentionally deferred: rubric scoring, reviewer workflows, inter-rater analysis, aggregate comparisons, and statistical reporting are not part of the current generation pipeline.
 
 ## Technology
 
-- FastAPI, SQLAlchemy, Pydantic
+- FastAPI, SQLAlchemy, Pydantic, PostgreSQL, and Alembic
 - Celery and Redis progress events
-- React, TypeScript, Vite, Zustand
-- `python-docx` Word generation
-- pytest and Vitest
+- React, TypeScript, Vite, and Zustand
+- `python-docx`, `pypdf`, pytest, and Vitest
 
-## Development
+## Local setup
 
-Install backend dependencies and run the API from the repository root:
-
-The research migration must run online because it uses Python's exact canonical
-JSON serializer to preserve legacy evidence hashes. Offline `--sql` mode refuses
-the migration; set `DATABASE_URL` and run the online command below.
+Copy `.env.example` to `.env`, install dependencies, create the PostgreSQL database, and apply migrations. The research migration runs online because it uses Python canonical JSON serialization to preserve legacy evidence hashes; offline `alembic --sql` mode is unsupported.
 
 ```powershell
 python -m pip install -r backend/requirements.txt
@@ -35,7 +30,7 @@ python -m alembic upgrade head
 python -m uvicorn backend.main:app --reload
 ```
 
-Run the worker and Redis using the project’s configured environment. Then start the frontend:
+Run Redis and the Celery worker using the same environment, then start the frontend:
 
 ```powershell
 cd frontend
@@ -45,14 +40,37 @@ npm run dev
 
 The frontend runs at `http://localhost:5173`; the API runs at `http://localhost:8000`.
 
+## Sources and canonical run APIs
+
+Source uploads accept UTF-8 text, Markdown, JSON, DOCX, and unencrypted PDF files up to 20 MiB. Exact bytes are retained independently from extracted prompt text.
+
+```text
+POST /source-documents
+GET  /source-documents/{id}
+GET  /source-documents/{id}/download
+POST /conditions/{condition_id}/runs
+GET  /runs/{run_id}
+POST /runs/{run_id}/retry
+GET  /runs/{run_id}/export-docx
+```
+
+`GET /runs/{run_id}` excludes raw provider output by default. In the current single-user research deployment, pass `include_raw_response=true` for provenance retrieval.
+
+The deprecated `/generations/{id}`, `/generations/{id}/regenerate`, and generation export routes remain temporary compatibility aliases. New clients should use `/runs`; compatibility regeneration is immutable and returns the newly created run ID.
+
 ## Verification
+
+SQLite unit and workflow tests run by default. Set `TEST_POSTGRES_DATABASE_URL` to enable PostgreSQL migration and constraint integration tests; otherwise those tests report an explicit skip reason.
 
 ```powershell
 python -m pytest backend/tests -v
+python -m alembic check
 cd frontend
 npm test -- --run
 npm run build
 ```
+
+To verify a fresh PostgreSQL database, point `DATABASE_URL` at an empty test database and run `python -m alembic upgrade head` before the suite.
 
 ## License
 
