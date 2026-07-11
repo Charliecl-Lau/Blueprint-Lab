@@ -24,6 +24,10 @@ Prompt design factors include Concept Bridge, Few-shot Examples, Reference Conte
 
 Install backend dependencies and run the API from the repository root:
 
+The migration uses PostgreSQL's `pgcrypto` extension for reproducible SHA-256
+backfills. The migration installs it with `CREATE EXTENSION IF NOT EXISTS`; the
+migration role must be allowed to install the extension if it is not present.
+
 ```powershell
 python -m pip install -r backend/requirements.txt
 $env:DATABASE_URL = "postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_lab"

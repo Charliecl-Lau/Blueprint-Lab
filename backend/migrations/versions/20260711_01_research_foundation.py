@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-
 import sqlalchemy as sa
-from alembic import context, op
+from alembic import op
 
 
 revision = "20260711_01"
@@ -15,11 +12,10 @@ branch_labels = None
 depends_on = None
 
 
-def _canonical_json(value) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
 def upgrade() -> None:
+    # digest() is supplied by pgcrypto. IF NOT EXISTS is idempotent, but the
+    # migration role must have permission to install an available extension.
+    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     op.rename_table("generations", "runs")
 
     # Experiment descriptors required by the canonical model are deliberately
@@ -71,6 +67,16 @@ def upgrade() -> None:
     op.add_column("prompts", sa.Column("generator_version", sa.String(), nullable=True))
     op.add_column("prompts", sa.Column("prompt_hash", sa.String(length=64), nullable=True))
     op.execute("UPDATE prompts SET system_prompt = '', template_version = 'legacy-unknown', generator_version = 'legacy-unknown'")
+    op.execute("""
+        DO $$ DECLARE duplicate_runs text;
+        BEGIN
+          SELECT string_agg(run_id::text, ', ' ORDER BY run_id) INTO duplicate_runs
+          FROM (SELECT run_id FROM prompts GROUP BY run_id HAVING count(*) > 1) duplicates;
+          IF duplicate_runs IS NOT NULL THEN
+            RAISE EXCEPTION 'evidence-preservation error: duplicate prompt_records for run IDs: %', duplicate_runs;
+          END IF;
+        END $$
+    """)
 
     op.create_table("assessments",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -83,21 +89,14 @@ def upgrade() -> None:
         sa.CheckConstraint("length(output_hash) = 64", name="ck_assessments_output_hash"),
     )
 
-    if context.is_offline_mode():
-        op.execute("-- Canonical JSON and SHA-256 hashes are populated by the online migration")
-    else:
-        connection = op.get_bind()
-        prompts = connection.execute(sa.text("SELECT id, final_prompt FROM prompts")).mappings()
-        for row in prompts:
-            digest = hashlib.sha256(row["final_prompt"].encode("utf-8")).hexdigest()
-            connection.execute(sa.text("UPDATE prompts SET prompt_hash=:digest WHERE id=:id"), {"digest": digest, "id": row["id"]})
-        rows = list(connection.execute(sa.text("SELECT id, generated_json, created_at FROM runs WHERE generated_json IS NOT NULL")).mappings())
-        for row in rows:
-            raw = _canonical_json(row["generated_json"])
-            connection.execute(sa.text("INSERT INTO assessments (run_id, raw_response_text, parsed_json, output_hash, schema_version, created_at) VALUES (:id,:raw,:parsed,:digest,'legacy-unknown',:created_at)"), {"id": row["id"], "raw": raw, "parsed": json.dumps(row["generated_json"]), "digest": hashlib.sha256(raw.encode("utf-8")).hexdigest(), "created_at": row["created_at"]})
-        copied = connection.scalar(sa.text("SELECT count(*) FROM assessments"))
-        if copied != len(rows):
-            raise RuntimeError("assessment backfill count validation failed; generated_json retained")
+    op.execute("UPDATE prompts SET prompt_hash = encode(digest(convert_to(final_prompt, 'UTF8'), 'sha256'), 'hex')")
+    op.execute("""
+        INSERT INTO assessments (run_id, raw_response_text, parsed_json, output_hash, schema_version, created_at)
+        SELECT id, generated_json::jsonb::text, generated_json,
+          encode(digest(convert_to(generated_json::jsonb::text, 'UTF8'), 'sha256'), 'hex'),
+          'legacy-unknown', created_at
+        FROM runs WHERE generated_json IS NOT NULL
+    """)
 
     for column in ("system_prompt", "template_version", "generator_version", "prompt_hash"):
         op.alter_column("prompts", column, nullable=False)
@@ -106,12 +105,17 @@ def upgrade() -> None:
 
     op.alter_column("document_artifacts", "generation_id", new_column_name="run_id")
     op.add_column("document_artifacts", sa.Column("content_hash", sa.String(64), nullable=True))
-    if context.is_offline_mode():
-        op.execute("-- Artifact SHA-256 hashes are populated by the online migration")
-    else:
-        connection = op.get_bind()
-        for row in connection.execute(sa.text("SELECT id, content FROM document_artifacts")).mappings():
-            connection.execute(sa.text("UPDATE document_artifacts SET content_hash=:digest WHERE id=:id"), {"digest": hashlib.sha256(bytes(row["content"])).hexdigest(), "id": row["id"]})
+    op.execute("""
+        DO $$ DECLARE duplicate_runs text;
+        BEGIN
+          SELECT string_agg(run_id::text, ', ' ORDER BY run_id) INTO duplicate_runs
+          FROM (SELECT run_id FROM document_artifacts GROUP BY run_id HAVING count(*) > 1) duplicates;
+          IF duplicate_runs IS NOT NULL THEN
+            RAISE EXCEPTION 'evidence-preservation error: duplicate document_artifacts for run IDs: %', duplicate_runs;
+          END IF;
+        END $$
+    """)
+    op.execute("UPDATE document_artifacts SET content_hash = encode(digest(content, 'sha256'), 'hex')")
     op.alter_column("document_artifacts", "content_hash", nullable=False)
     op.create_unique_constraint("uq_document_artifacts_run_id", "document_artifacts", ["run_id"])
     op.create_check_constraint("ck_document_artifacts_content_hash", "document_artifacts", "length(content_hash) = 64")
@@ -136,6 +140,25 @@ def upgrade() -> None:
     op.create_check_constraint("ck_runs_status", "runs", "status IN ('pending','prompting','generating','documenting','complete','error')")
     for column in ("experiment_id", "condition_id", "status", "created_at"):
         op.create_index(f"ix_runs_{column}", "runs", [column])
+    op.execute("""
+        DO $$ DECLARE source_count bigint; target_count bigint; invalid_count bigint;
+        BEGIN
+          SELECT count(*) INTO source_count FROM runs WHERE generated_json IS NOT NULL;
+          SELECT count(*) INTO target_count FROM assessments a
+            JOIN runs r ON r.id = a.run_id WHERE r.generated_json IS NOT NULL;
+          SELECT count(*) INTO invalid_count FROM runs r
+            LEFT JOIN assessments a ON a.run_id = r.id
+            WHERE r.generated_json IS NOT NULL AND
+              (a.run_id IS NULL OR a.raw_response_text IS NULL OR a.parsed_json IS NULL OR
+               a.output_hash IS NULL OR
+               a.raw_response_text <> r.generated_json::jsonb::text OR
+               a.parsed_json::jsonb <> r.generated_json::jsonb OR
+               a.output_hash <> encode(digest(convert_to(a.raw_response_text, 'UTF8'), 'sha256'), 'hex'));
+          IF source_count <> target_count OR invalid_count <> 0 THEN
+            RAISE EXCEPTION 'assessment backfill evidence validation failed: source %, target %, invalid %; generated_json retained', source_count, target_count, invalid_count;
+          END IF;
+        END $$
+    """)
     op.drop_column("runs", "generated_json")
 
 
