@@ -19,7 +19,11 @@ from backend.models.experiment import utc_now
 
 class SourceDocument(Base):
     __tablename__ = "source_documents"
-    __table_args__ = (CheckConstraint("length(content_hash) = 64"),)
+    __table_args__ = (
+        CheckConstraint("length(content_hash) = 64"),
+        UniqueConstraint("name", "document_type", "version", "original_filename", "media_type",
+            "content_hash", "description", name="uq_source_document_snapshot_identity"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     document_type: Mapped[str] = mapped_column(String, nullable=False)
@@ -30,7 +34,7 @@ class SourceDocument(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     extracted_text: Mapped[Optional[str]] = mapped_column(Text)
     extraction_method: Mapped[Optional[str]] = mapped_column(String)
-    description: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     runs: Mapped[list["RunSourceDocument"]] = relationship(back_populates="source_document")
 

@@ -1,3 +1,6 @@
+from sqlalchemy.exc import IntegrityError
+
+
 def fields(version="v1"):
     return {"name": "Syllabus", "document_type": "course_syllabus", "version": version, "description": "Current"}
 
@@ -27,3 +30,39 @@ def test_validation_error_has_stable_code(client):
     response = client.post("/source-documents", data=fields(), files={"file": ("x.png", b"x", "image/png")})
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "unsupported_source_document_media_type"
+
+
+def test_oversized_upload_has_stable_code(client):
+    response = client.post("/source-documents", data=fields(),
+        files={"file": ("huge.txt", b"x" * (20 * 1024 * 1024 + 1), "text/plain")})
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "source_document_too_large"
+
+
+def test_integrity_race_returns_duplicate_and_rolls_back(client, test_db, monkeypatch):
+    import backend.api.source_documents as api
+    rolled_back = False
+    original = test_db.rollback
+    def rollback():
+        nonlocal rolled_back
+        rolled_back = True
+        original()
+    monkeypatch.setattr(test_db, "rollback", rollback)
+    monkeypatch.setattr(api, "create_source_document", lambda *args, **kwargs:
+        (_ for _ in ()).throw(IntegrityError("insert", {}, Exception("unique"))))
+    response = client.post("/source-documents", data=fields(), files={"file": ("x.txt", b"x", "text/plain")})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "duplicate_source_version"
+    assert rolled_back
+
+
+def test_download_filename_cannot_inject_headers(client):
+    filename = 'evil"\r\nX-Injected: yes\u2603.txt'
+    upload = client.post("/source-documents", data=fields(), files={"file": (filename, b"safe", "text/plain")})
+    assert upload.status_code == 201
+    response = client.get(f"/source-documents/{upload.json()['id']}/download")
+    disposition = response.headers["content-disposition"]
+    assert "\r" not in disposition and "\n" not in disposition
+    assert "%0D" not in disposition.split("filename*=", 1)[0]
+    assert "%0A" not in disposition.split("filename*=", 1)[0]
+    assert "filename*=UTF-8''" in disposition

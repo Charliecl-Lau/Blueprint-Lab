@@ -71,3 +71,40 @@ def test_invalid_upload_does_not_insert(test_db, content, media_type, code):
         create(test_db, content, media_type)
     assert exc.value.code == code
     assert test_db.query(SourceDocument).count() == 0
+
+
+@pytest.mark.parametrize(("content", "media_type", "code"), [
+    (b"not-a-zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "invalid_source_document"),
+    (b"not-a-pdf", "application/pdf", "invalid_source_document"),
+    (b"", "text/plain", "empty_source_document"),
+    (b"{broken", "application/json", "invalid_source_document"),
+], ids=["corrupt-docx", "corrupt-pdf", "empty", "invalid-json"])
+def test_parser_failures_have_stable_codes(test_db, content, media_type, code):
+    with pytest.raises(SourceDocumentValidationError) as exc:
+        create(test_db, content, media_type)
+    assert exc.value.code == code
+
+
+def test_encrypted_pdf_has_stable_code(test_db):
+    stream = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.encrypt("secret")
+    writer.write(stream)
+    with pytest.raises(SourceDocumentValidationError) as exc:
+        create(test_db, stream.getvalue(), "application/pdf", "secret.pdf")
+    assert exc.value.code == "encrypted_source_document"
+
+
+def test_persistence_failure_rolls_back_session(test_db, monkeypatch):
+    rolled_back = False
+    original = test_db.rollback
+    def rollback():
+        nonlocal rolled_back
+        rolled_back = True
+        original()
+    monkeypatch.setattr(test_db, "rollback", rollback)
+    monkeypatch.setattr(test_db, "commit", lambda: (_ for _ in ()).throw(RuntimeError("db failed")))
+    with pytest.raises(RuntimeError, match="db failed"):
+        create(test_db)
+    assert rolled_back

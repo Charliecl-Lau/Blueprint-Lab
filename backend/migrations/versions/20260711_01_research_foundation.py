@@ -134,9 +134,10 @@ def upgrade() -> None:
         sa.Column("document_type", sa.String(), nullable=False), sa.Column("version", sa.String(), nullable=False),
         sa.Column("original_filename", sa.String(), nullable=False), sa.Column("media_type", sa.String(), nullable=False),
         sa.Column("content", sa.LargeBinary(), nullable=False), sa.Column("content_hash", sa.String(64), nullable=False),
-        sa.Column("extracted_text", sa.Text()), sa.Column("extraction_method", sa.String()), sa.Column("description", sa.Text()),
+        sa.Column("extracted_text", sa.Text()), sa.Column("extraction_method", sa.String()), sa.Column("description", sa.Text(), nullable=False, server_default=""),
         sa.Column("uploaded_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("length(content_hash) = 64", name="ck_source_documents_content_hash"))
+        sa.CheckConstraint("length(content_hash) = 64", name="ck_source_documents_content_hash"),
+        sa.UniqueConstraint("name", "document_type", "version", "original_filename", "media_type", "content_hash", "description", name="uq_source_document_snapshot_identity"))
     op.create_table("run_source_documents",
         sa.Column("id", sa.Integer(), primary_key=True), sa.Column("run_id", sa.Integer(), sa.ForeignKey("runs.id"), nullable=False),
         sa.Column("source_document_id", sa.Integer(), sa.ForeignKey("source_documents.id"), nullable=False),

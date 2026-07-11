@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from importlib.metadata import version as package_version
 from io import BytesIO
 from zipfile import BadZipFile
@@ -28,10 +29,19 @@ def _plain(content: bytes):
         raise SourceDocumentValidationError("invalid_source_document") from exc
 
 
+def _json(content: bytes):
+    text, _ = _plain(content)
+    try:
+        json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise SourceDocumentValidationError("invalid_source_document") from exc
+    return text, "plain-text:utf-8"
+
+
 def _docx(content: bytes):
     try:
         text = "\n".join(p.text for p in Document(BytesIO(content)).paragraphs if p.text.strip())
-    except (BadZipFile, KeyError, ValueError) as exc:
+    except Exception as exc:
         raise SourceDocumentValidationError("invalid_source_document") from exc
     return text, f"python-docx:{package_version('python-docx')}"
 
@@ -44,7 +54,7 @@ def _pdf(content: bytes):
         text = "\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
     except SourceDocumentValidationError:
         raise
-    except (PdfReadError, ValueError, TypeError, KeyError) as exc:
+    except Exception as exc:
         raise SourceDocumentValidationError("invalid_source_document") from exc
     return text, f"pypdf:{package_version('pypdf')}"
 
@@ -52,7 +62,7 @@ def _pdf(content: bytes):
 EXTRACTORS = {
     "text/plain": _plain,
     "text/markdown": _plain,
-    "application/json": _plain,
+    "application/json": _json,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": _docx,
     "application/pdf": _pdf,
 }
@@ -71,8 +81,12 @@ def create_source_document(db: Session, *, name: str, document_type: str, versio
     source = SourceDocument(name=name, document_type=document_type, version=version,
         original_filename=filename, media_type=media_type, content=content,
         content_hash=hashlib.sha256(content).hexdigest(), extracted_text=extracted_text,
-        extraction_method=extraction_method, description=description)
+        extraction_method=extraction_method, description=description or "")
     db.add(source)
-    db.commit()
-    db.refresh(source)
+    try:
+        db.commit()
+        db.refresh(source)
+    except Exception:
+        db.rollback()
+        raise
     return source
