@@ -1,34 +1,41 @@
 import { create } from 'zustand'
-import type { Experiment, Generation, SSEEvent } from '../types'
+import type { Experiment, Run, SSEEvent } from '../types'
 
 interface ExperimentStore {
   experiment: Experiment | null
-  generations: Record<number, Generation>
-  selectedGenerationId: number | null
+  runs: Record<number, Run>
+  selectedRunId: number | null
   setExperiment: (experiment: Experiment) => void
   applySSEEvent: (event: SSEEvent) => void
-  setGeneration: (generation: Generation) => void
-  selectGeneration: (id: number) => void
+  setRun: (run: Run) => void
+  addRetriedRun: (run: Run) => void
+  selectRun: (id: number) => void
   reset: () => void
 }
 
 export const useRunStore = create<ExperimentStore>((set) => ({
   experiment: null,
-  generations: {},
-  selectedGenerationId: null,
+  runs: {},
+  selectedRunId: null,
   setExperiment: (experiment) => {
-    const generations = Object.fromEntries(experiment.generations.map((generation) => [generation.id, generation]))
-    set({ experiment, generations, selectedGenerationId: null })
+    const runs = Object.fromEntries(experiment.runs.map((run) => [run.id, run]))
+    set({ experiment, runs, selectedRunId: null })
   },
   applySSEEvent: (event) => set((state) => {
-    const existing = state.generations[event.generation_id]
+    const runId = event.run_id ?? event.generation_id
+    if (runId === undefined) return state
+    const existing = state.runs[runId]
     if (!existing) return state
     return {
-      generations: { ...state.generations, [existing.id]: { ...existing, status: event.stage } },
-      selectedGenerationId: state.selectedGenerationId ?? (event.stage === 'complete' ? existing.id : null),
+      runs: { ...state.runs, [existing.id]: { ...existing, status: event.stage } },
+      selectedRunId: state.selectedRunId ?? (event.stage === 'complete' ? existing.id : null),
     }
   }),
-  setGeneration: (generation) => set((state) => ({ generations: { ...state.generations, [generation.id]: generation } })),
-  selectGeneration: (id) => set({ selectedGenerationId: id }),
-  reset: () => set({ experiment: null, generations: {}, selectedGenerationId: null }),
+  setRun: (run) => set((state) => ({ runs: { ...state.runs, [run.id]: run } })),
+  addRetriedRun: (run) => set((state) => ({
+    runs: { ...state.runs, [run.id]: run },
+    selectedRunId: run.id,
+  })),
+  selectRun: (id) => set({ selectedRunId: id }),
+  reset: () => set({ experiment: null, runs: {}, selectedRunId: null }),
 }))

@@ -1,6 +1,10 @@
 import { useEffect } from 'react'
 import type { SSEEvent } from '../types'
 
+export function normalizeSSEEvent(event: SSEEvent): SSEEvent {
+  return { ...event, run_id: event.run_id ?? event.generation_id }
+}
+
 export function useSSE(
   experimentId: number | null,
   onEvent: (event: SSEEvent) => void,
@@ -12,7 +16,7 @@ export function useSSE(
 
     es.onmessage = (e) => {
       const data: SSEEvent = JSON.parse(e.data)
-      onEvent(data)
+      onEvent(normalizeSSEEvent(data))
     }
 
     es.addEventListener('done', () => {

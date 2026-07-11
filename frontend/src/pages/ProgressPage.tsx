@@ -11,18 +11,18 @@ export function ProgressPage() {
   const { experimentId } = useParams()
   const navigate = useNavigate()
   const id = Number(experimentId)
-  const { experiment, generations, setExperiment, applySSEEvent } = useRunStore()
+  const { experiment, runs, setExperiment, applySSEEvent } = useRunStore()
   useEffect(() => { if (id) experimentsApi.get(id).then(setExperiment) }, [id, setExperiment])
   const receive = useCallback(applySSEEvent, [applySSEEvent])
   useSSE(id || null, receive)
-  const list = Object.values(generations)
+  const list = Object.values(runs)
   const complete = list.filter((item) => item.status === 'complete').length
   return <main className="experiment-page"><header><strong>Blueprint Lab</strong><span>Experiment progress</span></header><div className="experiment-shell">
-    <h1>{experiment?.topic ?? 'Running experiment'}</h1><p>{complete} of {list.length} generations complete</p>
-    <section><h2>Generations</h2>{list.map((generation) => {
-      const condition = generation.condition ?? experiment?.conditions.find((item) => item.id === generation.condition_id)
-      return <article className="generation-card" key={generation.id}><div><strong>{condition?.condition_label ?? `Condition ${generation.condition_id}`}</strong><small>{condition?.prompt_structure ?? 'Prompt structure unavailable'}</small></div><span className={`status ${generation.status}`}>{labels[generation.status]}</span></article>
-    })}{!list.length && <p>Loading generation conditions…</p>}</section>
-    {complete > 0 && <button className="primary" onClick={() => navigate(`/experiments/${id}/viewer`)}>Review generations</button>}
+    <h1>{experiment?.topic ?? 'Running experiment'}</h1><p>{complete} of {list.length} runs complete</p>
+    <section><h2>Runs</h2>{list.map((run) => {
+      const condition = run.condition ?? experiment?.conditions.find((item) => item.id === run.condition_id)
+      return <article className="generation-card" key={run.id}><div><strong>{condition?.condition_code ?? `Condition ${run.condition_id}`} · Run {run.run_number}</strong><small>{condition?.prompt_structure ?? 'Prompt structure unavailable'}</small></div><span className={`status ${run.status}`}>{labels[run.status]}</span></article>
+    })}{!list.length && <p>Loading run conditions…</p>}</section>
+    {complete > 0 && <button className="primary" onClick={() => navigate(`/experiments/${id}/viewer`)}>Review runs</button>}
   </div></main>
 }

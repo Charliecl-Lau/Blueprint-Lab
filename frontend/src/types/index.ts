@@ -18,6 +18,7 @@ export interface PromptFactorInputs {
 
 export interface Condition {
   id: number
+  condition_code?: string
   prompt_structure: PromptStructure
   concept_bridge_enabled: boolean
   few_shot_enabled: boolean
@@ -27,17 +28,49 @@ export interface Condition {
   condition_label: string
 }
 
-export interface Generation {
+export interface PromptProvenance {
+  text: string
+  hash: string
+  template_version: string
+  generator_version: string
+}
+
+export interface AssessmentOutput {
+  parsed_json: { questions: Question[] } | null
+  output_hash: string
+  schema_version: string
+  raw_response_text?: string
+}
+
+export interface RunSource {
+  source_document_id: number
+  role: string
+  ordinal: number
+  included_text_hash: string
+  name: string
+  version: string
+}
+
+export interface Run {
   id: number
   condition_id: number
+  run_number: number
   status: Stage
+  model_settings?: Record<string, unknown>
   model_name?: string | null
   model_version?: string | null
   generation_time_ms?: number | null
   generated_json?: { questions: Question[] } | null
   condition?: Condition
   prompt_text?: string | null
+  prompt?: PromptProvenance | null
+  assessment?: AssessmentOutput | null
+  sources?: RunSource[]
+  artifact_available?: boolean
 }
+
+/** @deprecated Use Run. */
+export type Generation = Run
 
 export interface Experiment {
   id: number
@@ -50,7 +83,8 @@ export interface Experiment {
   estimated_time_minutes: number
   created_at: string
   conditions: Condition[]
-  generations: Generation[]
+  runs: Run[]
+  generations?: Generation[]
 }
 
 export interface MCQOption { id?: number; body: string; is_correct: boolean }
@@ -63,7 +97,7 @@ export interface Question {
   model_answer?: string | null
 }
 
-export interface SSEEvent { generation_id: number; condition_id: number; stage: Stage }
+export interface SSEEvent { run_id?: number; generation_id?: number; condition_id: number; stage: Stage }
 
 export interface CreateExperimentPayload {
   course: string

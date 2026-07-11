@@ -13,21 +13,29 @@ const experiment: Experiment = {
   estimated_time_minutes: 30,
   created_at: '2026-07-10T00:00:00Z',
   conditions: [],
-  generations: [{ id: 8, condition_id: 3, status: 'pending' }],
+  runs: [{ id: 8, condition_id: 3, run_number: 1, status: 'complete' }],
 }
 
-describe('experiment store', () => {
+describe('run store', () => {
   beforeEach(() => useRunStore.getState().reset())
 
-  test('indexes generations when an experiment is loaded', () => {
+  test('indexes runs when an experiment is loaded', () => {
     useRunStore.getState().setExperiment(experiment)
-    expect(useRunStore.getState().generations[8]?.condition_id).toBe(3)
+    expect(useRunStore.getState().runs[8]?.condition_id).toBe(3)
   })
 
-  test('applies progress events by generation id', () => {
+  test('normalizes deprecated generation ids in progress events', () => {
     useRunStore.getState().setExperiment(experiment)
-    useRunStore.getState().applySSEEvent({ generation_id: 8, condition_id: 3, stage: 'complete' })
-    expect(useRunStore.getState().generations[8]?.status).toBe('complete')
-    expect(useRunStore.getState().selectedGenerationId).toBe(8)
+    useRunStore.getState().applySSEEvent({ generation_id: 8, condition_id: 3, stage: 'documenting' })
+    expect(useRunStore.getState().runs[8]?.status).toBe('documenting')
+  })
+
+  test('keeps the original run and selects the newly retried run', () => {
+    useRunStore.getState().setExperiment(experiment)
+    useRunStore.getState().addRetriedRun({ id: 9, condition_id: 3, run_number: 2, status: 'pending' })
+
+    expect(Object.keys(useRunStore.getState().runs).map(Number)).toEqual([8, 9])
+    expect(useRunStore.getState().runs[8]?.status).toBe('complete')
+    expect(useRunStore.getState().selectedRunId).toBe(9)
   })
 })

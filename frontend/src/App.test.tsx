@@ -3,8 +3,28 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { axe, toHaveNoViolations } from 'jest-axe'
 import App from './App'
+import { normalizeExperiment } from './api/experiments'
 
 expect.extend(toHaveNoViolations)
+
+test('normalizes deprecated generation collections at the API boundary', () => {
+  const legacyRun = { id: 7, condition_id: 2, run_number: 1, status: 'complete' as const }
+  const response = normalizeExperiment({
+    id: 42,
+    course: 'Statics',
+    topic: 'Equilibrium',
+    learning_objectives: 'Resolve forces',
+    assessment_type: 'mixed',
+    difficulty: 'medium',
+    number_of_questions: 4,
+    estimated_time_minutes: 30,
+    created_at: '2026-07-11T00:00:00Z',
+    conditions: [],
+    generations: [legacyRun],
+  })
+
+  expect(response.runs).toEqual([legacyRun])
+})
 
 beforeEach(() => {
   vi.restoreAllMocks()
