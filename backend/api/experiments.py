@@ -10,6 +10,7 @@ from backend.database import get_db
 from backend.models.experiment import Condition, Experiment, Generation
 from backend.schemas.experiment_schema import ExperimentCreate, ExperimentResponse
 from backend.services.prompt_factors import build_condition_label
+from backend.services.run_service import create_run
 from backend.workers.assessment_worker import run_generation_pipeline
 
 
@@ -68,13 +69,7 @@ def create_experiment(payload: ExperimentCreate, db: Session = Depends(get_db)):
     db.add(condition)
     db.flush()
 
-    generation = Generation(
-        experiment_id=experiment.id,
-        condition_id=condition.id,
-        status="pending",
-    )
-    db.add(generation)
-    db.commit()
+    generation = create_run(db, condition.id, [])
 
     run_generation_pipeline.delay(generation.id)
     db.refresh(experiment)

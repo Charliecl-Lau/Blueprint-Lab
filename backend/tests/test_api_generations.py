@@ -68,7 +68,7 @@ def test_export_docx_returns_word_artifact(client, test_db):
     assert response.content == b"docx-bytes"
 
 
-def test_regenerate_clears_artifacts_and_generation_metadata(client, test_db):
+def test_regenerate_creates_new_run_and_preserves_old_evidence(client, test_db):
     generation = make_generation(test_db)
 
     with patch("backend.api.generations.run_generation_pipeline.delay") as delay:
@@ -76,14 +76,16 @@ def test_regenerate_clears_artifacts_and_generation_metadata(client, test_db):
 
     assert response.status_code == 200
     test_db.refresh(generation)
-    assert generation.status == "pending"
-    assert generation.generated_json is None
-    assert generation.model_name is None
-    assert generation.model_version is None
-    assert generation.generation_time_ms is None
-    assert generation.prompt_record is None
-    assert generation.document_artifact is None
-    delay.assert_called_once_with(generation.id)
+    assert generation.status == "complete"
+    assert generation.generated_json == {"questions": []}
+    assert generation.prompt_record is not None
+    assert generation.document_artifact is not None
+    new_id = response.json()["run_id"]
+    assert new_id != generation.id
+    assert response.json()["generation_id"] == new_id
+    assert response.headers["Deprecation"] == "true"
+    assert response.headers["Link"] == f'</runs/{generation.id}/retry>; rel="successor-version"'
+    delay.assert_called_once_with(new_id)
 
 
 def test_generation_routes_return_404_for_missing_records(client):

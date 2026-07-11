@@ -63,6 +63,7 @@ class GenerationSummary(BaseModel):
     model_name: Optional[str]
     model_version: Optional[str]
     generation_time_ms: Optional[int]
+    run_number: int = 1
 
     model_config = {"from_attributes": True, "protected_namespaces": ()}
 
@@ -79,6 +80,7 @@ class ExperimentResponse(BaseModel):
     created_at: datetime
     conditions: list[ConditionResponse]
     generations: list[GenerationSummary]
+    runs: list[GenerationSummary]
 
     model_config = {"from_attributes": True}
 
