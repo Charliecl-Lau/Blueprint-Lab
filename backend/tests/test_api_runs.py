@@ -2,7 +2,7 @@ import hashlib
 from unittest.mock import patch
 
 from backend.models.experiment import Condition, Experiment
-from backend.models.run import Assessment, DocumentArtifact, Run
+from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
 from backend.models.source_document import SourceDocument
 
 
@@ -23,12 +23,42 @@ def test_canonical_create_detail_retry_raw_and_export(client, test_db):
     run_id = created.json()["id"]
     delay.assert_called_once_with(run_id)
     run = test_db.get(Run, run_id)
+    run.request_id = "generation-request"
+    run.version = "generation-version"
+    run.finish_reason = "STOP"
+    run.duration_ms = 456
+    run.prompt = Prompt(
+        prompt_structure="openai",
+        structure_system_prompt="OpenAI structure rules",
+        structure_input="Assessment Details: MSE202",
+        actual_prompt="# Role\nAssessment generator",
+        actual_prompt_hash="a" * 64,
+        structure_prompt_version="2",
+        actual_prompt_generator_version="2",
+        structure_request_id="structure-request",
+        structure_model="gemini",
+        structure_model_version="structure-version",
+        structure_finish_reason="STOP",
+        structure_duration_ms=123,
+        generation_context="Generate the assessment now.",
+        generation_envelope_hash="b" * 64,
+    )
     run.assessment = Assessment(raw_response_text="private raw", parsed_json={"questions": []}, output_hash=hashlib.sha256(b"private raw").hexdigest(), schema_version="1")
     run.document_artifact = DocumentArtifact(filename="run.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", content=b"docx")
     test_db.commit()
     default = client.get(f"/runs/{run_id}").json()
     assert "raw_response_text" not in default["assessment"]
-    assert client.get(f"/runs/{run_id}?include_raw_response=true").json()["assessment"]["raw_response_text"] == "private raw"
+    assert default["prompt"]["actual_prompt_hash"] == run.prompt.actual_prompt_hash
+    assert default["prompt"]["structure_prompt_version"] == "2"
+    assert default["prompt"]["generation_request_id"] == "generation-request"
+    assert "structure_system_prompt" not in default["prompt"]
+    assert "actual_prompt" not in default["prompt"]
+    raw_detail = client.get(f"/runs/{run_id}?include_raw_response=true").json()
+    assert raw_detail["assessment"]["raw_response_text"] == "private raw"
+    assert raw_detail["prompt"]["structure_system_prompt"] == "OpenAI structure rules"
+    assert raw_detail["prompt"]["structure_input"] == "Assessment Details: MSE202"
+    assert raw_detail["prompt"]["actual_prompt"] == "# Role\nAssessment generator"
+    assert raw_detail["prompt"]["generation_context"] == "Generate the assessment now."
     assert client.get(f"/runs/{run_id}/export-docx").content == b"docx"
     with patch("backend.api.runs.run_generation_pipeline.delay"):
         retried = client.post(f"/runs/{run_id}/retry")

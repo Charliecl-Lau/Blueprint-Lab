@@ -11,7 +11,64 @@ from backend.workers.assessment_worker import run_generation_pipeline
 router = APIRouter(tags=["runs"])
 
 def run_detail(run: Run, include_raw_response: bool = False):
-    return {"id": run.id, "experiment_id": run.experiment_id, "condition_id": run.condition_id, "run_number": run.run_number, "status": run.status, "model_settings": run.model_settings, "prompt": None if not run.prompt else {"text": run.prompt.final_prompt, "hash": run.prompt.prompt_hash, "template_version": run.prompt.template_version, "generator_version": run.prompt.generator_version}, "assessment": None if not run.assessment else {"parsed_json": run.assessment.parsed_json, "output_hash": run.assessment.output_hash, "schema_version": run.assessment.schema_version, **({"raw_response_text": run.assessment.raw_response_text} if include_raw_response else {})}, "sources": [{"source_document_id": item.source_document_id, "role": item.role, "ordinal": item.ordinal, "included_text_hash": item.included_text_hash, "name": item.source_document.name, "version": item.source_document.version} for item in run.source_documents], "error": None if not run.error_type and not run.error_message else {"type": run.error_type, "message": run.error_message}, "artifact_available": run.document_artifact is not None}
+    prompt = None
+    if run.prompt:
+        prompt = {
+            "prompt_structure": run.prompt.prompt_structure,
+            "actual_prompt_hash": run.prompt.actual_prompt_hash,
+            "structure_prompt_version": run.prompt.structure_prompt_version,
+            "actual_prompt_generator_version": run.prompt.actual_prompt_generator_version,
+            "structure_request_id": run.prompt.structure_request_id,
+            "structure_model": run.prompt.structure_model,
+            "structure_model_version": run.prompt.structure_model_version,
+            "structure_finish_reason": run.prompt.structure_finish_reason,
+            "structure_duration_ms": run.prompt.structure_duration_ms,
+            "generation_envelope_hash": run.prompt.generation_envelope_hash,
+            "generation_request_id": run.request_id,
+            "generation_model": run.model,
+            "generation_model_version": run.version,
+            "generation_finish_reason": run.finish_reason,
+            "generation_duration_ms": run.duration_ms,
+        }
+        if include_raw_response:
+            prompt.update({
+                "structure_system_prompt": run.prompt.structure_system_prompt,
+                "structure_input": run.prompt.structure_input,
+                "actual_prompt": run.prompt.actual_prompt,
+                "generation_context": run.prompt.generation_context,
+            })
+    return {
+        "id": run.id,
+        "experiment_id": run.experiment_id,
+        "condition_id": run.condition_id,
+        "run_number": run.run_number,
+        "status": run.status,
+        "model_settings": run.model_settings,
+        "prompt": prompt,
+        "assessment": None if not run.assessment else {
+            "parsed_json": run.assessment.parsed_json,
+            "output_hash": run.assessment.output_hash,
+            "schema_version": run.assessment.schema_version,
+            **({"raw_response_text": run.assessment.raw_response_text}
+               if include_raw_response else {}),
+        },
+        "sources": [
+            {
+                "source_document_id": item.source_document_id,
+                "role": item.role,
+                "ordinal": item.ordinal,
+                "included_text_hash": item.included_text_hash,
+                "name": item.source_document.name,
+                "version": item.source_document.version,
+            }
+            for item in run.source_documents
+        ],
+        "error": None if not run.error_type and not run.error_message else {
+            "type": run.error_type,
+            "message": run.error_message,
+        },
+        "artifact_available": run.document_artifact is not None,
+    }
 
 @router.post("/conditions/{condition_id}/runs", response_model=RunSummary)
 def post_run(condition_id: int, payload: RunCreate, db: Session = Depends(get_db)):

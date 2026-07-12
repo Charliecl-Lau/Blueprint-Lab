@@ -4,13 +4,13 @@ Blueprint Lab is a controlled research platform for prompt-engineering experimen
 
 ## Research guarantees
 
-Each immutable run records its condition and run number, ordered source-document bindings, canonical model settings, exact prompt and hash, untouched provider response and hash, parsed assessment, provider metadata, sanitized errors, and generated Word artifact and hash. Retrying a completed or failed run creates the next run number and never overwrites the original evidence.
+Each immutable run records its condition and run number, ordered source-document bindings, canonical model settings, the exact Structure System Prompt call, the raw Actual Prompt, the Actual-Prompt-controlled Generation call, untouched provider responses and hashes, parsed assessment, provider metadata, sanitized errors, and generated Word artifact and hash. Retrying a completed or failed run creates the next run number, repeats both model calls, and never overwrites the original evidence.
 
-Hashes use SHA-256. Source and artifact hashes cover exact stored bytes; output hashes cover the exact UTF-8 provider response; prompt hashes cover canonical JSON containing the system and final prompts, prompt structure and versions, model settings, and source hashes in binding order.
+Hashes use SHA-256. Source and artifact hashes cover exact stored bytes; output hashes cover the exact UTF-8 provider response. The Actual Prompt hash covers the Structure System Prompt, deterministic first-call input, raw Actual Prompt, structure and versions, and canonical model settings. The Generation envelope hash covers the raw Actual Prompt, exact ordered source context, the same model settings, and source hashes in binding order.
 
 ## Stage boundaries
 
-Stage 1 provides immutable source snapshots, reproducible generation runs, provenance retrieval, compatibility APIs, and DOCX export. Stage 2 evaluation is intentionally deferred: rubric scoring, reviewer workflows, inter-rater analysis, aggregate comparisons, and statistical reporting are not part of the current generation pipeline.
+Generation has two model-call stages. The Structure stage receives Assessment Details and Prompt Design Factors but no uploaded source content, and returns a raw provider-specific Actual Prompt. The Generation stage uses that unmodified Actual Prompt as its controlling system instruction and receives ordered immutable source snapshots separately. Both calls use the same model and canonical run settings. Evaluation remains deferred: rubric scoring, reviewer workflows, inter-rater analysis, aggregate comparisons, and statistical reporting are not part of the current pipeline.
 
 ## Technology
 
@@ -83,7 +83,7 @@ python -m alembic stamp head
 python -m alembic current
 ```
 
-`alembic current` should report `20260711_01 (head)`. For a database containing the legacy pre-research schema, run `python -m alembic upgrade head` instead. The research migration must run online because it uses Python canonical JSON serialization to preserve legacy evidence hashes; offline `alembic --sql` mode is unsupported.
+`alembic current` should report `20260712_01 (head)`. For a database containing the legacy pre-research schema, run `python -m alembic upgrade head` instead. The research migrations must run online because they use Python canonical JSON serialization to preserve legacy evidence hashes; offline `alembic --sql` mode is unsupported.
 
 ### 5. Start the application
 
@@ -130,7 +130,7 @@ POST /runs/{run_id}/retry
 GET  /runs/{run_id}/export-docx
 ```
 
-`GET /runs/{run_id}` excludes raw provider output by default. In the current single-user research deployment, pass `include_raw_response=true` for provenance retrieval.
+`GET /runs/{run_id}` returns both stages' hashes, versions, request IDs, model metadata, finish reasons, and durations, while excluding raw instructions, source context, and provider output by default. In the current single-user research deployment, pass `include_raw_response=true` to retrieve the exact Structure System Prompt, first-call input, raw Actual Prompt, Generation context, and assessment response.
 
 The deprecated `/generations/{id}`, `/generations/{id}/regenerate`, and generation export routes remain temporary compatibility aliases. New clients should use `/runs`; compatibility regeneration is immutable and returns the newly created run ID.
 
