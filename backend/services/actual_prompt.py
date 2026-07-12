@@ -110,4 +110,3 @@ def _validate_anthropic(raw_text: str) -> None:
         raise ActualPromptValidationError(
             "Anthropic Actual Prompt sections must be balanced and in the required order"
         )
-

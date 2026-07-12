@@ -64,4 +64,3 @@ def test_unusable_or_mismatched_snapshots_fail(source):
         source.included_text_hash = "0" * 64
     with pytest.raises(SourceSnapshotError):
         build_generation_context([source])
-

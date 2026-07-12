@@ -26,4 +26,3 @@ def get_structure_system_prompt(
     if prompt_structure == "anthropic":
         return ANTHROPIC_STRUCTURE_SYSTEM_PROMPT, STRUCTURE_PROMPT_VERSION
     return OPENAI_STRUCTURE_SYSTEM_PROMPT, STRUCTURE_PROMPT_VERSION
-

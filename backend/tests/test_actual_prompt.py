@@ -94,4 +94,3 @@ def test_invalid_actual_prompts_are_rejected(structure, raw_text):
 )
 def test_valid_actual_prompts_are_accepted_without_rewriting(structure, raw_text):
     assert validate_actual_prompt(structure, raw_text) is None
-

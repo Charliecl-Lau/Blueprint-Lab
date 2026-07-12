@@ -42,4 +42,3 @@ def build_generation_context(bindings: Sequence[RunSourceDocument]) -> str:
         )
         blocks.append(f"<source {attributes}>\n{text}\n</source>")
     return "\n\n".join(blocks)
-
