@@ -3,8 +3,28 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.models.experiment import Condition, Experiment, Generation
+from backend.schemas.experiment_schema import PromptFactors
 from backend.services.llm_client import LLMResult
 from backend.services.reproducibility import sha256_bytes, sha256_text
+from backend.services.actual_prompt import build_structure_input
+from backend.services.generation_context import build_generation_context
+from backend.services.structure_system_prompts import get_structure_system_prompt
+
+
+ACTUAL_PROMPT = """# Role
+Assessment author
+# Personality
+Precise
+# Goal
+Generate questions
+# Measure of Success
+Correct questions
+# Constraints
+Use supplied facts
+# Output
+Return JSON
+# Stop Rules
+Stop after output"""
 
 
 @pytest.fixture
@@ -60,11 +80,10 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
                 }
             ]
         })
-        llm.generate.return_value = LLMResult(
-            raw_text=raw_text, provider_request_id="request-123",
-            model_name="gemini", model_version="gemini-2.0-flash",
-            finish_reason="STOP",
-        )
+        llm.generate.side_effect = [
+            LLMResult(ACTUAL_PROMPT, "structure-123", "gemini", "structure-v", "STOP"),
+            LLMResult(raw_text, "request-123", "gemini", "generation-v", "STOP"),
+        ]
         MockLLM.return_value = llm
 
         from backend.workers.assessment_worker import run_generation_pipeline
@@ -76,7 +95,36 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         assert generation_fixture.assessment.parsed_json["questions"][0]["body"] == "Explain equilibrium."
         assert generation_fixture.assessment.raw_response_text == raw_text
         assert generation_fixture.assessment.output_hash == sha256_text(raw_text)
-        assert generation_fixture.prompt.prompt_hash
+        factors = generation_fixture.condition
+        expected_input = build_structure_input(
+            course=generation_fixture.experiment.course,
+            topic=generation_fixture.experiment.topic,
+            learning_objectives=generation_fixture.experiment.learning_objectives,
+            assessment_type=generation_fixture.experiment.assessment_type,
+            difficulty=generation_fixture.experiment.difficulty,
+            number_of_questions=generation_fixture.experiment.number_of_questions,
+            factors=PromptFactors(
+                concept_bridge=factors.concept_bridge_enabled,
+                few_shot=factors.few_shot_enabled,
+                reference_content=factors.reference_content_enabled,
+                reasoning_guidance=factors.reasoning_guidance_enabled,
+            ),
+            factor_inputs=factors.factor_inputs,
+        )
+        expected_system, _ = get_structure_system_prompt("openai")
+        expected_context = build_generation_context([])
+        assert [call.kwargs for call in llm.generate.call_args_list] == [
+            {"system_prompt": expected_system, "user_message": expected_input,
+             "model_settings": generation_fixture.model_settings},
+            {"system_prompt": ACTUAL_PROMPT, "user_message": expected_context,
+             "model_settings": generation_fixture.model_settings},
+        ]
+        assert generation_fixture.prompt.actual_prompt == ACTUAL_PROMPT
+        assert generation_fixture.prompt.actual_prompt_hash
+        assert generation_fixture.prompt.generation_envelope_hash
+        assert generation_fixture.prompt.structure_request_id == "structure-123"
+        assert generation_fixture.prompt.structure_model_version == "structure-v"
+        assert generation_fixture.prompt.structure_duration_ms is not None
         assert generation_fixture.document_artifact.content.startswith(b"PK")
         assert generation_fixture.document_artifact.content_hash == sha256_bytes(
             generation_fixture.document_artifact.content
@@ -96,11 +144,10 @@ def test_generation_pipeline_preserves_raw_response_when_parsing_fails(generatio
     ):
         MockSession.return_value = test_db
         test_db.close = MagicMock()
-        MockLLM.return_value.generate.return_value = LLMResult(
-            raw_text="not-json", provider_request_id="request-bad",
-            model_name="gemini", model_version="gemini-2.0-flash",
-            finish_reason="STOP",
-        )
+        MockLLM.return_value.generate.side_effect = [
+            LLMResult(ACTUAL_PROMPT, "structure", "gemini", "v", "STOP"),
+            LLMResult("not-json", "request-bad", "gemini", "v", "STOP"),
+        ]
 
         from backend.workers.assessment_worker import run_generation_pipeline
 
@@ -113,6 +160,52 @@ def test_generation_pipeline_preserves_raw_response_when_parsing_fails(generatio
         assert generation_fixture.assessment.output_hash == sha256_text("not-json")
         assert generation_fixture.error_type == "assessment_parse_error"
         assert generation_fixture.prompt.prompt_hash
+
+
+def test_malformed_actual_prompt_is_committed_before_validation(generation_fixture, test_db):
+    with (
+        patch("backend.workers.assessment_worker.LLMClient") as MockLLM,
+        patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
+        patch("backend.workers.assessment_worker.redis_client"),
+    ):
+        test_db.close = MagicMock()
+        MockLLM.return_value.generate.return_value = LLMResult(
+            "not a structured prompt", "structure-bad", "gemini", "v", "STOP"
+        )
+        from backend.workers.assessment_worker import run_generation_pipeline
+        run_generation_pipeline(generation_fixture.id)
+        test_db.refresh(generation_fixture)
+        assert generation_fixture.status == "error"
+        assert generation_fixture.error_type == "actual_prompt_validation_error"
+        assert generation_fixture.prompt.actual_prompt == "not a structured prompt"
+        assert MockLLM.return_value.generate.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "expected_error"),
+    [
+        ([RuntimeError("structure failed")], "actual_prompt_provider_error"),
+        ([LLMResult(ACTUAL_PROMPT, "s", "gemini", "v", "STOP"), RuntimeError("generation failed")],
+         "generation_provider_error"),
+    ],
+)
+def test_provider_failures_are_stage_specific(
+    generation_fixture, test_db, side_effect, expected_error
+):
+    with (
+        patch("backend.workers.assessment_worker.LLMClient") as MockLLM,
+        patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
+        patch("backend.workers.assessment_worker.redis_client"),
+    ):
+        test_db.close = MagicMock()
+        MockLLM.return_value.generate.side_effect = side_effect
+        from backend.workers.assessment_worker import run_generation_pipeline
+        with patch.object(run_generation_pipeline, "retry", side_effect=RuntimeError("retry scheduled")):
+            with pytest.raises(RuntimeError, match="retry scheduled"):
+                run_generation_pipeline(generation_fixture.id)
+        test_db.refresh(generation_fixture)
+        assert generation_fixture.status == "error"
+        assert generation_fixture.error_type == expected_error
 
 
 def test_generation_pipeline_ignores_missing_generation(test_db):

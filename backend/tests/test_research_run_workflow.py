@@ -6,6 +6,7 @@ from backend.schemas.run_schema import SourceBinding
 from backend.services.llm_client import LLMResult
 from backend.services.run_service import create_run, retry_run
 from backend.services.source_documents import create_source_document
+from backend.tests.test_worker import ACTUAL_PROMPT
 
 
 def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_db):
@@ -46,14 +47,19 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
         condition.id,
         [SourceBinding(source_document_id=source.id, role="course_syllabus", ordinal=0)],
     )
-    responses = [
+    assessment_responses = [
         json.dumps({"questions": [{"type": "long_answer", "body": "Explain equilibrium.", "model_answer": "Forces balance."}]}),
         json.dumps({"questions": [{"type": "long_answer", "body": "Explain moment equilibrium.", "model_answer": "Moments balance."}]}),
     ]
 
     def provider_result(*_args, **_kwargs):
-        raw_text = responses.pop(0)
+        if provider_result.call_number % 2 == 0:
+            raw_text = ACTUAL_PROMPT
+        else:
+            raw_text = assessment_responses.pop(0)
+        provider_result.call_number += 1
         return LLMResult(raw_text, "request-id", "gemini", "test-version", "STOP")
+    provider_result.call_number = 0
 
     with (
         patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
@@ -80,3 +86,8 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
     assert run_1.source_documents[0].source_document.content == uploaded_bytes
     assert run_1.document_artifact.content
     assert run_2.document_artifact.content
+    assert mock_client.return_value.generate.call_count == 4
+    source_text = uploaded_bytes.decode()
+    calls = mock_client.return_value.generate.call_args_list
+    assert all(source_text not in calls[index].kwargs["user_message"] for index in (0, 2))
+    assert all(source_text in calls[index].kwargs["user_message"] for index in (1, 3))
