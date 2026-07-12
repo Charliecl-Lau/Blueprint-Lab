@@ -9,7 +9,7 @@ from backend.config import settings
 from backend.database import get_db
 from backend.models.experiment import Condition, Experiment, Generation
 from backend.schemas.experiment_schema import ExperimentCreate, ExperimentResponse
-from backend.services.prompt_factors import build_condition_label
+from backend.services.actual_prompt import build_condition_label
 from backend.services.run_service import create_run
 from backend.workers.assessment_worker import run_generation_pipeline
 
