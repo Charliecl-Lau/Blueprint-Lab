@@ -21,8 +21,13 @@ from backend.database import Base
 from backend.models.experiment import utc_now
 
 
-def _hash_text_default(context) -> str:
-    value = context.get_current_parameters().get("final_prompt", "")
+def _actual_prompt_hash_default(context) -> str:
+    value = context.get_current_parameters().get("actual_prompt", "")
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _generation_envelope_hash_default(context) -> str:
+    value = context.get_current_parameters().get("actual_prompt", "")
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
@@ -80,21 +85,43 @@ class Run(Base):
 
 class Prompt(Base):
     __tablename__ = "prompts"
-    __table_args__ = (CheckConstraint("length(prompt_hash) = 64"),)
+    __table_args__ = (
+        CheckConstraint("length(actual_prompt_hash) = 64"),
+        CheckConstraint("length(generation_envelope_hash) = 64"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=False)
     prompt_structure: Mapped[str] = mapped_column(String, nullable=False)
-    system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    final_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    template_version: Mapped[str] = mapped_column(String, nullable=False, default="legacy")
-    generator_version: Mapped[str] = mapped_column(String, nullable=False, default="legacy")
-    prompt_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, default=_hash_text_default
+    structure_system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    structure_input: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    actual_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    actual_prompt_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=_actual_prompt_hash_default
+    )
+    structure_prompt_version: Mapped[str] = mapped_column(
+        String, nullable=False, default="legacy"
+    )
+    actual_prompt_generator_version: Mapped[str] = mapped_column(
+        String, nullable=False, default="legacy"
+    )
+    structure_request_id: Mapped[Optional[str]] = mapped_column(String)
+    structure_model: Mapped[Optional[str]] = mapped_column(String)
+    structure_model_version: Mapped[Optional[str]] = mapped_column(String)
+    structure_finish_reason: Mapped[Optional[str]] = mapped_column(String)
+    structure_duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    generation_context: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    generation_envelope_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=_generation_envelope_hash_default
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     run: Mapped[Run] = relationship(back_populates="prompt")
     generation_id = synonym("run_id")
-    full_prompt = synonym("final_prompt")
+    system_prompt = synonym("structure_system_prompt")
+    final_prompt = synonym("actual_prompt")
+    template_version = synonym("structure_prompt_version")
+    generator_version = synonym("actual_prompt_generator_version")
+    prompt_hash = synonym("actual_prompt_hash")
+    full_prompt = synonym("actual_prompt")
 
 
 class Assessment(Base):

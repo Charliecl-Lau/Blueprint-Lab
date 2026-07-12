@@ -95,14 +95,24 @@ def test_upgrade_preserves_exact_legacy_evidence(postgres_url):
         connection.execute(text("INSERT INTO document_artifacts VALUES (1,1,'quiz.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',:content,now())"), {"content": artifact})
         connection.execute(text("INSERT INTO rubric_results VALUES (1,2,'reviewer-a',4.5,'preserve me',now())"))
 
+    command.upgrade(alembic_config(postgres_url), "20260711_01")
+    with engine.connect() as connection:
+        legacy_prompt_text = connection.scalar(text("SELECT final_prompt FROM prompts WHERE run_id=1"))
     command.upgrade(alembic_config(postgres_url), "head")
     with engine.connect() as connection:
         runs = connection.execute(text("SELECT id, run_number, seed FROM runs ORDER BY id")).all()
-        prompt = connection.execute(text("SELECT final_prompt, generator_version FROM prompts WHERE run_id=1")).one()
+        prompt = connection.execute(text("""
+            SELECT actual_prompt, actual_prompt_generator_version, actual_prompt_hash,
+                   generation_envelope_hash
+            FROM prompts WHERE run_id=1
+        """)).one()
         assessment = connection.execute(text("SELECT raw_response_text, parsed_json, output_hash FROM assessments WHERE run_id=1")).one()
         migrated_artifact = connection.execute(text("SELECT content, content_hash FROM document_artifacts WHERE run_id=1")).one()
         assert runs == [(1, 2, None), (2, 1, None), (3, 1, None)]
-        assert prompt == ("FINAL LEGACY PROMPT", "legacy-unknown")
+        assert prompt.actual_prompt == legacy_prompt_text == "FINAL LEGACY PROMPT"
+        assert prompt.actual_prompt_generator_version == "legacy-unknown"
+        assert len(prompt.actual_prompt_hash) == 64
+        assert len(prompt.generation_envelope_hash) == 64
         assert assessment.parsed_json == legacy_json
         assert assessment.raw_response_text == expected_raw
         assert assessment.output_hash == hashlib.sha256(assessment.raw_response_text.encode()).hexdigest()

@@ -41,11 +41,19 @@ def test_immutable_research_run_round_trip(test_db):
     )
     run.prompt = Prompt(
         prompt_structure="openai",
-        system_prompt="You are an assessment designer.",
-        final_prompt="Generate three questions.",
-        template_version="1.0",
-        generator_version="1.0",
-        prompt_hash="a" * 64,
+        structure_system_prompt="You are an assessment designer.",
+        structure_input="Build an assessment prompt.",
+        actual_prompt="Generate three questions.",
+        actual_prompt_hash="a" * 64,
+        structure_prompt_version="1.0",
+        actual_prompt_generator_version="2.0",
+        structure_request_id="structure-request-1",
+        structure_model="gemini-2.0-flash",
+        structure_model_version="2026-07-01",
+        structure_finish_reason="stop",
+        structure_duration_ms=123,
+        generation_context="Use the supplied course evidence.",
+        generation_envelope_hash="c" * 64,
     )
     run.assessment = Assessment(
         raw_response_text='{"questions": []}',
@@ -54,11 +62,25 @@ def test_immutable_research_run_round_trip(test_db):
         schema_version="1.0",
     )
     test_db.add(experiment)
-    test_db.commit()
+    test_db.flush()
+    run_id = run.id
+    test_db.expire_all()
 
-    saved = test_db.get(Run, run.id)
+    saved = test_db.get(Run, run_id)
     assert saved.condition.condition_code == "C100"
-    assert saved.prompt.final_prompt == "Generate three questions."
+    assert saved.prompt.structure_system_prompt == "You are an assessment designer."
+    assert saved.prompt.structure_input == "Build an assessment prompt."
+    assert saved.prompt.actual_prompt == "Generate three questions."
+    assert saved.prompt.actual_prompt_hash == "a" * 64
+    assert saved.prompt.structure_prompt_version == "1.0"
+    assert saved.prompt.actual_prompt_generator_version == "2.0"
+    assert saved.prompt.structure_request_id == "structure-request-1"
+    assert saved.prompt.structure_model == "gemini-2.0-flash"
+    assert saved.prompt.structure_model_version == "2026-07-01"
+    assert saved.prompt.structure_finish_reason == "stop"
+    assert saved.prompt.structure_duration_ms == 123
+    assert saved.prompt.generation_context == "Use the supplied course evidence."
+    assert saved.prompt.generation_envelope_hash == "c" * 64
     assert saved.assessment.parsed_json == {"questions": []}
     assert saved.provider == "google"
     assert saved.model == "gemini-2.0-flash"
@@ -87,8 +109,13 @@ def test_prompt_hash_rejects_non_sha256_length(test_db):
     run = Run(experiment=experiment, condition=condition, run_number=1)
     run.prompt = Prompt(
         prompt_structure="openai",
-        final_prompt="Generate one question.",
-        prompt_hash="too-short",
+        structure_system_prompt="structure",
+        structure_input="input",
+        actual_prompt="Generate one question.",
+        actual_prompt_hash="too-short",
+        structure_prompt_version="1",
+        actual_prompt_generator_version="1",
+        generation_envelope_hash="a" * 64,
     )
     test_db.add(experiment)
 
