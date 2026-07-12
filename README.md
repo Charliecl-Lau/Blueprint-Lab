@@ -21,24 +21,100 @@ Stage 1 provides immutable source snapshots, reproducible generation runs, prove
 
 ## Local setup
 
-Copy `.env.example` to `.env`, install dependencies, create the PostgreSQL database, and apply migrations. The research migration runs online because it uses Python canonical JSON serialization to preserve legacy evidence hashes; offline `alembic --sql` mode is unsupported.
+Prerequisites:
+
+- Python 3.9 or newer
+- Node.js and npm
+- Docker Desktop
+- A Google AI API key with access to `gemma-4-31b-it`
+
+Run all commands from the repository root unless a step says otherwise.
+
+### 1. Configure the environment
+
+Copy the environment template, then put your Google API key in `.env`. Do not put a real key in `.env.example`; `.env` is ignored by Git.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The relevant values should look like this:
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_lab
+REDIS_URL=redis://localhost:6379/0
+GOOGLE_API_KEY=replace-with-your-google-api-key
+LLM_PROVIDER=google
+LLM_MODEL=gemma-4-31b-it
+LLM_TEMPERATURE=0.2
+```
+
+### 2. Install dependencies
 
 ```powershell
 python -m pip install -r backend/requirements.txt
-$env:DATABASE_URL = "postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_lab"
-python -m alembic upgrade head
+Set-Location frontend
+npm install
+Set-Location ..
+```
+
+### 3. Start PostgreSQL and Redis
+
+Start Docker Desktop, then create the local containers. These commands are only needed once:
+
+```powershell
+docker run -d --name blueprint-lab-postgres -e POSTGRES_USER=blueprint -e POSTGRES_PASSWORD=blueprint -e POSTGRES_DB=blueprint_lab -p 5432:5432 postgres:16
+docker run -d --name blueprint-lab-redis -p 6379:6379 redis:7
+```
+
+On later sessions, start the existing containers instead:
+
+```powershell
+docker start blueprint-lab-postgres blueprint-lab-redis
+```
+
+### 4. Initialize the database
+
+For a new, empty local database, create the current schema and record the Alembic revision:
+
+```powershell
+python -c "import backend.models; from backend.database import Base, engine; Base.metadata.create_all(bind=engine)"
+python -m alembic stamp head
+python -m alembic current
+```
+
+`alembic current` should report `20260711_01 (head)`. For a database containing the legacy pre-research schema, run `python -m alembic upgrade head` instead. The research migration must run online because it uses Python canonical JSON serialization to preserve legacy evidence hashes; offline `alembic --sql` mode is unsupported.
+
+### 5. Start the application
+
+Open three PowerShell windows at the repository root.
+
+Backend API:
+
+```powershell
 python -m uvicorn backend.main:app --reload
 ```
 
-Run Redis and the Celery worker using the same environment, then start the frontend:
+Celery worker (the `solo` pool is required on Windows):
 
 ```powershell
-cd frontend
-npm install
+python -m celery -A backend.celery_app worker --loglevel=info --pool=solo
+```
+
+Frontend:
+
+```powershell
+Set-Location frontend
 npm run dev
 ```
 
-The frontend runs at `http://localhost:5173`; the API runs at `http://localhost:8000`.
+Open `http://localhost:5173`. The API health endpoint is `http://localhost:8000/health`.
+
+### 6. Run an end-to-end generation
+
+Complete the experiment form and select **Run Experiment**. A successful local flow creates the experiment in PostgreSQL, queues generation through Redis, executes it in Celery, calls the configured Google model, and displays progress and output in the frontend.
+
+If a run fails, check the Celery terminal first for provider, model-access, or parsing errors. Configuration changes in `.env` require restarting both the backend and Celery. Create a new experiment after changing model settings because existing runs retain their original settings for reproducibility.
 
 ## Sources and canonical run APIs
 

@@ -22,7 +22,7 @@ def test_llm_client_calls_generate_content():
         assert result == LLMResult(
             raw_text='{"generated_prompt": "test prompt"}',
             provider_request_id=None,
-            model_name="gemma-4-31b",
+            model_name="gemma-4-31b-it",
             model_version=None,
             finish_reason=None,
         )
@@ -36,11 +36,11 @@ def test_llm_client_passes_model_name():
         MockClient.return_value.models.generate_content.return_value = mock_response
 
         from backend.services.llm_client import LLMClient
-        client = LLMClient(model="gemma-4-31b")
+        client = LLMClient(model="gemma-4-31b-it")
         client.generate("system", "user")
 
         call_kwargs = MockClient.return_value.models.generate_content.call_args
-        assert call_kwargs.kwargs["model"] == "gemma-4-31b"
+        assert call_kwargs.kwargs["model"] == "gemma-4-31b-it"
 
 
 def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
@@ -65,6 +65,6 @@ def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
         assert config.max_output_tokens == 8192
         assert result.raw_text == " untouched \n"
         assert result.provider_request_id == "request-123"
-        assert result.model_name == "gemma-4-31b"
+        assert result.model_name == "gemma-4-31b-it"
         assert result.model_version == "gemma-version-1"
         assert result.finish_reason == "STOP"

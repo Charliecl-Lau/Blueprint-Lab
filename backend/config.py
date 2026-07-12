@@ -7,7 +7,7 @@ class Settings(BaseSettings):
 
     google_api_key: str = ""
     llm_provider: str = "google"
-    llm_model: str = "gemma-4-31b"
+    llm_model: str = "gemma-4-31b-it"
     llm_temperature: float = 0.2
     llm_top_p: float = 0.95
     llm_seed: Optional[int] = None
