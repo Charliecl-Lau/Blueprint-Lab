@@ -86,6 +86,16 @@ JSON schema
 
 Never modify user-supplied values.
 
+Equation Notation Requirement
+
+The generated prompt must instruct the assessment model to mark every equation and derivation using notation suitable for direct conversion to a native Word equation object.
+
+The generated prompt must explicitly forbid returning equations as images, screenshots, raw LaTeX, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\]).
+
+Assessment Metadata Requirement
+
+The generated prompt must instruct the assessment model to populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements. Traceability IDs that were not supplied must be set to "Not Assigned" rather than invented.
+
 JSON Output Specification
 
 The generated prompt must instruct the assessment model to return exactly one valid JSON object.
@@ -291,6 +301,12 @@ enabled Prompt Design Factors
 Never modify user-supplied values.
 
 Never invent missing information.
+
+Within <constraints>, the generated prompt must also instruct the assessment-generation model to:
+
+mark every equation and derivation using notation suitable for direct conversion to a native Word equation object, and explicitly forbid returning equations as images, screenshots, raw LaTeX, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
+
+populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements, using "Not Assigned" for any traceability ID that was not supplied rather than inventing one
 
 Assessment Quality Requirements
 

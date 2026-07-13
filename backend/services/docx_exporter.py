@@ -31,10 +31,32 @@ def build_assessment_docx(*, run_id: int, prompt_id: int,
         metadata = question.get("metadata", {})
         if metadata.get("question_title"):
             document.add_heading(metadata["question_title"], level=3)
+        if metadata.get("question_type"):
+            document.add_paragraph(f"Question Type: {metadata['question_type']}")
+        if metadata.get("difficulty_level"):
+            document.add_paragraph(f"Difficulty Level: {metadata['difficulty_level']}")
+        if metadata.get("intended_assessment_setting"):
+            document.add_paragraph(f"Intended Assessment Setting: {metadata['intended_assessment_setting']}")
+        if metadata.get("mse202_concepts"):
+            document.add_paragraph(f"MSE202 Concept(s): {', '.join(metadata['mse202_concepts'])}")
+        if metadata.get("mse302_concepts"):
+            document.add_paragraph(f"MSE302 Concept(s): {', '.join(metadata['mse302_concepts'])}")
         if metadata.get("concept_map_bridge"):
             document.add_paragraph(f"Concept-Map Bridge: {metadata['concept_map_bridge']}")
         if metadata.get("materials_science_context"):
             document.add_paragraph(f"Materials Science Context: {metadata['materials_science_context']}")
+        if metadata.get("estimated_time"):
+            document.add_paragraph(f"Estimated Time: {metadata['estimated_time']}")
+        if metadata.get("learning_objectives"):
+            document.add_paragraph(f"Learning Objectives: {', '.join(metadata['learning_objectives'])}")
+        if metadata.get("id_requirements"):
+            document.add_paragraph(f"ID Requirements: {metadata['id_requirements']}")
+        document.add_paragraph(
+            f"Traceability IDs — Prompt Template: {metadata.get('prompt_template_id', 'Not Assigned')}, "
+            f"Actual Prompt: {metadata.get('actual_prompt_id', 'Not Assigned')}, "
+            f"Output: {metadata.get('output_id', 'Not Assigned')}, "
+            f"Final Question: {metadata.get('final_question_id', 'Not Assigned')}"
+        )
         document.add_paragraph(f"Q{index}. {question['body']}")
         for option in question.get("options", []):
             suffix = " [correct]" if option.get("is_correct") else ""
