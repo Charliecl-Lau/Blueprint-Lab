@@ -16,7 +16,15 @@ def test_provider_structures_are_distinct_and_versioned():
     assert openai_prompt
     assert anthropic_prompt
     assert openai_prompt != anthropic_prompt
-    assert openai_version == anthropic_version == "2"
+    assert openai_version == anthropic_version == "5"
+
+
+def test_provider_structures_require_questions_array_contract():
+    for structure in ("openai", "anthropic"):
+        system_prompt, _ = get_structure_system_prompt(structure)
+        assert '"questions"' in system_prompt
+        assert "type" in system_prompt
+        assert "body" in system_prompt
 
 
 def test_structure_input_contains_details_and_enabled_factor_values_only():
@@ -59,7 +67,7 @@ Correct questions
 # Constraints
 Use supplied facts
 # Output
-Return JSON
+Return a JSON object with a top-level "questions" array
 # Stop Rules
 Stop after output"""
 
@@ -67,7 +75,7 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
 <task>Generate questions</task>
 <constraints>Use supplied facts</constraints>
 <verification>Check correctness</verification>
-<output_format>Return JSON</output_format>
+<output_format>Return a JSON object with a top-level "questions" array</output_format>
 <reasoning_guidance>Use concise rationale</reasoning_guidance>"""
 
 
@@ -77,7 +85,13 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
         ("openai", ""),
         ("openai", f"```markdown\n{OPENAI_ACTUAL_PROMPT}\n```"),
         ("openai", f"Here is the prompt:\n{OPENAI_ACTUAL_PROMPT}"),
-        ("openai", OPENAI_ACTUAL_PROMPT.replace("# Output\nReturn JSON\n", "")),
+        (
+            "openai",
+            OPENAI_ACTUAL_PROMPT.replace(
+                '# Output\nReturn a JSON object with a top-level "questions" array\n',
+                "",
+            ),
+        ),
         ("anthropic", ANTHROPIC_ACTUAL_PROMPT.replace("<verification>", "<context>")),
         ("anthropic", ANTHROPIC_ACTUAL_PROMPT + "\n<context>duplicate</context>"),
         ("anthropic", ANTHROPIC_ACTUAL_PROMPT.replace("</task>", "")),
@@ -85,6 +99,18 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
 )
 def test_invalid_actual_prompts_are_rejected(structure, raw_text):
     with pytest.raises(ActualPromptValidationError):
+        validate_actual_prompt(structure, raw_text)
+
+
+@pytest.mark.parametrize(
+    ("structure", "raw_text"),
+    [
+        ("openai", OPENAI_ACTUAL_PROMPT.replace('top-level "questions" array', "JSON object")),
+        ("anthropic", ANTHROPIC_ACTUAL_PROMPT.replace('top-level "questions" array', "JSON object")),
+    ],
+)
+def test_actual_prompts_without_questions_array_contract_are_rejected(structure, raw_text):
+    with pytest.raises(ActualPromptValidationError, match="questions"):
         validate_actual_prompt(structure, raw_text)
 
 
