@@ -175,7 +175,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY alembic.ini alembic.ini
 COPY backend backend
 
-CMD ["python", "-m", "celery", "-A", "backend.celery_app", "worker", "--loglevel=info"]
+CMD ["python", "-m", "celery", "-A", "backend.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
 ```
 
 Run: `docker build -f Dockerfile.worker -t blueprint-lab-worker:local .`
@@ -184,7 +184,7 @@ Expected: Docker completes successfully and tags `blueprint-lab-worker:local`.
 
 Run: `docker image inspect blueprint-lab-worker:local --format '{{json .Config.Cmd}}'`
 
-Expected: `["python","-m","celery","-A","backend.celery_app","worker","--loglevel=info"]`.
+Expected: `["python","-m","celery","-A","backend.celery_app","worker","--loglevel=info","--concurrency=2"]`.
 
 - [ ] **Step 5: Configure the worker Dockerfile and shared variables**
 
