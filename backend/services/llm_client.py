@@ -22,6 +22,17 @@ def _without_defaults(value):
     return value
 
 
+class TruncatedResponseError(RuntimeError):
+    """Raised when the provider stopped before completing the response.
+
+    gemini-3.5-flash is a thinking model and thinking tokens are charged
+    against max_output_tokens. When the combined thinking + output exceeds
+    the budget the model stops with finish_reason=MAX_TOKENS and returns
+    truncated, unparseable JSON. Surfacing this explicitly lets the worker
+    retry and record a clear error instead of a misleading parse failure.
+    """
+
+
 @dataclass(frozen=True)
 class LLMResult:
     raw_text: str
@@ -53,6 +64,7 @@ class LLMClient:
             "temperature": overrides.get("temperature", settings.llm_temperature),
             "top_p": overrides.get("top_p", settings.llm_top_p),
             "max_output_tokens": overrides.get("max_tokens", settings.llm_max_output_tokens),
+            "thinking_config": types.ThinkingConfig(thinking_budget=0),
         }
         seed = overrides.get("seed", settings.llm_seed)
         if seed is not None:
@@ -75,6 +87,11 @@ class LLMClient:
         if candidates:
             finish_reason = getattr(candidates[0], "finish_reason", None)
             finish_reason = getattr(finish_reason, "value", finish_reason)
+        if finish_reason in ("MAX_TOKENS", 2):
+            raise TruncatedResponseError(
+                f"Provider stopped with finish_reason=MAX_TOKENS; response is "
+                f"truncated and cannot be parsed. Model={self.model}."
+            )
         return LLMResult(
             raw_text=response.text,
             provider_request_id=getattr(response, "response_id", None),

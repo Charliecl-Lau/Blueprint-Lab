@@ -92,6 +92,40 @@ def test_llm_client_passes_provider_structured_output_schema():
         assert not contains_default(config.response_schema)
 
 
+def test_llm_client_disables_thinking_budget():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        response = MagicMock()
+        response.text = "result"
+        response.candidates = []
+        mock_client.return_value.models.generate_content.return_value = response
+
+        from backend.services.llm_client import LLMClient
+
+        LLMClient().generate("system", "user")
+
+        config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
+        assert config.thinking_config is not None
+        assert config.thinking_config.thinking_budget == 0
+
+
+def test_llm_client_raises_on_truncated_response():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        response = MagicMock()
+        response.text = '{"questions": [{"body": "trunca'
+        candidate = MagicMock()
+        candidate.finish_reason = "MAX_TOKENS"
+        response.candidates = [candidate]
+        mock_client.return_value.models.generate_content.return_value = response
+
+        from backend.services.llm_client import LLMClient, TruncatedResponseError
+
+        try:
+            LLMClient().generate("system", "user")
+            assert False, "expected TruncatedResponseError"
+        except TruncatedResponseError as exc:
+            assert "MAX_TOKENS" in str(exc)
+
+
 def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         response = MagicMock()

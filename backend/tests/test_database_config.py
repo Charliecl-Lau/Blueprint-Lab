@@ -15,4 +15,4 @@ def test_sqlite_remains_a_supported_explicit_database():
 
 def test_default_google_model_uses_a_generate_content_identifier():
     settings = Settings(_env_file=None)
-    assert settings.llm_model == "gemma-4-31b-it"
+    assert settings.llm_model == "gemini-3.5-flash"
