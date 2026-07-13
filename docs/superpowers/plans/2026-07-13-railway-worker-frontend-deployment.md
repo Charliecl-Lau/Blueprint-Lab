@@ -4,7 +4,7 @@
 
 **Goal:** Deploy a private Celery worker and a public Caddy-served React frontend into the existing Railway project without disrupting the working FastAPI API.
 
-**Architecture:** The worker reuses the repository-root Python image and overrides its start command to run Celery against the existing private PostgreSQL and Redis services. The frontend uses a Node build stage and Caddy runtime stage; Caddy serves the SPA and strips `/api` before proxying to FastAPI on Railway private networking.
+**Architecture:** The worker uses a dedicated repository-root Dockerfile with the same Python dependencies as the API image and a Celery-specific command, selected through Railway's `RAILWAY_DOCKERFILE_PATH` variable. The frontend uses a Node build stage and Caddy runtime stage; Caddy serves the SPA and strips `/api` before proxying to FastAPI on Railway private networking.
 
 **Tech Stack:** Railway CLI 5.26.0, Docker, Python 3.12, Celery, React 19, Vite 8, Node 22, Caddy 2
 
@@ -128,8 +128,8 @@ git commit -m "Add Railway frontend container" -m "Build the Vite application in
 ### Task 2: Railway API and worker configuration
 
 **Files:**
-- Reuse: `Dockerfile`
-- Runtime configuration only: Railway project `giving-smile`, services `Blueprint-Lab` and `worker`
+- Create: `Dockerfile.worker`
+- Runtime configuration only: Railway project `Blueprint Lab`, services `Blueprint-Lab` and `worker`
 
 **Interfaces:**
 - Consumes: existing Railway PostgreSQL, Redis, Google provider, and model variables.
@@ -149,33 +149,66 @@ Run: `python -m pytest backend/tests/test_worker.py -q`
 
 Expected: The worker pipeline tests pass without calling the external Google API.
 
-- [ ] **Step 3: Create the worker from the connected GitHub repository**
+- [ ] **Step 3: Create the private worker service without a source**
 
-Run: `railway add --service worker --repo Charliecl-Lau/Blueprint-Lab --branch main --json`
+Run: `railway add --service worker --json`
 
-Expected: Railway creates a `worker` service in the production environment with the repository root as its source.
+Expected: Railway creates an empty `worker` service in the production environment without starting a deployment.
 
-- [ ] **Step 4: Configure the worker command and shared variables**
+- [ ] **Step 4: Add and validate the worker-specific Dockerfile**
 
-Run:
+Create `Dockerfile.worker`:
 
-```powershell
-railway environment edit --service-config worker deploy.startCommand 'python -m celery -A backend.celery_app worker --loglevel=info' --message 'Configure the private Celery worker start command' --json
+```dockerfile
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY backend/requirements.txt backend/requirements.txt
+
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+COPY alembic.ini alembic.ini
+COPY backend backend
+
+CMD ["python", "-m", "celery", "-A", "backend.celery_app", "worker", "--loglevel=info"]
 ```
 
+Run: `docker build -f Dockerfile.worker -t blueprint-lab-worker:local .`
+
+Expected: Docker completes successfully and tags `blueprint-lab-worker:local`.
+
+Run: `docker image inspect blueprint-lab-worker:local --format '{{json .Config.Cmd}}'`
+
+Expected: `["python","-m","celery","-A","backend.celery_app","worker","--loglevel=info"]`.
+
+- [ ] **Step 5: Configure the worker Dockerfile and shared variables**
+
 Run:
 
 ```powershell
-railway variable set --service worker --skip-deploys 'DATABASE_URL=postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}' 'REDIS_URL=${{Redis.REDIS_URL}}' 'GOOGLE_API_KEY=${{Blueprint-Lab.GOOGLE_API_KEY}}' 'LLM_PROVIDER=${{Blueprint-Lab.LLM_PROVIDER}}' 'LLM_MODEL=${{Blueprint-Lab.LLM_MODEL}}' 'LLM_TEMPERATURE=${{Blueprint-Lab.LLM_TEMPERATURE}}' 'LLM_TOP_P=${{Blueprint-Lab.LLM_TOP_P}}' 'LLM_MAX_OUTPUT_TOKENS=${{Blueprint-Lab.LLM_MAX_OUTPUT_TOKENS}}' --json
+railway variable set --service worker --skip-deploys 'RAILWAY_DOCKERFILE_PATH=Dockerfile.worker' 'DATABASE_URL=postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}' 'REDIS_URL=${{Redis.REDIS_URL}}' 'GOOGLE_API_KEY=${{Blueprint-Lab.GOOGLE_API_KEY}}' 'LLM_PROVIDER=${{Blueprint-Lab.LLM_PROVIDER}}' 'LLM_MODEL=${{Blueprint-Lab.LLM_MODEL}}' 'LLM_TEMPERATURE=${{Blueprint-Lab.LLM_TEMPERATURE}}' 'LLM_TOP_P=${{Blueprint-Lab.LLM_TOP_P}}' 'LLM_MAX_OUTPUT_TOKENS=${{Blueprint-Lab.LLM_MAX_OUTPUT_TOKENS}}' --json
 ```
 
 Do not configure a pre-deploy command, HTTP health check, or public domain.
 
 Expected: Railway resolves the database and Redis references inside the worker without exposing their values in the committed repository.
 
-- [ ] **Step 5: Deploy and inspect worker readiness**
+- [ ] **Step 6: Commit the worker Dockerfile and fallback documentation**
 
-Run: `railway redeploy --service worker --yes`
+```powershell
+git add Dockerfile.worker docs/superpowers/plans/2026-07-13-railway-worker-frontend-deployment.md
+git commit -m "Add Railway worker container" -m "Provide a Celery-specific Dockerfile that Railway can select through its documented Dockerfile-path variable. This avoids the CLI start-command editor that no-ops for the new worker while keeping its deployment reproducible from GitHub."
+git push origin main
+```
+
+- [ ] **Step 7: Deploy and inspect worker readiness**
+
+Run: `railway service source connect --service worker --repo Charliecl-Lau/Blueprint-Lab --branch main --json`
 
 Expected: Deployment status reaches `SUCCESS`; logs show Celery connected to Redis and ready, with registered assessment tasks and no crash loop.
 
