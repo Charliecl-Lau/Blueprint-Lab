@@ -4,7 +4,7 @@
 
 **Goal:** Deploy a private Celery worker and a public Caddy-served React frontend into the existing Railway project without disrupting the working FastAPI API.
 
-**Architecture:** The worker uses a dedicated repository-root Dockerfile with the same Python dependencies as the API image and a Celery-specific command, selected through Railway's `RAILWAY_DOCKERFILE_PATH` variable. The frontend uses a Node build stage and Caddy runtime stage; Caddy serves the SPA and strips `/api` before proxying to FastAPI on Railway private networking.
+**Architecture:** The worker and frontend use dedicated repository-root Dockerfiles selected through Railway's `RAILWAY_DOCKERFILE_PATH` variable, avoiding service-setting edits that Railway CLI 5.26.0 does not apply. The frontend's Node build stage produces the Vite bundle, and its Caddy runtime serves the SPA while stripping `/api` before proxying to FastAPI on Railway private networking.
 
 **Tech Stack:** Railway CLI 5.26.0, Docker, Python 3.12, Celery, React 19, Vite 8, Node 22, Caddy 2
 
@@ -215,7 +215,7 @@ Expected: Deployment status reaches `SUCCESS`; logs show Celery connected to Red
 ### Task 3: Railway frontend and live routing verification
 
 **Files:**
-- Reuse: `frontend/Dockerfile`
+- Create: `Dockerfile.frontend`
 - Reuse: `frontend/Caddyfile`
 - Runtime configuration only: Railway service `frontend`
 
@@ -223,23 +223,48 @@ Expected: Deployment status reaches `SUCCESS`; logs show Celery connected to Red
 - Consumes: the API private hostname through `API_UPSTREAM`.
 - Produces: one Railway public HTTPS domain serving both the React SPA and proxied API requests.
 
-- [ ] **Step 1: Create and configure the frontend service**
+- [ ] **Step 1: Add and validate the repository-root frontend Dockerfile**
 
-Run: `railway add --service frontend --repo Charliecl-Lau/Blueprint-Lab --branch main --json`
+Create `Dockerfile.frontend`:
+
+```dockerfile
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend .
+RUN npm run build
+
+FROM caddy:2-alpine
+
+COPY frontend/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+```
+
+Run: `docker build -f Dockerfile.frontend -t blueprint-lab-frontend:railway .`
+
+Expected: Docker builds the frontend from repository-root context and tags `blueprint-lab-frontend:railway`.
+
+- [ ] **Step 2: Create and configure the frontend service**
+
+Run: `railway add --service frontend --json`
 
 Run:
 
 ```powershell
-railway environment edit --service-config frontend source.rootDirectory '/frontend' --service-config frontend deploy.healthcheckPath '/health' --message 'Configure the public frontend Docker service' --json
+railway variable set --service frontend --skip-deploys 'RAILWAY_DOCKERFILE_PATH=Dockerfile.frontend' 'API_UPSTREAM=blueprint-lab.railway.internal:8000' --json
 ```
 
-Run: `railway variable set --service frontend --skip-deploys 'API_UPSTREAM=blueprint-lab.railway.internal:8000' --json`
+Run: `railway service source connect --service frontend --repo Charliecl-Lau/Blueprint-Lab --branch main --json`
 
-Leave the start command unset so the image uses Caddy's default command. Railway detects `frontend/Dockerfile` from the configured root directory.
+Leave the start command unset so the image uses Caddy's default command. Caddy exposes `/health` for direct live verification because the CLI cannot persist the service health-check path.
 
-Expected: Railway builds `frontend/Dockerfile` from the frontend directory and checks the Caddy endpoint on its injected port.
+Expected: Railway builds `Dockerfile.frontend` from repository-root context and Caddy listens on Railway's injected port.
 
-- [ ] **Step 2: Deploy the frontend and create its public domain**
+- [ ] **Step 3: Deploy the frontend and create its public domain**
 
 Run: `railway redeploy --service frontend --yes`
 
@@ -247,7 +272,7 @@ Run: `railway domain --service frontend`
 
 Expected: Deployment reaches `SUCCESS`, and Railway returns a public `*.up.railway.app` domain for `frontend` only.
 
-- [ ] **Step 3: Verify direct and proxied health endpoints**
+- [ ] **Step 4: Verify direct and proxied health endpoints**
 
 Run:
 
@@ -262,13 +287,13 @@ Run: `curl.exe -fsS "https://$domain/api/health"`
 
 Expected: HTTP success with JSON body `{"status":"ok"}`.
 
-- [ ] **Step 4: Verify SPA fallback**
+- [ ] **Step 5: Verify SPA fallback**
 
 Run: `curl.exe -fsS "https://$domain/progress"`
 
 Expected: HTTP success containing the built application's `<div id="root"></div>` markup.
 
-- [ ] **Step 5: Perform final service checks**
+- [ ] **Step 6: Perform final service checks**
 
 Run: `railway status --json`
 
