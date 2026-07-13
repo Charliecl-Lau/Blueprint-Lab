@@ -23,6 +23,24 @@ def _hash(value: object) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def _drop_check_constraint_if_present(table_name: str, constraint_names: tuple[str, ...]) -> None:
+    connection = op.get_bind()
+    existing_names = set(connection.execute(
+        sa.text("""
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = to_regclass(:table_name)
+              AND contype = 'c'
+        """),
+        {"table_name": table_name},
+    ).scalars().all())
+
+    for constraint_name in constraint_names:
+        if constraint_name in existing_names:
+            op.drop_constraint(constraint_name, table_name, type_="check")
+            return
+
+
 def upgrade() -> None:
     if context.is_offline_mode():
         raise RuntimeError(
@@ -30,7 +48,10 @@ def upgrade() -> None:
             "requires Python; run `python -m alembic upgrade head` online with DATABASE_URL set"
         )
 
-    op.drop_constraint("ck_prompts_prompt_hash", "prompts", type_="check")
+    _drop_check_constraint_if_present(
+        "prompts",
+        ("ck_prompts_prompt_hash", "prompts_prompt_hash_check"),
+    )
     op.alter_column("prompts", "system_prompt", new_column_name="structure_system_prompt")
     op.alter_column("prompts", "final_prompt", new_column_name="actual_prompt")
     op.alter_column("prompts", "template_version", new_column_name="structure_prompt_version")

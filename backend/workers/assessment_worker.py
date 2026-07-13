@@ -11,6 +11,10 @@ from backend.database import SessionLocal
 from backend.models.experiment import utc_now
 from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
 from backend.schemas.experiment_schema import PromptFactors
+from backend.schemas.assessment_schema import (
+    ASSESSMENT_PROVIDER_SCHEMA,
+    AssessmentGenerationResponse,
+)
 from backend.services.actual_prompt import (
     ACTUAL_PROMPT_GENERATOR_VERSION,
     ActualPromptValidationError,
@@ -93,72 +97,74 @@ def run_generation_pipeline(self, run_id: int) -> None:
         experiment = run.experiment
         condition = run.condition
         ordered_sources = sorted(run.source_documents, key=lambda item: (item.ordinal, item.id))
-        _set_status(db, run, "prompting")
-        _publish_progress(experiment.id, run.id, condition.id, "prompting")
-        structure_system_prompt, structure_prompt_version = (
-            get_structure_system_prompt(condition.prompt_structure)
-        )
-        structure_input = build_structure_input(
-            course=experiment.course,
-            topic=experiment.topic,
-            learning_objectives=experiment.learning_objectives,
-            assessment_type=experiment.assessment_type,
-            difficulty=experiment.difficulty,
-            number_of_questions=experiment.number_of_questions,
-            factors=_factors_from_condition(condition),
-            factor_inputs=_structure_factor_inputs(condition, ordered_sources),
-        )
         llm = LLMClient(model=run.model)
-        structure_started = time.perf_counter()
-        try:
-            structure_result = llm.generate(
-                system_prompt=structure_system_prompt,
-                user_message=structure_input,
-                model_settings=run.model_settings,
+        prompt = run.prompt
+        if prompt is None:
+            _set_status(db, run, "prompting")
+            _publish_progress(experiment.id, run.id, condition.id, "prompting")
+            structure_system_prompt, structure_prompt_version = (
+                get_structure_system_prompt(condition.prompt_structure)
             )
-        except Exception as exc:
-            _retry_provider_failure(
-                self, db, run, "actual_prompt_provider_error", exc
+            structure_input = build_structure_input(
+                course=experiment.course,
+                topic=experiment.topic,
+                learning_objectives=experiment.learning_objectives,
+                assessment_type=experiment.assessment_type,
+                difficulty=experiment.difficulty,
+                number_of_questions=experiment.number_of_questions,
+                factors=_factors_from_condition(condition),
+                factor_inputs=_structure_factor_inputs(condition, ordered_sources),
             )
+            structure_started = time.perf_counter()
+            try:
+                structure_result = llm.generate(
+                    system_prompt=structure_system_prompt,
+                    user_message=structure_input,
+                    model_settings=run.model_settings,
+                )
+            except Exception as exc:
+                _retry_provider_failure(
+                    self, db, run, "actual_prompt_provider_error", exc
+                )
 
-        structure_duration_ms = int(
-            (time.perf_counter() - structure_started) * 1000
-        )
-        generation_context = build_generation_context(ordered_sources)
-        source_hashes = [item.included_text_hash for item in ordered_sources]
-        prompt = Prompt(
-            run_id=run.id,
-            prompt_structure=condition.prompt_structure,
-            structure_system_prompt=structure_system_prompt,
-            structure_input=structure_input,
-            actual_prompt=structure_result.raw_text,
-            actual_prompt_hash=build_actual_prompt_hash(
+            structure_duration_ms = int(
+                (time.perf_counter() - structure_started) * 1000
+            )
+            generation_context = build_generation_context(ordered_sources)
+            source_hashes = [item.included_text_hash for item in ordered_sources]
+            prompt = Prompt(
+                run_id=run.id,
+                prompt_structure=condition.prompt_structure,
                 structure_system_prompt=structure_system_prompt,
                 structure_input=structure_input,
                 actual_prompt=structure_result.raw_text,
-                prompt_structure=condition.prompt_structure,
+                actual_prompt_hash=build_actual_prompt_hash(
+                    structure_system_prompt=structure_system_prompt,
+                    structure_input=structure_input,
+                    actual_prompt=structure_result.raw_text,
+                    prompt_structure=condition.prompt_structure,
+                    structure_prompt_version=structure_prompt_version,
+                    actual_prompt_generator_version=ACTUAL_PROMPT_GENERATOR_VERSION,
+                    model_settings=run.model_settings,
+                ),
                 structure_prompt_version=structure_prompt_version,
                 actual_prompt_generator_version=ACTUAL_PROMPT_GENERATOR_VERSION,
-                model_settings=run.model_settings,
-            ),
-            structure_prompt_version=structure_prompt_version,
-            actual_prompt_generator_version=ACTUAL_PROMPT_GENERATOR_VERSION,
-            structure_request_id=structure_result.provider_request_id,
-            structure_model=structure_result.model_name,
-            structure_model_version=structure_result.model_version,
-            structure_finish_reason=structure_result.finish_reason,
-            structure_duration_ms=structure_duration_ms,
-            generation_context=generation_context,
-            generation_envelope_hash=build_generation_envelope_hash(
-                actual_prompt=structure_result.raw_text,
+                structure_request_id=structure_result.provider_request_id,
+                structure_model=structure_result.model_name,
+                structure_model_version=structure_result.model_version,
+                structure_finish_reason=structure_result.finish_reason,
+                structure_duration_ms=structure_duration_ms,
                 generation_context=generation_context,
-                model_settings=run.model_settings,
-                source_hashes=source_hashes,
-            ),
-        )
-        db.add(prompt)
-        db.commit()
-        db.refresh(prompt)
+                generation_envelope_hash=build_generation_envelope_hash(
+                    actual_prompt=structure_result.raw_text,
+                    generation_context=generation_context,
+                    model_settings=run.model_settings,
+                    source_hashes=source_hashes,
+                ),
+            )
+            db.add(prompt)
+            db.commit()
+            db.refresh(prompt)
 
         try:
             validate_actual_prompt(condition.prompt_structure, prompt.actual_prompt)
@@ -175,6 +181,7 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 system_prompt=prompt.actual_prompt,
                 user_message=prompt.generation_context,
                 model_settings=run.model_settings,
+                response_schema=ASSESSMENT_PROVIDER_SCHEMA,
             )
         except Exception as exc:
             _retry_provider_failure(self, db, run, "generation_provider_error", exc)

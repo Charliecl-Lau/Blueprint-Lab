@@ -5,9 +5,12 @@ def test_generate_questions_uses_full_prompt_and_rich_schema_directly():
     raw_text = """{
         "questions": [{
             "type": "mcq",
-            "metadata": {
-                "question_title": "Stress definition",
-                "mse202_concepts": ["stress"],
+                "metadata": {
+                    "question_title": "Stress definition",
+                    "question_type": "mcq",
+                    "difficulty_level": "introductory",
+                    "intended_assessment_setting": "In-class quiz",
+                    "mse202_concepts": ["stress"],
                 "mse302_concepts": ["mechanical work"],
                 "concept_map_bridge": "Relate force intensity to mechanical work.",
                 "materials_science_context": "Mechanics of materials.",
@@ -23,7 +26,7 @@ def test_generate_questions_uses_full_prompt_and_rich_schema_directly():
             "model_answer": null,
             "equations": [{"label": "Stress", "expression": "sigma = F/A", "location": "solution"}],
             "quality_check": [{"criterion": "Correctness", "rating": 5, "comment": "Correct."}],
-            "revision_options": ["Make it computational."]
+            "revision_options": ["Make it computational.", "Ask for a units check."]
         }]
     }"""
 

@@ -81,6 +81,10 @@ def validate_actual_prompt(
         )
     if "```" in raw_text:
         raise ActualPromptValidationError("Actual Prompt must not use code fences")
+    if '"questions"' not in raw_text:
+        raise ActualPromptValidationError(
+            'Actual Prompt must require a top-level "questions" array'
+        )
     if prompt_structure == "anthropic":
         _validate_anthropic(raw_text)
     else:

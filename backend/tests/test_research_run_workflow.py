@@ -6,7 +6,7 @@ from backend.schemas.run_schema import SourceBinding
 from backend.services.llm_client import LLMResult
 from backend.services.run_service import create_run, retry_run
 from backend.services.source_documents import create_source_document
-from backend.tests.test_worker import ACTUAL_PROMPT
+from backend.tests.test_worker import ACTUAL_PROMPT, complete_question
 
 
 def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_db):
@@ -48,8 +48,16 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
         [SourceBinding(source_document_id=source.id, role="course_syllabus", ordinal=0)],
     )
     assessment_responses = [
-        json.dumps({"questions": [{"type": "long_answer", "body": "Explain equilibrium.", "model_answer": "Forces balance."}]}),
-        json.dumps({"questions": [{"type": "long_answer", "body": "Explain moment equilibrium.", "model_answer": "Moments balance."}]}),
+        json.dumps({"questions": [complete_question(
+            question_type="long_answer",
+            body="Explain equilibrium.",
+            model_answer="Forces balance.",
+        )]}),
+        json.dumps({"questions": [complete_question(
+            question_type="long_answer",
+            body="Explain moment equilibrium.",
+            model_answer="Moments balance.",
+        )]}),
     ]
 
     def provider_result(*_args, **_kwargs):

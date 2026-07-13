@@ -1,6 +1,25 @@
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock, call, patch
 
 from backend.services.llm_client import LLMResult
+from backend.schemas.assessment_schema import AssessmentGenerationResponse
+
+
+def test_llm_client_installs_event_loop_when_worker_thread_has_none():
+    new_loop = MagicMock()
+    with (
+        patch.object(asyncio, "get_event_loop", side_effect=RuntimeError("no current event loop")),
+        patch.object(asyncio, "new_event_loop", return_value=new_loop) as create_loop,
+        patch.object(asyncio, "set_event_loop") as set_loop,
+        patch("backend.services.llm_client.genai.Client") as mock_client,
+    ):
+        from backend.services.llm_client import LLMClient
+
+        LLMClient()
+
+    create_loop.assert_called_once_with()
+    set_loop.assert_has_calls([call(new_loop)])
+    mock_client.assert_called_once()
 
 
 def test_llm_client_calls_generate_content():
@@ -41,6 +60,36 @@ def test_llm_client_passes_model_name():
 
         call_kwargs = MockClient.return_value.models.generate_content.call_args
         assert call_kwargs.kwargs["model"] == "gemma-4-31b-it"
+
+
+def test_llm_client_passes_provider_structured_output_schema():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        response = MagicMock()
+        response.text = '{"questions": []}'
+        response.candidates = []
+        mock_client.return_value.models.generate_content.return_value = response
+
+        from backend.services.llm_client import LLMClient
+
+        LLMClient().generate(
+            "system",
+            "user",
+            response_schema=AssessmentGenerationResponse,
+        )
+
+        config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
+        assert config.response_mime_type == "application/json"
+        assert isinstance(config.response_schema, dict)
+        assert "questions" in config.response_schema["properties"]
+
+        def contains_default(value):
+            if isinstance(value, dict):
+                return "default" in value or any(contains_default(item) for item in value.values())
+            if isinstance(value, list):
+                return any(contains_default(item) for item in value)
+            return False
+
+        assert not contains_default(config.response_schema)
 
 
 def test_llm_client_passes_explicit_model_settings_and_returns_metadata():

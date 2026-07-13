@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -7,6 +8,18 @@ from google import genai
 from google.genai import types
 
 from backend.config import settings
+
+
+def _without_defaults(value):
+    if isinstance(value, dict):
+        return {
+            key: _without_defaults(item)
+            for key, item in value.items()
+            if key != "default"
+        }
+    if isinstance(value, list):
+        return [_without_defaults(item) for item in value]
+    return value
 
 
 @dataclass(frozen=True)
@@ -21,9 +34,19 @@ class LLMResult:
 class LLMClient:
     def __init__(self, model: Optional[str] = None):
         self.model = model or settings.llm_model
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
         self._client = genai.Client(api_key=settings.google_api_key)
 
-    def generate(self, system_prompt: str, user_message: str, model_settings: Optional[dict] = None) -> LLMResult:
+    def generate(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_settings: Optional[dict] = None,
+        response_schema: Optional[type] = None,
+    ) -> LLMResult:
         overrides = model_settings or {}
         config_kwargs = {
             "system_instruction": system_prompt,
@@ -34,6 +57,14 @@ class LLMClient:
         seed = overrides.get("seed", settings.llm_seed)
         if seed is not None:
             config_kwargs["seed"] = seed
+        if response_schema is not None:
+            config_kwargs["response_mime_type"] = "application/json"
+            schema = (
+                response_schema.model_json_schema()
+                if hasattr(response_schema, "model_json_schema")
+                else response_schema
+            )
+            config_kwargs["response_schema"] = _without_defaults(schema)
         response = self._client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(**config_kwargs),

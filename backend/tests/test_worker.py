@@ -4,6 +4,10 @@ import pytest
 
 from backend.models.experiment import Condition, Experiment, Generation
 from backend.schemas.experiment_schema import PromptFactors
+from backend.schemas.assessment_schema import (
+    ASSESSMENT_PROVIDER_SCHEMA,
+    AssessmentGenerationResponse,
+)
 from backend.services.llm_client import LLMResult
 from backend.services.reproducibility import sha256_bytes, sha256_text
 from backend.services.actual_prompt import build_structure_input
@@ -22,9 +26,37 @@ Correct questions
 # Constraints
 Use supplied facts
 # Output
-Return JSON
+Return a JSON object with a top-level "questions" array
 # Stop Rules
 Stop after output"""
+
+
+def complete_question(*, question_type, body, model_answer):
+    return {
+        "type": question_type,
+        "metadata": {
+            "question_title": "Equilibrium condition",
+            "question_type": question_type,
+            "difficulty_level": "introductory",
+            "intended_assessment_setting": "In-class assessment",
+            "mse202_concepts": ["Static equilibrium"],
+            "mse302_concepts": ["Mechanical stability"],
+            "concept_map_bridge": "Connects force balance to mechanical stability.",
+            "materials_science_context": "Applies equilibrium to stable material systems.",
+        },
+        "body": body,
+        "options": [],
+        "model_answer": model_answer,
+        "quality_check": [{
+            "criterion": "Correctness",
+            "rating": 5,
+            "comment": "The equilibrium condition is technically correct.",
+        }],
+        "revision_options": [
+            "Add a numerical force balance.",
+            "Ask students to state assumptions.",
+        ],
+    }
 
 
 @pytest.fixture
@@ -72,12 +104,11 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         llm = MagicMock()
         raw_text = __import__("json").dumps({
             "questions": [
-                {
-                    "type": "long_answer",
-                    "body": "Explain equilibrium.",
-                    "options": [],
-                    "model_answer": "Net force and net moment are zero.",
-                }
+                complete_question(
+                    question_type="long_answer",
+                    body="Explain equilibrium.",
+                    model_answer="Net force and net moment are zero.",
+                )
             ]
         })
         llm.generate.side_effect = [
@@ -117,7 +148,8 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
             {"system_prompt": expected_system, "user_message": expected_input,
              "model_settings": generation_fixture.model_settings},
             {"system_prompt": ACTUAL_PROMPT, "user_message": expected_context,
-             "model_settings": generation_fixture.model_settings},
+             "model_settings": generation_fixture.model_settings,
+             "response_schema": ASSESSMENT_PROVIDER_SCHEMA},
         ]
         assert generation_fixture.prompt.actual_prompt == ACTUAL_PROMPT
         assert generation_fixture.prompt.actual_prompt_hash
@@ -134,6 +166,56 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         assert generation_fixture.finish_reason == "STOP"
         assert generation_fixture.generation_time_ms is not None
         assert mock_redis.publish.called
+
+
+def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test_db):
+    valid_response = __import__("json").dumps({
+        "questions": [complete_question(
+            question_type="short_answer",
+            body="State the equilibrium condition.",
+            model_answer="Net force and moment are zero.",
+        )]
+    })
+    with (
+        patch("backend.workers.assessment_worker.LLMClient") as mock_client,
+        patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
+        patch("backend.workers.assessment_worker.redis_client"),
+    ):
+        test_db.close = MagicMock()
+        llm = mock_client.return_value
+        llm.generate.side_effect = [
+            LLMResult(ACTUAL_PROMPT, "structure", "gemini", "v", "STOP"),
+            RuntimeError("temporary provider failure"),
+        ]
+
+        from backend.workers.assessment_worker import run_generation_pipeline
+
+        with patch.object(
+            run_generation_pipeline,
+            "retry",
+            side_effect=RuntimeError("retry scheduled"),
+        ):
+            with pytest.raises(RuntimeError, match="retry scheduled"):
+                run_generation_pipeline(generation_fixture.id)
+
+        test_db.refresh(generation_fixture)
+        assert generation_fixture.prompt is not None
+
+        llm.generate.reset_mock()
+        llm.generate.side_effect = [
+            LLMResult(valid_response, "generation", "gemini", "v", "STOP")
+        ]
+        run_generation_pipeline(generation_fixture.id)
+
+        test_db.refresh(generation_fixture)
+        assert generation_fixture.status == "complete"
+        assert llm.generate.call_count == 1
+        assert llm.generate.call_args.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
+        question_schema = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
+        assert set(question_schema["required"]) >= {
+            "type", "body", "metadata", "quality_check", "revision_options"
+        }
+        assert "metadata" in question_schema["properties"]
 
 
 def test_generation_pipeline_preserves_raw_response_when_parsing_fails(generation_fixture, test_db):
