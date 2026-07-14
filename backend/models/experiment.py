@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,6 +28,9 @@ class Experiment(Base):
     difficulty: Mapped[str] = mapped_column(String, nullable=False)
     number_of_questions: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

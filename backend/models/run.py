@@ -47,6 +47,22 @@ class Run(Base):
         Index("ix_runs_condition_id", "condition_id"),
         Index("ix_runs_status", "status"),
         Index("ix_runs_created_at", "created_at"),
+        CheckConstraint(
+            "input_tokens IS NULL OR input_tokens >= 0",
+            name="ck_runs_input_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "output_tokens IS NULL OR output_tokens >= 0",
+            name="ck_runs_output_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "total_tokens IS NULL OR total_tokens >= 0",
+            name="ck_runs_total_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "model_call_count IS NULL OR model_call_count >= 0",
+            name="ck_runs_model_call_count_nonnegative",
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
@@ -65,6 +81,10 @@ class Run(Base):
     request_id: Mapped[Optional[str]] = mapped_column(String)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     finish_reason: Mapped[Optional[str]] = mapped_column(String)
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    total_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    model_call_count: Mapped[Optional[int]] = mapped_column(Integer)
     error_type: Mapped[Optional[str]] = mapped_column(String)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -77,6 +97,9 @@ class Run(Base):
     document_artifact: Mapped[Optional["DocumentArtifact"]] = relationship(back_populates="run", uselist=False)
     source_documents: Mapped[list["RunSourceDocument"]] = relationship(back_populates="run")
     rubric_results: Mapped[list["RubricResult"]] = relationship(back_populates="run")
+    model_call_usages: Mapped[list["ModelCallUsage"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
     model_name = synonym("model")
     model_version = synonym("version")
     generation_time_ms = synonym("duration_ms")
@@ -170,3 +193,4 @@ Generation = Run
 PromptRecord = Prompt
 
 from backend.models.source_document import RunSourceDocument  # noqa: E402,F401
+from backend.models.model_call_usage import ModelCallUsage  # noqa: E402,F401
