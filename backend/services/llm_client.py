@@ -64,7 +64,6 @@ class LLMClient:
             "temperature": overrides.get("temperature", settings.llm_temperature),
             "top_p": overrides.get("top_p", settings.llm_top_p),
             "max_output_tokens": overrides.get("max_tokens", settings.llm_max_output_tokens),
-            "thinking_config": types.ThinkingConfig(thinking_budget=0),
         }
         seed = overrides.get("seed", settings.llm_seed)
         if seed is not None:
