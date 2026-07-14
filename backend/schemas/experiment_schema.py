@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 PromptStructure = Literal["openai", "anthropic"]
@@ -21,6 +21,11 @@ class PromptFactorInputs(BaseModel):
     reference_content: Optional[str] = Field(default=None, max_length=20000)
     reasoning_guidance: Optional[str] = Field(default=None, max_length=20000)
 
+    @field_validator("*", mode="before")
+    @classmethod
+    def trim_optional_factor_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
 
 class ExperimentCreate(BaseModel):
     course: str = Field(min_length=1)
@@ -33,6 +38,11 @@ class ExperimentCreate(BaseModel):
     prompt_structure: PromptStructure = "openai"
     factors: PromptFactors = Field(default_factory=PromptFactors)
     factor_inputs: PromptFactorInputs = Field(default_factory=PromptFactorInputs)
+
+    @field_validator("course", "topic", "learning_objectives", mode="before")
+    @classmethod
+    def trim_required_assessment_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def require_enabled_factor_content(self):

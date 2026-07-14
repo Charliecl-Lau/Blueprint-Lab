@@ -4,6 +4,25 @@ from pydantic import ValidationError
 from backend.schemas.experiment_schema import ExperimentCreate, PromptFactors
 
 
+@pytest.fixture
+def valid_payload():
+    return {
+        "course": "ENGR 101",
+        "topic": "Statics",
+        "learning_objectives": "Resolve forces.",
+        "assessment_type": "mixed",
+        "difficulty": "introductory",
+        "number_of_questions": 4,
+        "factors": {
+            "concept_bridge": False,
+            "few_shot": False,
+            "reference_content": False,
+            "reasoning_guidance": False,
+        },
+        "factor_inputs": {},
+    }
+
+
 def test_experiment_create_defaults_to_openai_and_all_factors_off():
     payload = ExperimentCreate(
         course="ENGR 101",
@@ -56,3 +75,28 @@ def test_experiment_create_rejects_removed_frameworks():
             number_of_questions=4,
             prompt_structure="forge",
         )
+
+
+@pytest.mark.parametrize("field", ["course", "topic", "learning_objectives"])
+def test_assessment_text_fields_reject_whitespace(field, valid_payload):
+    valid_payload[field] = "   "
+
+    with pytest.raises(ValidationError):
+        ExperimentCreate(**valid_payload)
+
+
+def test_assessment_text_fields_are_trimmed(valid_payload):
+    valid_payload["course"] = "  ENGR 101  "
+    valid_payload["topic"] = "  Statics  "
+    payload = ExperimentCreate(**valid_payload)
+
+    assert payload.course == "ENGR 101"
+    assert payload.topic == "Statics"
+
+
+def test_enabled_reference_content_requires_trimmed_text(valid_payload):
+    valid_payload["factors"]["reference_content"] = True
+    valid_payload["factor_inputs"]["reference_content"] = "  "
+
+    with pytest.raises(ValidationError):
+        ExperimentCreate(**valid_payload)

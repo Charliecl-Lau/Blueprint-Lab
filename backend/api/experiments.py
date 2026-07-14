@@ -1,16 +1,15 @@
 import json
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
 from backend.config import settings
 from backend.database import get_db
-from backend.models.experiment import Condition, Experiment, Generation
+from backend.models.experiment import Experiment
 from backend.schemas.experiment_schema import ExperimentCreate, ExperimentResponse
-from backend.services.actual_prompt import build_condition_label
-from backend.services.run_service import create_run
+from backend.services.experiment_service import create_experiment_with_run
 from backend.workers.assessment_worker import run_generation_pipeline
 
 
@@ -43,36 +42,21 @@ async def _stream_experiment_progress(experiment_id: int, total_generations: int
 
 
 @router.post("", response_model=ExperimentResponse)
-def create_experiment(payload: ExperimentCreate, db: Session = Depends(get_db)):
-    experiment = Experiment(
-        course=payload.course,
-        topic=payload.topic,
-        learning_objectives=payload.learning_objectives,
-        assessment_type=payload.assessment_type,
-        difficulty=payload.difficulty,
-        number_of_questions=payload.number_of_questions,
-        estimated_time_minutes=payload.estimated_time_minutes,
+def create_experiment(
+    payload: ExperimentCreate,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=64,
+    ),
+    db: Session = Depends(get_db),
+):
+    experiment, run, created = create_experiment_with_run(
+        db, payload, idempotency_key
     )
-    db.add(experiment)
-    db.flush()
-
-    condition = Condition(
-        experiment_id=experiment.id,
-        prompt_structure=payload.prompt_structure,
-        concept_bridge_enabled=payload.factors.concept_bridge,
-        few_shot_enabled=payload.factors.few_shot,
-        reference_content_enabled=payload.factors.reference_content,
-        reasoning_guidance_enabled=payload.factors.reasoning_guidance,
-        factor_inputs=payload.factor_inputs.model_dump(exclude_none=True),
-        condition_label=build_condition_label(payload.factors),
-    )
-    db.add(condition)
-    db.flush()
-
-    generation = create_run(db, condition.id, [])
-
-    run_generation_pipeline.delay(generation.id)
-    db.refresh(experiment)
+    if created:
+        run_generation_pipeline.delay(run.id)
     return experiment
 
 
