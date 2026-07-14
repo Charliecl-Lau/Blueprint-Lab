@@ -353,7 +353,9 @@ def test_generation_pipeline_ignores_missing_generation(test_db):
         assert run_generation_pipeline(999_999) is None
 
 
-def test_pipeline_records_both_stage_usage(generation_fixture, test_db):
+def test_pipeline_records_both_model_stages_without_counting_local_validation_or_formatting(
+    generation_fixture, test_db
+):
     llm = MagicMock()
     raw_text = __import__("json").dumps(
         {
@@ -383,7 +385,9 @@ def test_pipeline_records_both_stage_usage(generation_fixture, test_db):
         ("actual_prompt", 15),
         ("assessment", 28),
     ]
+    assert llm.generate.call_count == 2
     assert generation_fixture.total_tokens == 43
+    assert generation_fixture.document_artifact is not None
     channels = [call.args[0] for call in mock_redis.publish.call_args_list]
     assert f"run:{generation_fixture.id}:progress" in channels
 

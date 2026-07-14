@@ -4,6 +4,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import { axe, toHaveNoViolations } from 'jest-axe'
 import App from './App'
 import { normalizeExperiment } from './api/experiments'
+import { useRunStore } from './store/runStore'
 
 expect.extend(toHaveNoViolations)
 
@@ -28,6 +29,7 @@ test('normalizes deprecated generation collections at the API boundary', () => {
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  useRunStore.getState().reset()
   window.history.replaceState({}, '', '/')
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true,
@@ -264,6 +266,35 @@ test('shows a top-right shortcut back to the latest run progress', async () => {
   expect(shortcut).toHaveAttribute('href', '/runs/9/progress')
   await userEvent.click(shortcut)
   expect(window.location.pathname).toBe('/runs/9/progress')
+})
+
+test('keeps the progress shortcut after returning home when recent runs cannot load', async () => {
+  useRunStore.getState().mergeExperiment({
+    id: 3,
+    course: 'Mechanics',
+    topic: 'Kinematics',
+    learning_objectives: 'Analyze motion.',
+    assessment_type: 'mixed',
+    difficulty: 'medium',
+    number_of_questions: 4,
+    estimated_time_minutes: 30,
+    created_at: '2026-07-14T02:00:00Z',
+    conditions: [],
+    runs: [{
+      id: 10,
+      experiment_id: 3,
+      condition_id: 5,
+      run_number: 1,
+      status: 'generating',
+    }],
+  })
+  vi.mocked(fetch).mockRejectedValue(new Error('recent runs unavailable'))
+
+  render(<App />)
+
+  expect(await screen.findByRole('link', {
+    name: 'Return to run progress: Kinematics',
+  })).toHaveAttribute('href', '/runs/10/progress')
 })
 
 test('asks for confirmation before retrying a run', async () => {

@@ -1,21 +1,39 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { runsApi } from '../api/runs'
+import { useRunStore } from '../store/runStore'
 import type { RecentRun } from '../types'
 
+const ACTIVE = new Set(['pending', 'prompting', 'generating', 'documenting'])
+
 export function RunProgressShortcut() {
-  const [run, setRun] = useState<RecentRun | null>(null)
+  const runs = useRunStore((state) => state.runs)
+  const experiments = useRunStore((state) => state.experiments)
+  const storedRun = Object.values(runs)
+    .filter((item) => ACTIVE.has(item.status))
+    .sort((left, right) => right.id - left.id)[0]
+  const storedShortcut = storedRun
+    ? {
+        id: storedRun.id,
+        topic: experiments[storedRun.experiment_id ?? -1]?.topic ?? `Run ${storedRun.id}`,
+      }
+    : null
+  const storedRunId = storedShortcut?.id
+  const [recentRun, setRecentRun] = useState<RecentRun | null>(null)
 
   useEffect(() => {
+    if (storedRunId) return
     let active = true
-    runsApi.recent(1)
+    runsApi.recent(10)
       .then((items) => {
-        if (active) setRun(Array.isArray(items) ? items[0] ?? null : null)
+        if (!active || !Array.isArray(items)) return
+        setRecentRun(items.find((item) => ACTIVE.has(item.status)) ?? items[0] ?? null)
       })
-      .catch(() => { if (active) setRun(null) })
+      .catch(() => { if (active) setRecentRun(null) })
     return () => { active = false }
-  }, [])
+  }, [storedRunId])
 
+  const run = storedShortcut ?? recentRun
   if (!run) return null
   return (
     <Link
