@@ -226,3 +226,112 @@ test('recent active run reopens run-specific progress', async () => {
   )
   expect(window.location.pathname).toBe('/runs/8/progress')
 })
+
+test('shows a top-right shortcut back to the latest run progress', async () => {
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    if (String(input).includes('/api/runs/recent?limit=')) {
+      return {
+        ok: true,
+        json: async () => ([{
+          id: 9,
+          experiment_id: 2,
+          condition_id: 4,
+          run_number: 1,
+          status: 'complete',
+          topic: 'Dynamics',
+          condition_label: 'Baseline',
+          created_at: '2026-07-14T01:00:00Z',
+          completed_at: '2026-07-14T01:05:00Z',
+          token_usage: {
+            input_tokens: 30,
+            output_tokens: 12,
+            total_tokens: 42,
+            model_calls: 2,
+            recording_state: 'recorded',
+            stages: [],
+          },
+        }]),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+  const shortcut = await screen.findByRole('link', {
+    name: 'Return to run progress: Dynamics',
+  })
+  expect(shortcut).toHaveClass('run-progress-shortcut')
+  expect(shortcut).toHaveAttribute('href', '/runs/9/progress')
+  await userEvent.click(shortcut)
+  expect(window.location.pathname).toBe('/runs/9/progress')
+})
+
+test('asks for confirmation before retrying a run', async () => {
+  window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'Statics',
+          topic: 'Equilibrium',
+          learning_objectives: 'Resolve forces',
+          assessment_type: 'mixed',
+          difficulty: 'medium',
+          number_of_questions: 4,
+          estimated_time_minutes: 30,
+          created_at: '2026-07-14T00:00:00Z',
+          conditions: [{
+            id: 3,
+            condition_code: 'C1',
+            prompt_structure: 'openai',
+            concept_bridge_enabled: false,
+            few_shot_enabled: false,
+            reference_content_enabled: false,
+            reasoning_guidance_enabled: false,
+            factor_inputs: {},
+            condition_label: 'Baseline',
+          }],
+          runs: [{ id: 8, experiment_id: 1, condition_id: 3, run_number: 1, status: 'complete' }],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8/retry') && init?.method === 'POST') {
+      return {
+        ok: true,
+        json: async () => ({ id: 9, experiment_id: 1, condition_id: 3, run_number: 2, status: 'pending' }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          assessment: { parsed_json: { questions: [] }, output_hash: 'hash', schema_version: '1' },
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+  const retry = await screen.findByRole('button', { name: 'Retry run' })
+  expect(retry).toHaveClass('retry-run-button')
+  await userEvent.click(retry)
+
+  const dialog = screen.getByRole('dialog', { name: 'Retry this run?' })
+  expect(dialog).toBeVisible()
+  expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm retry' }))
+
+  await waitFor(() => expect(
+    vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST'),
+  ).toHaveLength(1))
+  expect(window.location.pathname).toBe('/runs/9/progress')
+})

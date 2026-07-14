@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
@@ -18,6 +18,8 @@ export function AssessmentViewerPage() {
   const mergeRun = useRunStore((state) => state.mergeRun)
   const addRetriedRun = useRunStore((state) => state.addRetriedRun)
   const selectRun = useRunStore((state) => state.selectRun)
+  const [retryDialogOpen, setRetryDialogOpen] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   useEffect(() => {
     if (id) experimentsApi.get(id).then(mergeExperiment)
@@ -41,9 +43,15 @@ export function AssessmentViewerPage() {
   const condition = selected?.condition ?? experiment?.conditions.find((item) => item.id === selected?.condition_id)
   const retry = async () => {
     if (!selectedId) return
-    const retried = await runsApi.retry(selectedId)
-    addRetriedRun({ ...retried, experiment_id: retried.experiment_id ?? id })
-    navigate(`/runs/${retried.id}/progress`)
+    setRetrying(true)
+    try {
+      const retried = await runsApi.retry(selectedId)
+      addRetriedRun({ ...retried, experiment_id: retried.experiment_id ?? id })
+      setRetryDialogOpen(false)
+      navigate(`/runs/${retried.id}/progress`)
+    } finally {
+      setRetrying(false)
+    }
   }
 
   return (
@@ -73,7 +81,7 @@ export function AssessmentViewerPage() {
             </div>
             {selectedId && (
               <div>
-                <button onClick={retry}>Retry run</button>
+                <button className="retry-run-button" onClick={() => setRetryDialogOpen(true)}>Retry run</button>
                 <button className="primary" onClick={() => runsApi.exportDocx(selectedId)}>Export Word document</button>
               </div>
             )}
@@ -107,6 +115,16 @@ export function AssessmentViewerPage() {
         </article>
       </div>
       {selectedId && <Link className="viewer-back-button" to={`/runs/${selectedId}/progress`}>Back</Link>}
+      {retryDialogOpen && <div className="modal-backdrop">
+        <div className="incomplete-modal retry-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="retry-dialog-title">
+          <h2 id="retry-dialog-title">Retry this run?</h2>
+          <p>This creates a new run while preserving the current run and its results.</p>
+          <div className="retry-dialog-actions">
+            <button disabled={retrying} onClick={() => setRetryDialogOpen(false)}>Cancel</button>
+            <button className="primary" disabled={retrying} onClick={retry}>{retrying ? 'Starting retry…' : 'Confirm retry'}</button>
+          </div>
+        </div>
+      </div>}
     </main>
   )
 }

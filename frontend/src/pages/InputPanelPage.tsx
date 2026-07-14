@@ -4,6 +4,7 @@ import { experimentsApi } from '../api/experiments'
 import { AppHeader } from '../components/AppHeader'
 import { PromptFactorFields } from '../components/PromptFactorFields'
 import { RecentRuns } from '../components/RecentRuns'
+import { RunProgressShortcut } from '../components/RunProgressShortcut'
 import { useRunStore } from '../store/runStore'
 import type { AssessmentType, PromptStructure } from '../types'
 import {
@@ -137,7 +138,7 @@ export function InputPanelPage() {
   }
 
   return <main className="experiment-page wizard-page">
-    <AppHeader subtitle="Controlled assessment research" />
+    <AppHeader subtitle="Controlled assessment research" action={<RunProgressShortcut />} />
     <div className="wizard-layout">
       <nav aria-label="Experiment sections" className="wizard-nav">
         <h1 className="nav-eyebrow">New Experiment</h1>
