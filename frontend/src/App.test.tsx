@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { axe, toHaveNoViolations } from 'jest-axe'
@@ -100,10 +100,37 @@ test('shows selected factor inputs beneath the selection grid', () => {
 test('opens an incomplete experiment modal and links to missing sections', () => {
   render(<App />)
   fireEvent.click(screen.getByRole('button', { name: 'Run Experiment' }))
-  expect(screen.getByRole('dialog', { name: 'Your experiment isn’t ready yet' })).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /Assessment Details: Course name/ }))
+  expect(screen.getByRole('dialog', { name: 'Complete the required fields before running the experiment.' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Course name' }))
   expect(screen.getByRole('heading', { name: 'Assessment Details' })).toBeInTheDocument()
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+test('shows a red grouped dialog and sends no request for an incomplete form', async () => {
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: 'Run Experiment' }))
+
+  const dialog = screen.getByRole('dialog', {
+    name: 'Complete the required fields before running the experiment.',
+  })
+  expect(dialog).toHaveClass('validation-dialog')
+  expect(within(dialog).getByRole('heading', { name: 'Assessment Details' })).toBeVisible()
+  expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+})
+
+test('focuses the first invalid field and clears only its error when valid', async () => {
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: 'Run Experiment' }))
+  await user.click(screen.getByRole('button', { name: 'Close' }))
+
+  const course = screen.getByLabelText('Course name')
+  await waitFor(() => expect(course).toHaveFocus())
+  expect(course).toHaveAttribute('aria-invalid', 'true')
+  await user.type(course, 'Statics')
+  expect(course).not.toHaveAttribute('aria-invalid', 'true')
+  expect(screen.getByText('Topic is required.')).toBeVisible()
 })
 
 test('keeps the run action in a fixed bottom-right action bar', () => {
