@@ -10,7 +10,11 @@ from backend.schemas.assessment_schema import (
 )
 from backend.services.llm_client import LLMResult
 from backend.services.reproducibility import sha256_bytes, sha256_text
-from backend.services.actual_prompt import build_structure_input
+from backend.services.actual_prompt import (
+    EQUATION_GENERATION_INSTRUCTION,
+    build_generation_system_prompt,
+    build_structure_input,
+)
 from backend.services.generation_context import build_generation_context
 from backend.services.structure_system_prompts import get_structure_system_prompt
 
@@ -147,11 +151,12 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         assert [call.kwargs for call in llm.generate.call_args_list] == [
             {"system_prompt": expected_system, "user_message": expected_input,
              "model_settings": generation_fixture.model_settings},
-            {"system_prompt": ACTUAL_PROMPT, "user_message": expected_context,
+            {"system_prompt": build_generation_system_prompt(ACTUAL_PROMPT), "user_message": expected_context,
              "model_settings": generation_fixture.model_settings,
              "response_schema": ASSESSMENT_PROVIDER_SCHEMA},
         ]
         assert generation_fixture.prompt.actual_prompt == ACTUAL_PROMPT
+        assert EQUATION_GENERATION_INSTRUCTION in llm.generate.call_args_list[1].kwargs["system_prompt"]
         assert generation_fixture.prompt.actual_prompt_hash
         assert generation_fixture.prompt.generation_envelope_hash
         assert generation_fixture.prompt.structure_request_id == "structure-123"

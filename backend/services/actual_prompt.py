@@ -4,6 +4,12 @@ from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
 ACTUAL_PROMPT_GENERATOR_VERSION = "2"
+EQUATION_GENERATION_INSTRUCTION = (
+    "Before generating questions, represent every equation and derivation using "
+    "notation that can be converted into native Microsoft Word equation objects; "
+    "do not return equations as images, screenshots, raw LaTeX, or "
+    "Markdown-delimited mathematics."
+)
 
 _FACTOR_DEFINITIONS = (
     ("concept_bridge", "Concept Bridge"),
@@ -32,6 +38,10 @@ _ANTHROPIC_SECTIONS = (
 
 class ActualPromptValidationError(ValueError):
     pass
+
+
+def build_generation_system_prompt(actual_prompt: str) -> str:
+    return f"{EQUATION_GENERATION_INSTRUCTION}\n\n{actual_prompt}"
 
 
 def build_condition_label(factors: PromptFactors) -> str:

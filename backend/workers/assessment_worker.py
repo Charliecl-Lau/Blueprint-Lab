@@ -19,6 +19,7 @@ from backend.services.actual_prompt import (
     ACTUAL_PROMPT_GENERATOR_VERSION,
     ActualPromptValidationError,
     build_structure_input,
+    build_generation_system_prompt,
     validate_actual_prompt,
 )
 from backend.services.docx_exporter import build_assessment_docx
@@ -178,7 +179,7 @@ def run_generation_pipeline(self, run_id: int) -> None:
         generation_started = time.perf_counter()
         try:
             result = llm.generate(
-                system_prompt=prompt.actual_prompt,
+                system_prompt=build_generation_system_prompt(prompt.actual_prompt),
                 user_message=prompt.generation_context,
                 model_settings=run.model_settings,
                 response_schema=ASSESSMENT_PROVIDER_SCHEMA,
