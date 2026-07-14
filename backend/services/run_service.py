@@ -46,7 +46,18 @@ def _create_run(db: Session, condition_id: int, source_bindings, model_settings:
                     raise HTTPException(status_code=404, detail="Condition not found")
                 number = (db.scalar(select(func.max(Run.run_number)).where(Run.condition_id == condition_id)) or 0) + 1
                 values = settings.model_dump(exclude_none=True)
-                run = Run(experiment_id=condition.experiment_id, condition_id=condition.id, run_number=number, status="pending", model_settings=values, **values)
+                run = Run(
+                    experiment_id=condition.experiment_id,
+                    condition_id=condition.id,
+                    run_number=number,
+                    status="pending",
+                    model_settings=values,
+                    input_tokens=0,
+                    output_tokens=0,
+                    total_tokens=0,
+                    model_call_count=0,
+                    **values,
+                )
                 db.add(run); db.flush()
                 for binding in source_bindings:
                     source = db.get(SourceDocument, binding.source_document_id)

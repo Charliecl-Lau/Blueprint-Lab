@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 
 import redis
 from pydantic import ValidationError
@@ -25,7 +26,7 @@ from backend.services.actual_prompt import (
 from backend.services.docx_exporter import build_assessment_docx
 from backend.services.generation_context import build_generation_context
 from backend.services.generator import generate_questions
-from backend.services.llm_client import LLMClient
+from backend.services.llm_client import LLMClient, TruncatedResponseError
 from backend.services.reproducibility import (
     build_actual_prompt_hash,
     build_generation_envelope_hash,
@@ -33,6 +34,7 @@ from backend.services.reproducibility import (
     sha256_text,
 )
 from backend.services.structure_system_prompts import get_structure_system_prompt
+from backend.services.usage_tracking import record_model_call
 
 
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
@@ -41,10 +43,16 @@ _MAX_ERROR_MESSAGE_LENGTH = 1000
 
 
 def _publish_progress(experiment_id: int, run_id: int, condition_id: int, stage: str) -> None:
-    redis_client.publish(
-        f"experiment:{experiment_id}:progress",
-        json.dumps({"run_id": run_id, "generation_id": run_id, "condition_id": condition_id, "stage": stage}),
+    message = json.dumps(
+        {
+            "run_id": run_id,
+            "generation_id": run_id,
+            "condition_id": condition_id,
+            "stage": stage,
+        }
     )
+    redis_client.publish(f"experiment:{experiment_id}:progress", message)
+    redis_client.publish(f"run:{run_id}:progress", message)
 
 
 def _set_status(db: Session, run: Run, status: str) -> None:
@@ -87,6 +95,60 @@ def _retry_provider_failure(
     raise task.retry(exc=exc, countdown=10)
 
 
+def _call_gemini(
+    task,
+    db: Session,
+    run: Run,
+    llm: LLMClient,
+    *,
+    stage: str,
+    system_prompt: str,
+    user_message: str,
+    model_settings: dict,
+    response_schema=None,
+):
+    call_id = str(uuid.uuid4())
+    attempt = sum(1 for item in run.model_call_usages if item.stage == stage) + 1
+    request = {
+        "system_prompt": system_prompt,
+        "user_message": user_message,
+        "model_settings": model_settings,
+    }
+    if response_schema is not None:
+        request["response_schema"] = response_schema
+    try:
+        result = llm.generate(**request)
+    except TruncatedResponseError as exc:
+        record_model_call(
+            db,
+            run=run,
+            call_id=call_id,
+            stage=stage,
+            attempt=attempt,
+            result=exc.result,
+        )
+        raise
+    except Exception:
+        record_model_call(
+            db,
+            run=run,
+            call_id=call_id,
+            stage=stage,
+            attempt=attempt,
+            failed=True,
+        )
+        raise
+    record_model_call(
+        db,
+        run=run,
+        call_id=call_id,
+        stage=stage,
+        attempt=attempt,
+        result=result,
+    )
+    return result
+
+
 @celery_app.task(bind=True, max_retries=3)
 def run_generation_pipeline(self, run_id: int) -> None:
     db = SessionLocal()
@@ -118,7 +180,12 @@ def run_generation_pipeline(self, run_id: int) -> None:
             )
             structure_started = time.perf_counter()
             try:
-                structure_result = llm.generate(
+                structure_result = _call_gemini(
+                    self,
+                    db,
+                    run,
+                    llm,
+                    stage="actual_prompt",
                     system_prompt=structure_system_prompt,
                     user_message=structure_input,
                     model_settings=run.model_settings,
@@ -178,7 +245,12 @@ def run_generation_pipeline(self, run_id: int) -> None:
         _publish_progress(experiment.id, run.id, condition.id, "generating")
         generation_started = time.perf_counter()
         try:
-            result = llm.generate(
+            result = _call_gemini(
+                self,
+                db,
+                run,
+                llm,
+                stage="assessment",
                 system_prompt=build_generation_system_prompt(prompt.actual_prompt),
                 user_message=prompt.generation_context,
                 model_settings=run.model_settings,

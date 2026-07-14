@@ -1,14 +1,16 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from celery.exceptions import Retry
 
+from backend.models import ModelCallUsage
 from backend.models.experiment import Condition, Experiment, Generation
 from backend.schemas.experiment_schema import PromptFactors
 from backend.schemas.assessment_schema import (
     ASSESSMENT_PROVIDER_SCHEMA,
     AssessmentGenerationResponse,
 )
-from backend.services.llm_client import LLMResult
+from backend.services.llm_client import LLMResult, TokenUsage, TruncatedResponseError
 from backend.services.reproducibility import sha256_bytes, sha256_text
 from backend.services.actual_prompt import (
     EQUATION_GENERATION_INSTRUCTION,
@@ -33,6 +35,37 @@ Use supplied facts
 Return a JSON object with a top-level "questions" array
 # Stop Rules
 Stop after output"""
+
+
+def result(raw_text, input_tokens, output_tokens, total_tokens, finish="STOP"):
+    return LLMResult(
+        raw_text=raw_text,
+        provider_request_id=f"response-{total_tokens}",
+        model_name="gemini",
+        model_version="v1",
+        finish_reason=finish,
+        usage=TokenUsage(
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            None,
+            None,
+            {},
+        ),
+    )
+
+
+def run_pipeline_synchronously(run, test_db, llm):
+    with (
+        patch("backend.workers.assessment_worker.LLMClient", return_value=llm),
+        patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
+        patch("backend.workers.assessment_worker.redis_client") as mock_redis,
+    ):
+        test_db.close = MagicMock()
+        from backend.workers.assessment_worker import run_generation_pipeline
+
+        run_generation_pipeline.run(run.id)
+        return mock_redis
 
 
 def complete_question(*, question_type, body, model_answer):
@@ -91,6 +124,10 @@ def generation_fixture(test_db):
         experiment_id=experiment.id,
         condition_id=condition.id,
         status="pending",
+        input_tokens=0,
+        output_tokens=0,
+        total_tokens=0,
+        model_call_count=0,
     )
     test_db.add(generation)
     test_db.commit()
@@ -221,6 +258,17 @@ def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test
             "type", "body", "metadata", "quality_check", "revision_options"
         }
         assert "metadata" in question_schema["properties"]
+        usage_calls = (
+            test_db.query(ModelCallUsage)
+            .filter_by(run_id=generation_fixture.id)
+            .order_by(ModelCallUsage.id)
+            .all()
+        )
+        assert [call.stage for call in usage_calls] == [
+            "actual_prompt",
+            "assessment",
+            "assessment",
+        ]
 
 
 def test_generation_pipeline_preserves_raw_response_when_parsing_fails(generation_fixture, test_db):
@@ -303,3 +351,88 @@ def test_generation_pipeline_ignores_missing_generation(test_db):
         from backend.workers.assessment_worker import run_generation_pipeline
 
         assert run_generation_pipeline(999_999) is None
+
+
+def test_pipeline_records_both_stage_usage(generation_fixture, test_db):
+    llm = MagicMock()
+    raw_text = __import__("json").dumps(
+        {
+            "questions": [
+                complete_question(
+                    question_type="short_answer",
+                    body="State equilibrium.",
+                    model_answer="Forces and moments balance.",
+                )
+            ]
+        }
+    )
+    llm.generate.side_effect = [
+        result(ACTUAL_PROMPT, 10, 5, 15),
+        result(raw_text, 20, 8, 28),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+    calls = (
+        test_db.query(ModelCallUsage)
+        .filter_by(run_id=generation_fixture.id)
+        .order_by(ModelCallUsage.id)
+        .all()
+    )
+
+    assert [(call.stage, call.total_tokens) for call in calls] == [
+        ("actual_prompt", 15),
+        ("assessment", 28),
+    ]
+    assert generation_fixture.total_tokens == 43
+    channels = [call.args[0] for call in mock_redis.publish.call_args_list]
+    assert f"run:{generation_fixture.id}:progress" in channels
+
+
+def test_truncated_retry_records_response_usage_once(generation_fixture, test_db):
+    llm = MagicMock()
+    truncated = TruncatedResponseError(
+        result("truncated", 20, 1, 30, finish="MAX_TOKENS")
+    )
+    llm.generate.side_effect = [result(ACTUAL_PROMPT, 10, 5, 15), truncated]
+
+    from backend.workers.assessment_worker import run_generation_pipeline
+
+    with patch.object(
+        run_generation_pipeline,
+        "retry",
+        side_effect=Retry("retry scheduled"),
+    ):
+        with pytest.raises(Retry):
+            run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    calls = (
+        test_db.query(ModelCallUsage)
+        .filter_by(run_id=generation_fixture.id)
+        .order_by(ModelCallUsage.id)
+        .all()
+    )
+    assert [(call.stage, call.total_tokens) for call in calls] == [
+        ("actual_prompt", 15),
+        ("assessment", 30),
+    ]
+    assert generation_fixture.total_tokens == 45
+
+
+def test_failed_provider_call_is_recorded_without_tokens(generation_fixture, test_db):
+    llm = MagicMock()
+    llm.generate.side_effect = RuntimeError("provider unavailable")
+
+    from backend.workers.assessment_worker import run_generation_pipeline
+
+    with patch.object(
+        run_generation_pipeline,
+        "retry",
+        side_effect=Retry("retry scheduled"),
+    ):
+        with pytest.raises(Retry):
+            run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    call = test_db.query(ModelCallUsage).filter_by(run_id=generation_fixture.id).one()
+    assert call.stage == "actual_prompt"
+    assert call.status == "failed"
+    assert call.total_tokens is None

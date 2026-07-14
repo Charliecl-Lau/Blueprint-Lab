@@ -29,6 +29,12 @@ def test_retry_creates_next_run_without_mutating_original(test_db):
     assert retried.id != original.id
     assert retried.run_number == original.run_number + 1
     assert retried.status == "pending"
+    assert (
+        retried.input_tokens,
+        retried.output_tokens,
+        retried.total_tokens,
+        retried.model_call_count,
+    ) == (0, 0, 0, 0)
     test_db.refresh(original)
     assert original.status == "complete"
     assert original.prompt.prompt_hash == hashlib.sha256(b"original").hexdigest()
