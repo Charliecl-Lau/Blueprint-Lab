@@ -1,8 +1,9 @@
 import { api } from './client'
-import type { Run } from '../types'
+import type { RecentRun, Run } from '../types'
 
 export const runsApi = {
   get: (id: number): Promise<Run> => api.get(`/runs/${id}`),
+  recent: (limit = 10): Promise<RecentRun[]> => api.get(`/runs/recent?limit=${limit}`),
   retry: (id: number): Promise<Run> => api.post(`/runs/${id}/retry`, {}),
   exportDocx: async (id: number): Promise<void> => {
     const response = await fetch(`/api/runs/${id}/export-docx`)

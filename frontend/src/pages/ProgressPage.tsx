@@ -1,28 +1,84 @@
 import { useCallback, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { experimentsApi } from '../api/experiments'
+import { runsApi } from '../api/runs'
+import { AppHeader } from '../components/AppHeader'
+import { TokenUsage } from '../components/TokenUsage'
 import { useSSE } from '../hooks/useSSE'
 import { useRunStore } from '../store/runStore'
 import type { Stage } from '../types'
 
-const labels: Record<Stage, string> = { pending: 'Queued', prompting: 'Generating prompt', generating: 'Generating questions', documenting: 'Building Word document', complete: 'Complete', error: 'Failed' }
+const labels: Record<Stage, string> = {
+  pending: 'Queued',
+  prompting: 'Generating prompt',
+  generating: 'Generating questions',
+  documenting: 'Building Word document',
+  complete: 'Complete',
+  error: 'Failed',
+}
 
 export function ProgressPage() {
-  const { experimentId } = useParams()
-  const navigate = useNavigate()
-  const id = Number(experimentId)
-  const { experiment, runs, setExperiment, applySSEEvent } = useRunStore()
-  useEffect(() => { if (id) experimentsApi.get(id).then(setExperiment) }, [id, setExperiment])
-  const receive = useCallback(applySSEEvent, [applySSEEvent])
+  const { runId } = useParams()
+  const id = Number(runId)
+  const run = useRunStore((state) => state.runs[id])
+  const experiment = useRunStore((state) => (
+    run?.experiment_id ? state.experiments[run.experiment_id] : undefined
+  ))
+  const mergeRun = useRunStore((state) => state.mergeRun)
+  const mergeExperiment = useRunStore((state) => state.mergeExperiment)
+  const applyRunSnapshot = useRunStore((state) => state.applyRunSnapshot)
+
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    runsApi.get(id).then((snapshot) => {
+      if (!active) return
+      mergeRun(snapshot)
+      if (snapshot.experiment_id) {
+        experimentsApi.get(snapshot.experiment_id).then((value) => {
+          if (active) mergeExperiment(value)
+        })
+      }
+    })
+    return () => { active = false }
+  }, [id, mergeExperiment, mergeRun])
+
+  const receive = useCallback((snapshot: Parameters<typeof applyRunSnapshot>[0]) => {
+    applyRunSnapshot(snapshot)
+  }, [applyRunSnapshot])
   useSSE(id || null, receive)
-  const list = Object.values(runs)
-  const complete = list.filter((item) => item.status === 'complete').length
-  return <main className="experiment-page"><header><strong>Blueprint Lab</strong><span>Experiment progress</span></header><div className="experiment-shell">
-    <h1>{experiment?.topic ?? 'Running experiment'}</h1><p>{complete} of {list.length} runs complete</p>
-    <section><h2>Runs</h2>{list.map((run) => {
-      const condition = run.condition ?? experiment?.conditions.find((item) => item.id === run.condition_id)
-      return <article className="generation-card" key={run.id}><div><strong>{condition?.condition_code ?? `Condition ${run.condition_id}`} · Run {run.run_number}</strong><small>{condition?.prompt_structure ?? 'Prompt structure unavailable'}</small></div><span className={`status ${run.status}`}>{labels[run.status]}</span></article>
-    })}{!list.length && <p>Loading run conditions…</p>}</section>
-    {complete > 0 && <button className="primary" onClick={() => navigate(`/experiments/${id}/viewer`)}>Review runs</button>}
-  </div></main>
+
+  const condition = experiment?.conditions.find((item) => item.id === run?.condition_id)
+  return (
+    <main className="experiment-page">
+      <AppHeader subtitle="Run progress" />
+      <div className="experiment-shell">
+        <h1>{experiment?.topic ?? `Run ${id || ''}`}</h1>
+        <p>This page reflects the latest persisted state for this run.</p>
+        <section>
+          <h2>Run status</h2>
+          {run ? (
+            <article className="generation-card">
+              <div>
+                <strong>{condition?.condition_code ?? `Condition ${run.condition_id}`} · Run {run.run_number}</strong>
+                <small>{condition?.prompt_structure ?? 'Prompt structure unavailable'}</small>
+              </div>
+              <span className={`status ${run.status}`}>{labels[run.status]}</span>
+            </article>
+          ) : <p>Loading persisted run state…</p>}
+          {run?.error?.message && <p className="error">{run.error.message}</p>}
+        </section>
+        <TokenUsage usage={run?.token_usage} />
+        {run?.status === 'complete' && run.experiment_id && (
+          <Link className="primary inline-action" to={`/experiments/${run.experiment_id}/viewer/${run.id}`}>
+            Review run
+          </Link>
+        )}
+        <div className="progress-exit">
+          <p>This experiment will continue running in the background.</p>
+          <Link className="primary" to="/">Back to Control Assessment</Link>
+        </div>
+      </div>
+    </main>
+  )
 }

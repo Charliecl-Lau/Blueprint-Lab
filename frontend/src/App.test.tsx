@@ -63,13 +63,16 @@ test('submits exact enabled factor content and estimated time', async () => {
   fireEvent.change(screen.getByLabelText('Concept Bridge content'), { target: { value: 'Connect vectors to force balance.' } })
   fireEvent.click(screen.getByRole('button', { name: 'Run Experiment' }))
 
-  await waitFor(() => expect(fetch).toHaveBeenCalled())
-  const [, init] = vi.mocked(fetch).mock.calls[0]
+  await waitFor(() => expect(
+    vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST'),
+  ).toBe(true))
+  const [, init] = vi.mocked(fetch).mock.calls.find(([, value]) => value?.method === 'POST')!
   expect(JSON.parse(String(init?.body))).toMatchObject({
     estimated_time_minutes: 30,
     factors: { concept_bridge: true, reasoning_guidance: false },
     factor_inputs: { concept_bridge: 'Connect vectors to force balance.' },
   })
+  expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy()
 })
 
 test('navigates the three form sections from the side panel and section buttons', () => {
@@ -143,4 +146,56 @@ test('uses compact wide run action and chevron section navigation', () => {
   expect(next.querySelector('svg')).toBeInTheDocument()
   fireEvent.click(next)
   expect(screen.getByRole('button', { name: 'Previous' }).querySelector('svg')).toBeInTheDocument()
+})
+
+
+test.each(['/', '/runs/8/progress', '/experiments/1/viewer/8'])(
+  'logo navigates client-side from %s',
+  async (path) => {
+    window.history.replaceState({}, '', path)
+    render(<App />)
+    const logo = await screen.findByRole('link', {
+      name: 'Go to Blueprint Lab home',
+    })
+    expect(logo).toHaveAttribute('href', '/')
+    await userEvent.click(logo)
+    expect(window.location.pathname).toBe('/')
+  },
+)
+
+
+test('recent active run reopens run-specific progress', async () => {
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    if (String(input).endsWith('/api/runs/recent?limit=10')) {
+      return {
+        ok: true,
+        json: async () => ([{
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'generating',
+          topic: 'Equilibrium',
+          condition_label: 'Baseline',
+          created_at: '2026-07-14T00:00:00Z',
+          completed_at: null,
+          token_usage: {
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: 14,
+            model_calls: 1,
+            recording_state: 'in_progress',
+            stages: [],
+          },
+        }]),
+      } as Response
+    }
+    return { ok: true, json: async () => ({ id: 42, conditions: [], runs: [] }) } as Response
+  })
+
+  render(<App />)
+  await userEvent.click(
+    await screen.findByRole('link', { name: /Reopen.*Equilibrium/ }),
+  )
+  expect(window.location.pathname).toBe('/runs/8/progress')
 })

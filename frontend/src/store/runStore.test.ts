@@ -38,4 +38,33 @@ describe('run store', () => {
     expect(useRunStore.getState().runs[8]?.status).toBe('complete')
     expect(useRunStore.getState().selectedRunId).toBe(9)
   })
+
+  test('loading a second experiment preserves the first run', () => {
+    const second: Experiment = {
+      ...experiment,
+      id: 2,
+      topic: 'Dynamics',
+      runs: [{ id: 9, condition_id: 4, run_number: 1, status: 'pending' }],
+    }
+
+    useRunStore.getState().mergeExperiment(experiment)
+    useRunStore.getState().mergeExperiment(second)
+
+    expect(useRunStore.getState().runs[8]).toEqual(experiment.runs[0])
+    expect(useRunStore.getState().runs[9]).toEqual(second.runs[0])
+    expect(useRunStore.getState().experiments[1]).toMatchObject({ topic: 'Equilibrium' })
+    expect(useRunStore.getState().experiments[2]).toMatchObject({ topic: 'Dynamics' })
+  })
+
+  test('a run snapshot updates only its matching id', () => {
+    const runA = experiment.runs[0]
+    const runB = { id: 9, condition_id: 4, run_number: 1, status: 'pending' as const }
+    useRunStore.getState().mergeRun(runA)
+    useRunStore.getState().mergeRun(runB)
+
+    useRunStore.getState().applyRunSnapshot({ ...runA, status: 'generating' })
+
+    expect(useRunStore.getState().runs[runA.id].status).toBe('generating')
+    expect(useRunStore.getState().runs[runB.id].status).toBe(runB.status)
+  })
 })

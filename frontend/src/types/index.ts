@@ -1,6 +1,27 @@
 export type Stage = 'pending' | 'prompting' | 'generating' | 'documenting' | 'complete' | 'error'
 export type PromptStructure = 'openai' | 'anthropic'
 export type AssessmentType = 'mcq' | 'short_answer' | 'mixed'
+export type RecordingState = 'not_recorded' | 'in_progress' | 'recorded'
+
+export interface StageUsage {
+  stage: string
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  model_calls: number
+  cached_content_tokens?: number
+  reasoning_tokens?: number
+  extra_token_counts?: Record<string, number>
+}
+
+export interface TokenUsage {
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  model_calls: number | null
+  recording_state: RecordingState
+  stages: StageUsage[]
+}
 
 export interface PromptFactors {
   concept_bridge: boolean
@@ -53,6 +74,8 @@ export interface RunSource {
 
 export interface Run {
   id: number
+  run_id?: number
+  experiment_id?: number
   condition_id: number
   run_number: number
   status: Stage
@@ -67,6 +90,8 @@ export interface Run {
   assessment?: AssessmentOutput | null
   sources?: RunSource[]
   artifact_available?: boolean
+  token_usage?: TokenUsage
+  error?: { type?: string | null; message?: string | null } | null
 }
 
 /** @deprecated Use Run. */
@@ -87,6 +112,19 @@ export interface Experiment {
   generations?: Generation[]
 }
 
+export interface RecentRun {
+  id: number
+  experiment_id: number
+  condition_id: number
+  run_number: number
+  status: Stage
+  topic: string
+  condition_label: string
+  created_at: string
+  completed_at: string | null
+  token_usage: TokenUsage
+}
+
 export interface MCQOption { id?: number; body: string; is_correct: boolean }
 export interface Question {
   id?: number
@@ -98,6 +136,19 @@ export interface Question {
 }
 
 export interface SSEEvent { run_id?: number; generation_id?: number; condition_id: number; stage: Stage }
+
+export type RunSnapshot = Run & { type?: 'run_detail' }
+
+export interface ValidationError {
+  section: string
+  field: string
+  label: string
+  message: string
+}
+
+export interface ValidationErrorResponse {
+  detail: { errors: ValidationError[] }
+}
 
 export interface CreateExperimentPayload {
   course: string
