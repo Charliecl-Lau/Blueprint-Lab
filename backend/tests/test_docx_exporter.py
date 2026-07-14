@@ -39,8 +39,38 @@ def test_docx_contains_rich_research_content_and_native_word_equation():
     assert "Chemical potentials are equal at equilibrium." in text
     assert "Assessment Quality Check" in text
     assert "Suggested Revision Options" in text
+    assert "End-to-end token usage" in text
+    assert "Not recorded." in text
 
     with ZipFile(BytesIO(content)) as archive:
         document_xml = archive.read("word/document.xml")
     assert b"<m:oMath" in document_xml
     assert b"mu_alpha = mu_beta" in document_xml
+
+
+def test_docx_contains_recorded_end_to_end_token_usage():
+    content = build_assessment_docx(
+        run_id=1,
+        prompt_id=2,
+        condition_code="C100",
+        run_number=1,
+        course="ENGR 101",
+        topic="Statics",
+        questions=[],
+        token_usage={
+            "input_tokens": 30,
+            "output_tokens": 12,
+            "total_tokens": 42,
+            "model_calls": 2,
+            "recording_state": "recorded",
+            "stages": [],
+        },
+    )
+
+    document = Document(BytesIO(content))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "End-to-end token usage" in text
+    assert "Input: 30" in text
+    assert "Output: 12" in text
+    assert "Total: 42" in text
+    assert "Model calls: 2" in text

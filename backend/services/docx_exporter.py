@@ -1,4 +1,5 @@
 from io import BytesIO
+from typing import Optional
 
 from docx import Document
 from docx.oxml import OxmlElement
@@ -16,7 +17,8 @@ def _add_word_equation(paragraph, expression: str) -> None:
 
 def build_assessment_docx(*, run_id: int, prompt_id: int,
                           condition_code: str, run_number: int, course: str, topic: str,
-                          questions: list[dict]) -> bytes:
+                          questions: list[dict],
+                          token_usage: Optional[dict] = None) -> bytes:
     document = Document()
     document.add_heading("Blueprint Lab Assessment", level=1)
     document.add_paragraph(f"Run ID: {run_id}")
@@ -25,6 +27,21 @@ def build_assessment_docx(*, run_id: int, prompt_id: int,
     document.add_paragraph(f"Run Number: {run_number}")
     document.add_paragraph(f"Course: {course}")
     document.add_paragraph(f"Topic: {topic}")
+    document.add_heading("End-to-end token usage", level=2)
+    if token_usage is None or token_usage.get("recording_state") == "not_recorded":
+        document.add_paragraph("Not recorded.")
+    else:
+        labels = (
+            ("Input", "input_tokens"),
+            ("Output", "output_tokens"),
+            ("Total", "total_tokens"),
+            ("Model calls", "model_calls"),
+        )
+        for label, key in labels:
+            value = token_usage.get(key)
+            document.add_paragraph(
+                f"{label}: {value if value is not None else 'Not reported'}"
+            )
 
     document.add_heading("Generated Questions", level=2)
     for index, question in enumerate(questions, start=1):

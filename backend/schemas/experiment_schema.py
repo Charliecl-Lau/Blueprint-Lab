@@ -74,6 +74,10 @@ class GenerationSummary(BaseModel):
     model_version: Optional[str]
     generation_time_ms: Optional[int]
     run_number: int = 1
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    model_call_count: Optional[int] = None
 
     model_config = {"from_attributes": True, "protected_namespaces": ()}
 

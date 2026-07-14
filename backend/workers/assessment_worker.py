@@ -12,6 +12,7 @@ from backend.database import SessionLocal
 from backend.models.experiment import utc_now
 from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
 from backend.schemas.experiment_schema import PromptFactors
+from backend.schemas.run_schema import token_usage_detail
 from backend.schemas.assessment_schema import (
     ASSESSMENT_PROVIDER_SCHEMA,
     AssessmentGenerationResponse,
@@ -296,6 +297,7 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 course=experiment.course,
                 topic=experiment.topic,
                 questions=assessment.parsed_json["questions"],
+                token_usage=token_usage_detail(run),
             )
             db.add(DocumentArtifact(
                 run_id=run.id,
