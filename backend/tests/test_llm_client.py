@@ -1,8 +1,42 @@
 import asyncio
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
-from backend.services.llm_client import LLMResult
+import pytest
+
+from backend.config import settings
+from backend.services.llm_client import (
+    LLMClient,
+    LLMResult,
+    TokenUsage,
+    TruncatedResponseError,
+)
 from backend.schemas.assessment_schema import AssessmentGenerationResponse
+
+
+@contextmanager
+def client_for_response(response):
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        mock_client.return_value.models.generate_content.return_value = response
+        yield LLMClient()
+
+
+def gemini_response(finish_reason="STOP"):
+    return SimpleNamespace(
+        text="result",
+        response_id="response-1",
+        model_version="v1",
+        candidates=[SimpleNamespace(finish_reason=finish_reason)],
+        usage_metadata=SimpleNamespace(
+            prompt_token_count=100,
+            candidates_token_count=40,
+            total_token_count=155,
+            cached_content_token_count=20,
+            thoughts_token_count=15,
+            tool_use_prompt_token_count=3,
+        ),
+    )
 
 
 def test_llm_client_installs_event_loop_when_worker_thread_has_none():
@@ -29,6 +63,7 @@ def test_llm_client_calls_generate_content():
         mock_response.response_id = None
         mock_response.model_version = None
         mock_response.candidates = []
+        mock_response.usage_metadata = None
         MockClient.return_value.models.generate_content.return_value = mock_response
 
         from backend.services.llm_client import LLMClient
@@ -41,9 +76,10 @@ def test_llm_client_calls_generate_content():
         assert result == LLMResult(
             raw_text='{"generated_prompt": "test prompt"}',
             provider_request_id=None,
-            model_name="gemma-4-31b-it",
+            model_name=settings.llm_model,
             model_version=None,
             finish_reason=None,
+            usage=None,
         )
         MockClient.return_value.models.generate_content.assert_called_once()
 
@@ -92,7 +128,7 @@ def test_llm_client_passes_provider_structured_output_schema():
         assert not contains_default(config.response_schema)
 
 
-def test_llm_client_disables_thinking_budget():
+def test_llm_client_uses_configured_model_defaults_without_thinking_override():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         response = MagicMock()
         response.text = "result"
@@ -104,8 +140,7 @@ def test_llm_client_disables_thinking_budget():
         LLMClient().generate("system", "user")
 
         config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
-        assert config.thinking_config is not None
-        assert config.thinking_config.thinking_budget == 0
+        assert config.thinking_config is None
 
 
 def test_llm_client_raises_on_truncated_response():
@@ -115,6 +150,7 @@ def test_llm_client_raises_on_truncated_response():
         candidate = MagicMock()
         candidate.finish_reason = "MAX_TOKENS"
         response.candidates = [candidate]
+        response.usage_metadata = None
         mock_client.return_value.models.generate_content.return_value = response
 
         from backend.services.llm_client import LLMClient, TruncatedResponseError
@@ -135,6 +171,7 @@ def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
         candidate = MagicMock()
         candidate.finish_reason = "STOP"
         response.candidates = [candidate]
+        response.usage_metadata = None
         mock_client.return_value.models.generate_content.return_value = response
 
         from backend.services.llm_client import LLMClient
@@ -145,9 +182,34 @@ def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
         assert config.temperature == 0.2
         assert config.top_p == 0.95
         assert config.seed is None
-        assert config.max_output_tokens == 8192
+        assert config.max_output_tokens == settings.llm_max_output_tokens
         assert result.raw_text == " untouched \n"
         assert result.provider_request_id == "request-123"
-        assert result.model_name == "gemma-4-31b-it"
+        assert result.model_name == settings.llm_model
         assert result.model_version == "gemma-version-1"
         assert result.finish_reason == "STOP"
+        assert result.usage is None
+
+
+def test_llm_client_returns_api_reported_usage_without_combining_categories():
+    response = gemini_response()
+    with client_for_response(response) as client:
+        result = client.generate("system", "user")
+
+    assert result.usage == TokenUsage(
+        input_tokens=100,
+        output_tokens=40,
+        total_tokens=155,
+        cached_content_tokens=20,
+        reasoning_tokens=15,
+        extra_token_counts={"tool_use_prompt_token_count": 3},
+    )
+
+
+def test_truncated_response_error_preserves_usage():
+    response = gemini_response("MAX_TOKENS")
+    with pytest.raises(TruncatedResponseError) as raised:
+        with client_for_response(response) as client:
+            client.generate("system", "user")
+
+    assert raised.value.result.usage.total_tokens == 155

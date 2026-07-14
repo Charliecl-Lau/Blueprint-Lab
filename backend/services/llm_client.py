@@ -25,12 +25,28 @@ def _without_defaults(value):
 class TruncatedResponseError(RuntimeError):
     """Raised when the provider stopped before completing the response.
 
-    gemini-3.5-flash is a thinking model and thinking tokens are charged
-    against max_output_tokens. When the combined thinking + output exceeds
-    the budget the model stops with finish_reason=MAX_TOKENS and returns
-    truncated, unparseable JSON. Surfacing this explicitly lets the worker
-    retry and record a clear error instead of a misleading parse failure.
+    Thinking tokens can be charged against max_output_tokens. When the
+    combined thinking and output exceeds the budget, the provider can return
+    truncated, unparseable JSON. The partial result retains provider usage so
+    callers can account for the completed request before retrying.
     """
+
+    def __init__(self, result: "LLMResult"):
+        self.result = result
+        super().__init__(
+            "Provider stopped with finish_reason=MAX_TOKENS; response is "
+            f"truncated and cannot be parsed. Model={result.model_name}."
+        )
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    input_tokens: Optional[int]
+    output_tokens: Optional[int]
+    total_tokens: Optional[int]
+    cached_content_tokens: Optional[int]
+    reasoning_tokens: Optional[int]
+    extra_token_counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -40,6 +56,40 @@ class LLMResult:
     model_name: str
     model_version: Optional[str]
     finish_reason: Optional[str]
+    usage: Optional[TokenUsage] = None
+
+
+def _usage_from_response(response) -> Optional[TokenUsage]:
+    metadata = getattr(response, "usage_metadata", None)
+    if metadata is None:
+        return None
+    raw = (
+        metadata.model_dump(exclude_none=True)
+        if hasattr(metadata, "model_dump")
+        else vars(metadata)
+    )
+    known = {
+        "prompt_token_count",
+        "candidates_token_count",
+        "total_token_count",
+        "cached_content_token_count",
+        "thoughts_token_count",
+    }
+    extras = {
+        key: value
+        for key, value in raw.items()
+        if key.endswith("_token_count")
+        and key not in known
+        and isinstance(value, int)
+    }
+    return TokenUsage(
+        input_tokens=getattr(metadata, "prompt_token_count", None),
+        output_tokens=getattr(metadata, "candidates_token_count", None),
+        total_tokens=getattr(metadata, "total_token_count", None),
+        cached_content_tokens=getattr(metadata, "cached_content_token_count", None),
+        reasoning_tokens=getattr(metadata, "thoughts_token_count", None),
+        extra_token_counts=extras,
+    )
 
 
 class LLMClient:
@@ -86,18 +136,17 @@ class LLMClient:
         if candidates:
             finish_reason = getattr(candidates[0], "finish_reason", None)
             finish_reason = getattr(finish_reason, "value", finish_reason)
-        if finish_reason in ("MAX_TOKENS", 2):
-            raise TruncatedResponseError(
-                f"Provider stopped with finish_reason=MAX_TOKENS; response is "
-                f"truncated and cannot be parsed. Model={self.model}."
-            )
-        return LLMResult(
+        result = LLMResult(
             raw_text=response.text,
             provider_request_id=getattr(response, "response_id", None),
             model_name=self.model,
             model_version=getattr(response, "model_version", None),
             finish_reason=finish_reason,
+            usage=_usage_from_response(response),
         )
+        if finish_reason in ("MAX_TOKENS", 2):
+            raise TruncatedResponseError(result)
+        return result
 
     def generate_json(self, system_prompt: str, user_message: str) -> dict:
         result = self.generate(system_prompt, user_message)
