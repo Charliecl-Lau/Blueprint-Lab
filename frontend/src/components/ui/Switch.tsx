@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 interface SwitchProps {
   checked: boolean
   onChange: (checked: boolean) => void
@@ -6,8 +8,15 @@ interface SwitchProps {
   label?: string
 }
 
+type SwitchSize = NonNullable<SwitchProps['size']>
+interface SwitchDimensions {
+  track: CSSProperties
+  knob: { width: number; height: number; top: number; left: number }
+  knobOn: string
+}
+
 export function Switch({ checked, onChange, size = 'md', disabled = false, label }: SwitchProps) {
-  const sizes: Record<string, { track: object; knob: object; knobOn: string }> = {
+  const sizes: Record<SwitchSize, SwitchDimensions> = {
     sm: { track: { width: 28, height: 16, borderRadius: 99 }, knob: { width: 12, height: 12, top: 2, left: 2 }, knobOn: '14px' },
     md: { track: { width: 36, height: 20, borderRadius: 99 }, knob: { width: 16, height: 16, top: 2, left: 2 }, knobOn: '18px' },
     lg: { track: { width: 44, height: 24, borderRadius: 99 }, knob: { width: 20, height: 20, top: 2, left: 2 }, knobOn: '22px' },
@@ -31,10 +40,10 @@ export function Switch({ checked, onChange, size = 'md', disabled = false, label
       >
         <span style={{
           position: 'absolute',
-          top: (s.knob as any).top,
-          left: checked ? s.knobOn : `${(s.knob as any).left}px`,
-          width: (s.knob as any).width,
-          height: (s.knob as any).height,
+          top: s.knob.top,
+          left: checked ? s.knobOn : `${s.knob.left}px`,
+          width: s.knob.width,
+          height: s.knob.height,
           borderRadius: '50%',
           background: 'white',
           boxShadow: '0 1px 3px rgba(0,0,0,0.2)',

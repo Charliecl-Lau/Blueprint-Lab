@@ -26,7 +26,7 @@ Prerequisites:
 - Python 3.9 or newer
 - Node.js and npm
 - Docker Desktop
-- A Google AI API key with access to `gemma-4-31b-it`
+- A Google AI API key with access to the configured Gemini model
 
 Run all commands from the repository root unless a step says otherwise.
 
@@ -45,8 +45,9 @@ DATABASE_URL=postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_l
 REDIS_URL=redis://localhost:6379/0
 GOOGLE_API_KEY=replace-with-your-google-api-key
 LLM_PROVIDER=google
-LLM_MODEL=gemma-4-31b-it
+LLM_MODEL=gemini-3.1-flash-lite
 LLM_TEMPERATURE=0.2
+LLM_MAX_OUTPUT_TOKENS=32768
 ```
 
 ### 2. Install dependencies
@@ -75,15 +76,14 @@ docker start blueprint-lab-postgres blueprint-lab-redis
 
 ### 4. Initialize the database
 
-For a new, empty local database, create the current schema and record the Alembic revision:
+Apply all database migrations before starting the API or worker:
 
 ```powershell
-python -c "import backend.models; from backend.database import Base, engine; Base.metadata.create_all(bind=engine)"
-python -m alembic stamp head
+python -m alembic upgrade head
 python -m alembic current
 ```
 
-`alembic current` should report `20260712_01 (head)`. For a database containing the legacy pre-research schema, run `python -m alembic upgrade head` instead. The research migrations must run online because they use Python canonical JSON serialization to preserve legacy evidence hashes; offline `alembic --sql` mode is unsupported.
+`alembic current` should report `20260714_01 (head)`. Existing databases retain null usage aggregates for legacy runs so the UI can distinguish “Not recorded” from a measured zero. The research migrations must run online because they use Python canonical JSON serialization to preserve legacy evidence hashes; offline `alembic --sql` mode is unsupported.
 
 ### 5. Start the application
 
@@ -116,6 +116,12 @@ Complete the experiment form and select **Run Experiment**. A successful local f
 
 If a run fails, check the Celery terminal first for provider, model-access, or parsing errors. Configuration changes in `.env` require restarting both the backend and Celery. Create a new experiment after changing model settings because existing runs retain their original settings for reproducibility.
 
+Leaving a progress page closes only that browser's live progress connection; it does not cancel Celery work. You can start another experiment while earlier runs continue, then use **Recent runs** to reopen active or completed persisted state. Each run keeps its own status, result, errors, and API-reported token usage by run ID.
+
+The form validates all required assessment fields and content for each enabled prompt factor before sending a request. Incomplete submissions show a grouped dialog and inline accessible errors, and create no experiment, run, or Celery task. Repeated valid submissions use an idempotency key so a retried request does not enqueue duplicate work.
+
+See [Run Lifecycle and Token Accounting](docs/RUN_LIFECYCLE_AND_TOKEN_ACCOUNTING.md) for the accounting definitions, retry behavior, legacy display, and isolation contract. This feature introduces no new environment variables.
+
 ## Sources and canonical run APIs
 
 Source uploads accept UTF-8 text, Markdown, JSON, DOCX, and unencrypted PDF files up to 20 MiB. Exact bytes are retained independently from extracted prompt text.
@@ -126,6 +132,8 @@ GET  /source-documents/{id}
 GET  /source-documents/{id}/download
 POST /conditions/{condition_id}/runs
 GET  /runs/{run_id}
+GET  /runs/recent
+GET  /runs/{run_id}/progress
 POST /runs/{run_id}/retry
 GET  /runs/{run_id}/export-docx
 ```
@@ -140,10 +148,13 @@ SQLite unit and workflow tests run by default. Set `TEST_POSTGRES_DATABASE_URL` 
 
 ```powershell
 python -m pytest backend/tests -v
+python -m pytest backend/tests/test_end_to_end_run_lifecycle.py -v
 python -m alembic check
 cd frontend
 npm test -- --run
+npm run lint
 npm run build
+npx playwright test
 ```
 
 To verify a fresh PostgreSQL database, point `DATABASE_URL` at an empty test database and run `python -m alembic upgrade head` before the suite.

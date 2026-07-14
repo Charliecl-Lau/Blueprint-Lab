@@ -1,4 +1,4 @@
-import type { ReactNode, HTMLAttributes } from 'react'
+import type { CSSProperties, ReactNode, HTMLAttributes } from 'react'
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: 'default' | 'info' | 'success' | 'warning' | 'error' | 'purple'
@@ -7,8 +7,17 @@ interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   children?: ReactNode
 }
 
+type BadgeVariant = NonNullable<BadgeProps['variant']>
+type BadgeSize = NonNullable<BadgeProps['size']>
+type VariantStyle = Pick<CSSProperties, 'background' | 'color' | 'border'> & {
+  dotColor: CSSProperties['background']
+}
+type SizeStyle = Pick<CSSProperties, 'fontSize' | 'padding' | 'height' | 'borderRadius' | 'gap'> & {
+  dotSize: CSSProperties['width']
+}
+
 export function Badge({ children, variant = 'default', size = 'md', dot = false, style, ...props }: BadgeProps) {
-  const variants: Record<string, object> = {
+  const variants: Record<BadgeVariant, VariantStyle> = {
     default: { background: 'var(--color-gray-100)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)', dotColor: 'var(--color-gray-400)' },
     info:    { background: 'var(--color-accent-subtle)', color: 'var(--color-blue-600)', border: '1px solid var(--color-blue-200)', dotColor: 'var(--color-accent)' },
     success: { background: 'var(--color-success-subtle)', color: 'var(--color-green-600)', border: '1px solid var(--color-green-200)', dotColor: 'var(--color-success)' },
@@ -17,14 +26,14 @@ export function Badge({ children, variant = 'default', size = 'md', dot = false,
     purple:  { background: 'var(--color-purple-50)', color: 'var(--color-purple-500)', border: '1px solid var(--color-purple-200)', dotColor: 'var(--color-purple-500)' },
   }
 
-  const sizes: Record<string, object> = {
+  const sizes: Record<BadgeSize, SizeStyle> = {
     sm: { fontSize: '10px', padding: '1px 6px', height: '17px', borderRadius: '5px', gap: '3px', dotSize: '4px' },
     md: { fontSize: '11px', padding: '2px 7px', height: '20px', borderRadius: '6px', gap: '4px', dotSize: '5px' },
     lg: { fontSize: '12px', padding: '3px 9px', height: '24px', borderRadius: '7px', gap: '5px', dotSize: '6px' },
   }
 
-  const v = variants[variant] as any
-  const s = sizes[size] as any
+  const v = variants[variant]
+  const s = sizes[size]
 
   return (
     <span style={{
