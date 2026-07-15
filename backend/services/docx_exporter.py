@@ -2,17 +2,7 @@ from io import BytesIO
 from typing import Optional
 
 from docx import Document
-from docx.oxml import OxmlElement
-
-
-def _add_word_equation(paragraph, expression: str) -> None:
-    math = OxmlElement("m:oMath")
-    run = OxmlElement("m:r")
-    text = OxmlElement("m:t")
-    text.text = expression
-    run.append(text)
-    math.append(run)
-    paragraph._p.append(math)
+from backend.services.omml import append_content, append_math
 
 
 def build_assessment_docx(*, run_id: int, prompt_id: int,
@@ -74,10 +64,24 @@ def build_assessment_docx(*, run_id: int, prompt_id: int,
             f"Output: {metadata.get('output_id', 'Not Assigned')}, "
             f"Final Question: {metadata.get('final_question_id', 'Not Assigned')}"
         )
-        document.add_paragraph(f"Q{index}. {question['body']}")
+        paragraph = document.add_paragraph()
+        paragraph.add_run(f"Q{index}. ")
+        append_content(paragraph, question.get("body_segments"), question["body"])
         for option in question.get("options", []):
             suffix = " [correct]" if option.get("is_correct") else ""
-            document.add_paragraph(f"- {option['body']}{suffix}")
+            paragraph = document.add_paragraph()
+            paragraph.add_run("- ")
+            append_content(paragraph, option.get("segments"), option["body"])
+            paragraph.add_run(suffix)
+        for equation in question.get("equations", []):
+            if equation.get("location") != "question":
+                continue
+            paragraph = document.add_paragraph(f"{equation['label']}: ")
+            append_math(
+                paragraph,
+                equation.get("math")
+                or {"type": "text", "text": equation["expression"]},
+            )
 
     document.add_heading("Solutions", level=2)
     for index, question in enumerate(questions, start=1):
@@ -85,10 +89,22 @@ def build_assessment_docx(*, run_id: int, prompt_id: int,
         if not answer:
             correct = [option["body"] for option in question.get("options", []) if option.get("is_correct")]
             answer = correct[0] if correct else "No solution provided."
-        document.add_paragraph(f"Q{index}. {answer}")
+        paragraph = document.add_paragraph()
+        paragraph.add_run(f"Q{index}. ")
+        append_content(
+            paragraph,
+            question.get("model_answer_segments") if question.get("model_answer") else None,
+            answer,
+        )
         for equation in question.get("equations", []):
+            if equation.get("location") != "solution":
+                continue
             paragraph = document.add_paragraph(f"{equation['label']}: ")
-            _add_word_equation(paragraph, equation["expression"])
+            append_math(
+                paragraph,
+                equation.get("math")
+                or {"type": "text", "text": equation["expression"]},
+            )
 
     document.add_heading("Assessment Quality Check", level=2)
     for index, question in enumerate(questions, start=1):

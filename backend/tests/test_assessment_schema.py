@@ -107,3 +107,73 @@ def test_provider_schema_requires_complete_assessment_contract():
     assert question["properties"]["quality_check"]["minItems"] == 1
     assert question["properties"]["revision_options"]["minItems"] == 2
     assert question["properties"]["revision_options"]["maxItems"] == 3
+
+
+def thermodynamic_equation_ast():
+    return {
+        "type": "equation",
+        "left": {
+            "type": "fraction",
+            "numerator": {"type": "differential", "variable": "P"},
+            "denominator": {"type": "differential", "variable": "T"},
+        },
+        "right": {
+            "type": "fraction",
+            "numerator": {"type": "symbol", "name": "DeltaH"},
+            "denominator": {
+                "type": "product",
+                "terms": [
+                    {"type": "symbol", "name": "T"},
+                    {"type": "symbol", "name": "DeltaV"},
+                ],
+            },
+        },
+    }
+
+
+def test_structured_math_ast_and_embedded_segments_are_validated(complete_payload):
+    question = complete_payload["questions"][0]
+    equation = thermodynamic_equation_ast()
+    question["body_segments"] = [
+        {"type": "text", "text": "Use "},
+        {"type": "math", "math": equation},
+        {"type": "text", "text": " to calculate the slope."},
+    ]
+    question["model_answer_segments"] = [
+        {"type": "text", "text": "The governing relation is "},
+        {"type": "math", "math": equation},
+        {"type": "text", "text": "."},
+    ]
+    question["equations"] = [{
+        "label": "Clapeyron equation",
+        "math": equation,
+        "location": "solution",
+    }]
+
+    parsed = AssessmentGenerationResponse.model_validate(complete_payload)
+
+    assert parsed.questions[0].equations[0].math.type == "equation"
+    assert parsed.questions[0].body_segments[1].math.right.type == "fraction"
+
+
+def test_malformed_structured_fraction_is_rejected(complete_payload):
+    complete_payload["questions"][0]["body_segments"] = [{
+        "type": "math",
+        "math": {
+            "type": "fraction",
+            "numerator": {"type": "symbol", "name": "x"},
+        },
+    }]
+
+    with pytest.raises(ValidationError):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_provider_schema_requires_structured_math_for_word_omml():
+    question = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
+    assert "body_segments" in question["properties"]
+    assert "model_answer_segments" in question["properties"]
+    assert "equations" in question["properties"]
+    assert "math" in question["properties"]["equations"]["items"]["required"]
+    option = question["properties"]["options"]["items"]
+    assert "segments" in option["properties"]

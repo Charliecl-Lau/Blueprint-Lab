@@ -16,7 +16,12 @@ def test_generate_questions_uses_full_prompt_and_rich_schema_directly():
                 "materials_science_context": "Mechanics of materials.",
                 "learning_objectives": ["Define engineering stress."]
             },
-            "body": "What is stress?",
+            "body": "Which expression defines stress as force per area?",
+            "body_segments": [
+                {"type": "text", "text": "Which expression defines "},
+                {"type": "math", "math": {"type": "symbol", "name": "sigma"}},
+                {"type": "text", "text": " as force per area?"}
+            ],
             "options": [
                 {"body": "Force per area", "is_correct": true},
                 {"body": "Force times area", "is_correct": false},
@@ -24,7 +29,19 @@ def test_generate_questions_uses_full_prompt_and_rich_schema_directly():
                 {"body": "Velocity over time", "is_correct": false}
             ],
             "model_answer": null,
-            "equations": [{"label": "Stress", "expression": "sigma = F/A", "location": "solution"}],
+            "equations": [{
+                "label": "Stress",
+                "math": {
+                    "type": "equation",
+                    "left": {"type": "symbol", "name": "sigma"},
+                    "right": {
+                        "type": "fraction",
+                        "numerator": {"type": "symbol", "name": "F"},
+                        "denominator": {"type": "symbol", "name": "A"}
+                    }
+                },
+                "location": "solution"
+            }],
             "quality_check": [{"criterion": "Correctness", "rating": 5, "comment": "Correct."}],
             "revision_options": ["Make it computational.", "Ask for a units check."]
         }]
@@ -33,4 +50,6 @@ def test_generate_questions_uses_full_prompt_and_rich_schema_directly():
     result = generate_questions(raw_text)
 
     assert result.questions[0].metadata.question_title == "Stress definition"
-    assert result.questions[0].equations[0].expression == "sigma = F/A"
+    assert result.questions[0].equations[0].math.type == "equation"
+    assert result.questions[0].equations[0].math.right.type == "fraction"
+    assert result.questions[0].body_segments[1].math.name == "sigma"

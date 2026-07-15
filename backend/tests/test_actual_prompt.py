@@ -3,6 +3,7 @@ import pytest
 from backend.schemas.experiment_schema import PromptFactors
 from backend.services.actual_prompt import (
     ActualPromptValidationError,
+    build_generation_system_prompt,
     build_condition_label,
     build_structure_input,
     validate_actual_prompt,
@@ -16,7 +17,7 @@ def test_provider_structures_are_distinct_and_versioned():
     assert openai_prompt
     assert anthropic_prompt
     assert openai_prompt != anthropic_prompt
-    assert openai_version == anthropic_version == "5"
+    assert openai_version == anthropic_version == "6"
 
 
 def test_provider_structures_require_questions_array_contract():
@@ -25,6 +26,24 @@ def test_provider_structures_require_questions_array_contract():
         assert '"questions"' in system_prompt
         assert "type" in system_prompt
         assert "body" in system_prompt
+
+
+def test_generation_and_structure_prompts_require_structured_omml_math():
+    generation_prompt = build_generation_system_prompt(OPENAI_ACTUAL_PROMPT)
+    for required_text in (
+        "native Microsoft Word OMML",
+        "structured math AST",
+        "body_segments",
+        "model_answer_segments",
+        "equations[].math",
+    ):
+        assert required_text in generation_prompt
+
+    for structure in ("openai", "anthropic"):
+        system_prompt, _ = get_structure_system_prompt(structure)
+        assert "native Microsoft Word OMML" in system_prompt
+        assert "structured math AST" in system_prompt
+        assert "body_segments" in system_prompt
 
 
 def test_structure_input_contains_details_and_enabled_factor_values_only():

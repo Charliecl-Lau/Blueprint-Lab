@@ -115,8 +115,9 @@ def test_llm_client_passes_provider_structured_output_schema():
 
         config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
         assert config.response_mime_type == "application/json"
-        assert isinstance(config.response_schema, dict)
-        assert "questions" in config.response_schema["properties"]
+        assert config.response_schema is None
+        assert isinstance(config.response_json_schema, dict)
+        assert "questions" in config.response_json_schema["properties"]
 
         def contains_default(value):
             if isinstance(value, dict):
@@ -125,7 +126,28 @@ def test_llm_client_passes_provider_structured_output_schema():
                 return any(contains_default(item) for item in value)
             return False
 
-        assert not contains_default(config.response_schema)
+        assert not contains_default(config.response_json_schema)
+
+
+def test_llm_client_uses_json_schema_field_for_recursive_provider_schema():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        response = MagicMock()
+        response.text = '{"questions": []}'
+        response.candidates = []
+        mock_client.return_value.models.generate_content.return_value = response
+
+        from backend.schemas.assessment_schema import ASSESSMENT_PROVIDER_SCHEMA
+        from backend.services.llm_client import LLMClient
+
+        LLMClient().generate(
+            "system",
+            "user",
+            response_schema=ASSESSMENT_PROVIDER_SCHEMA,
+        )
+
+        config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
+        assert config.response_schema is None
+        assert config.response_json_schema["$defs"]["mathNode"]
 
 
 def test_llm_client_uses_configured_model_defaults_without_thinking_override():

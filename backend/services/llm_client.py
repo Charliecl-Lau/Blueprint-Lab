@@ -125,7 +125,11 @@ class LLMClient:
                 if hasattr(response_schema, "model_json_schema")
                 else response_schema
             )
-            config_kwargs["response_schema"] = _without_defaults(schema)
+            schema = _without_defaults(schema)
+            if isinstance(schema, dict) and "$defs" in schema:
+                config_kwargs["response_json_schema"] = schema
+            else:
+                config_kwargs["response_schema"] = schema
         response = self._client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(**config_kwargs),

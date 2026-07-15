@@ -3,12 +3,23 @@ import re
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
-ACTUAL_PROMPT_GENERATOR_VERSION = "2"
+ACTUAL_PROMPT_GENERATOR_VERSION = "3"
 EQUATION_GENERATION_INSTRUCTION = (
-    "Before generating questions, represent every equation and derivation using "
-    "notation that can be converted into native Microsoft Word equation objects; "
-    "do not return equations as images, screenshots, raw LaTeX, or "
-    "Markdown-delimited mathematics."
+    "The final DOCX must contain editable native Microsoft Word OMML equations. "
+    "Represent every equation and every mathematical expression embedded in a "
+    "question body, answer option, or model answer as a structured math AST; never "
+    "ask the backend to infer math from a linear string. Use body_segments, each "
+    "option's segments, and model_answer_segments as ordered text/math segments, "
+    "where a math segment has {\"type\": \"math\", \"math\": <AST>}. Put each "
+    "displayed equation's AST in equations[].math. AST node types are text(text), "
+    "symbol(name), number(value), operator(value), sequence(items), equation(left, "
+    "right), fraction(numerator, denominator), differential(variable), product(terms, "
+    "optional operator), subscript(base, subscript), superscript(base, superscript), "
+    "radical(radicand, optional degree), and matrix(rows). The backend deterministically "
+    "serializes this structured math AST to native Microsoft Word OMML. Plain body, "
+    "option body, and model_answer strings remain readable fallbacks, but must not be "
+    "the only representation of embedded math. Do not return equations as images, "
+    "screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics."
 )
 
 _FACTOR_DEFINITIONS = (

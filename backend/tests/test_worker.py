@@ -258,6 +258,10 @@ def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test
             "type", "body", "metadata", "quality_check", "revision_options"
         }
         assert "metadata" in question_schema["properties"]
+        assert "body_segments" in question_schema["properties"]
+        assert "model_answer_segments" in question_schema["properties"]
+        assert "equations" in question_schema["properties"]
+        assert "math" in question_schema["properties"]["equations"]["items"]["required"]
         usage_calls = (
             test_db.query(ModelCallUsage)
             .filter_by(run_id=generation_fixture.id)
