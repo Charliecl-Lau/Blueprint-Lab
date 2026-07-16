@@ -49,6 +49,19 @@ test('shows the streamlined research inputs and removes production controls', ()
   expect(screen.queryByText("Bloom's taxonomy")).not.toBeInTheDocument()
 })
 
+test('places prompt structure beside cognitive demand and additional instruction last', () => {
+  render(<App />)
+  const grid = screen.getByLabelText('Prompt structure').closest('.form-grid')
+  const fields = Array.from(grid?.children ?? [])
+  const promptStructure = screen.getByLabelText('Prompt structure').closest('label')!
+  const cognitiveDemand = screen.getByLabelText('Cognitive demand').closest('.field-stack')!
+  const additionalInstruction = screen.getByLabelText('Additional instruction (optional)').closest('.field-stack')!
+
+  expect(fields.indexOf(cognitiveDemand)).toBe(fields.indexOf(promptStructure) + 1)
+  expect(fields.at(-1)).toBe(additionalInstruction)
+  expect(additionalInstruction).toHaveClass('wide')
+})
+
 test('submits cognitive demand and optional additional instruction', async () => {
   render(<App />)
   fireEvent.change(screen.getByLabelText('Course name'), { target: { value: 'Statics' } })
