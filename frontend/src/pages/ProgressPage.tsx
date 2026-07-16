@@ -3,7 +3,6 @@ import { Link, useParams } from 'react-router-dom'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
 import { AppHeader } from '../components/AppHeader'
-import { TokenUsage } from '../components/TokenUsage'
 import { useSSE } from '../hooks/useSSE'
 import { useRunStore } from '../store/runStore'
 import type { Stage } from '../types'
@@ -68,7 +67,6 @@ export function ProgressPage() {
           ) : <p>Loading persisted run state…</p>}
           {run?.error?.message && <p className="error">{run.error.message}</p>}
         </section>
-        <TokenUsage usage={run?.token_usage} />
         {run?.status === 'complete' && run.experiment_id && (
           <Link className="primary inline-action" to={`/experiments/${run.experiment_id}/viewer/${run.id}`}>
             Review run

@@ -1,9 +1,9 @@
 import { Fragment, type ReactNode } from 'react'
 import type { ContentSegment, EquationEntry, MathNode } from '../types'
+import { EQUATION_PLACEHOLDER_PATTERN } from '../math/equationReferences'
 import { parseLinearMath } from '../math/linearMath'
 
 
-const PLACEHOLDER_PATTERN = /\[\[EQ:([A-Za-z0-9_-]+)\]\]/g
 const GREEK_NAMES: Record<string, string> = {
   Alpha: 'Α', Beta: 'Β', Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ',
   Mu: 'Μ', Pi: 'Π', Sigma: 'Σ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
@@ -74,7 +74,7 @@ function PlaceholderContent({ text, equations }: { text: string; equations: Equa
   const content: ReactNode[] = []
   let cursor = 0
   let key = 0
-  for (const match of text.matchAll(PLACEHOLDER_PATTERN)) {
+  for (const match of text.matchAll(EQUATION_PLACEHOLDER_PATTERN)) {
     const index = match.index
     if (index > cursor) content.push(<Fragment key={key++}>{text.slice(cursor, index)}</Fragment>)
     const equation = equationByLabel.get(match[1])
@@ -105,15 +105,6 @@ export function MathContent({
         : <Fragment key={index}>{segment.text ?? ''}</Fragment>)
       : <PlaceholderContent text={text} equations={equations} />}
   </span>
-}
-
-export function referencedEquationLabels(...texts: Array<string | null | undefined>): Set<string> {
-  const labels = new Set<string>()
-  for (const text of texts) {
-    if (!text) continue
-    for (const match of text.matchAll(PLACEHOLDER_PATTERN)) labels.add(match[1])
-  }
-  return labels
 }
 
 export function StandaloneEquations({

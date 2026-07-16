@@ -3,8 +3,17 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
 import { AppHeader } from '../components/AppHeader'
+import { MathContent, StandaloneEquations } from '../components/MathContent'
 import { TokenUsage } from '../components/TokenUsage'
+import { referencedEquationLabels } from '../math/equationReferences'
 import { useRunStore } from '../store/runStore'
+import type { CognitiveDemand } from '../types'
+
+const cognitiveDemandLabels: Record<CognitiveDemand, string> = {
+  remember_understand: 'Remember/Understand',
+  apply_analyze: 'Apply/Analyze',
+  evaluate_create: 'Evaluate/Create',
+}
 
 export function AssessmentViewerPage() {
   const { experimentId, runId } = useParams()
@@ -77,7 +86,7 @@ export function AssessmentViewerPage() {
           <div className="viewer-actions">
             <div>
               <h1>{experiment?.topic ?? 'Assessment'}</h1>
-              <p>{condition?.condition_code ?? `Condition ${selected?.condition_id ?? '—'}`} · Run {selected?.run_number ?? '—'} · Prompt structure {condition?.prompt_structure ?? '—'}</p>
+              <p>{condition?.condition_code ?? `Condition ${selected?.condition_id ?? '—'}`} · Run {selected?.run_number ?? '—'}</p>
             </div>
             {selectedId && (
               <div>
@@ -91,25 +100,35 @@ export function AssessmentViewerPage() {
             <p><strong>Course:</strong> {experiment?.course}</p>
             <p><strong>Topic:</strong> {experiment?.topic}</p>
             <p><strong>Estimated student completion time:</strong> {experiment?.estimated_time_minutes} minutes</p>
-            <p><strong>Condition:</strong> {condition?.condition_label}</p>
+            {experiment?.cognitive_demand && <p><strong>Cognitive demand:</strong> {cognitiveDemandLabels[experiment.cognitive_demand]}</p>}
+            {experiment?.additional_instruction && <p><strong>Additional instruction:</strong> {experiment.additional_instruction}</p>}
+            {condition && <div className="condition-factors" aria-label="Condition factors">
+              <p className="condition-factor">Concept Bridge = {condition.concept_bridge_enabled ? 'ON' : 'OFF'}</p>
+              <p className="condition-factor">Few-shot Examples = {condition.few_shot_enabled ? 'ON' : 'OFF'}</p>
+              <p className="condition-factor">Reference Content = {condition.reference_content_enabled ? 'ON' : 'OFF'}</p>
+              <p className="condition-factor">Reasoning Guidance = {condition.reasoning_guidance_enabled ? 'ON' : 'OFF'}</p>
+            </div>}
             <TokenUsage usage={selected?.token_usage} />
-            <details>
-              <summary>Prompt and factor metadata</summary>
-              <pre>{JSON.stringify(condition?.factor_inputs ?? {}, null, 2)}</pre>
-              <p>{selected?.prompt?.text ?? selected?.prompt_text}</p>
-            </details>
           </section>
           <section>
             <h2>Generated Questions</h2>
-            {questions.map((question, index) => (
-              <div className="question" key={question.id ?? index}>
-                <strong>{index + 1}. {question.body}</strong>
+            {questions.map((question, index) => {
+              const equations = question.equations ?? []
+              const referencedLabels = referencedEquationLabels(
+                question.body,
+                ...question.options?.map((option) => option.body) ?? [],
+                question.model_answer,
+              )
+              return <div className="question" key={question.id ?? index}>
+                <strong>{index + 1}. <MathContent text={question.body} segments={question.body_segments} equations={equations} location="question" /></strong>
                 {question.options?.map((option, optionIndex) => (
-                  <p key={option.id ?? optionIndex}>{option.body}{option.is_correct ? ' ✓' : ''}</p>
+                  <p key={option.id ?? optionIndex}><MathContent text={option.body} segments={option.segments} equations={equations} location="question" />{option.is_correct ? ' ✓' : ''}</p>
                 ))}
-                {question.model_answer && <p><strong>Solution:</strong> {question.model_answer}</p>}
+                <StandaloneEquations equations={equations} location="question" referencedLabels={referencedLabels} />
+                {question.model_answer && <p><strong>Solution:</strong> <MathContent text={question.model_answer} segments={question.model_answer_segments} equations={equations} location="solution" /></p>}
+                <StandaloneEquations equations={equations} location="solution" referencedLabels={referencedLabels} />
               </div>
-            ))}
+            })}
             {!questions.length && <p>Select a completed run to inspect its questions.</p>}
           </section>
         </article>

@@ -327,6 +327,156 @@ test('keeps the progress shortcut after returning home when recent runs cannot l
   })).toHaveAttribute('href', '/runs/10/progress')
 })
 
+test('does not display token usage on run progress', async () => {
+  window.history.replaceState({}, '', '/runs/8/progress')
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          token_usage: {
+            input_tokens: 30,
+            output_tokens: 12,
+            total_tokens: 42,
+            model_calls: 2,
+            recording_state: 'recorded',
+            stages: [],
+          },
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'Statics',
+          topic: 'Equilibrium',
+          learning_objectives: 'Resolve forces',
+          assessment_type: 'mixed',
+          difficulty: 'medium',
+          number_of_questions: 4,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'remember_understand',
+          additional_instruction: null,
+          created_at: '2026-07-14T00:00:00Z',
+          conditions: [],
+          runs: [{ id: 8, experiment_id: 1, condition_id: 3, run_number: 1, status: 'complete' }],
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByText('Equilibrium')).toBeVisible()
+  expect(screen.queryByRole('region', { name: 'Token usage' })).not.toBeInTheDocument()
+  expect(screen.queryByText('Token usage is loading.')).not.toBeInTheDocument()
+})
+
+test('keeps usage in the viewer and renders readable conditions and MathML questions', async () => {
+  window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE202',
+          topic: 'Thermodynamics',
+          learning_objectives: 'Apply equilibrium relations.',
+          assessment_type: 'mixed',
+          difficulty: 'medium',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: 'Use one laboratory scenario.',
+          created_at: '2026-07-14T00:00:00Z',
+          conditions: [{
+            id: 3,
+            condition_code: 'C1',
+            prompt_structure: 'openai',
+            concept_bridge_enabled: true,
+            few_shot_enabled: false,
+            reference_content_enabled: true,
+            reasoning_guidance_enabled: false,
+            factor_inputs: { concept_bridge: 'Hidden factor input' },
+            condition_label: 'ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF',
+          }],
+          runs: [{ id: 8, experiment_id: 1, condition_id: 3, run_number: 1, status: 'complete' }],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          prompt: {
+            text: 'Hidden generated prompt',
+            hash: 'hash',
+            template_version: '10',
+            generator_version: '7',
+          },
+          token_usage: {
+            input_tokens: 30,
+            output_tokens: 12,
+            total_tokens: 42,
+            model_calls: 2,
+            recording_state: 'recorded',
+            stages: [],
+          },
+          assessment: {
+            output_hash: 'hash',
+            schema_version: '1',
+            parsed_json: { questions: [{
+              type: 'mcq',
+              body: 'Calculate [[EQ:fraction]].',
+              options: [{ body: 'Choose [[EQ:scripts]].', is_correct: true }],
+              model_answer: 'Then use [[EQ:root]].',
+              equations: [
+                { label: 'fraction', expression: 'DeltaH/(T DeltaS)', location: 'question' },
+                { label: 'scripts', expression: 'x_a^2', location: 'question' },
+                { label: 'root', expression: 'sqrt(x_a)', location: 'solution' },
+              ],
+            }] },
+          },
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  const { container } = render(<App />)
+
+  expect(await screen.findByText('Concept Bridge = ON')).toBeVisible()
+  expect(screen.getByText('Few-shot Examples = OFF')).toBeVisible()
+  expect(screen.getByText('Reference Content = ON')).toBeVisible()
+  expect(screen.getByText('Reasoning Guidance = OFF')).toBeVisible()
+  expect(screen.getByText('Evaluate/Create')).toBeVisible()
+  expect(screen.getByText('Use one laboratory scenario.')).toBeVisible()
+  expect(screen.getByRole('region', { name: 'Token usage' })).toBeVisible()
+  expect(screen.queryByText(/Prompt structure/i)).not.toBeInTheDocument()
+  expect(screen.queryByText('Prompt and factor metadata')).not.toBeInTheDocument()
+  expect(screen.queryByText('Hidden generated prompt')).not.toBeInTheDocument()
+  expect(screen.queryByText('Hidden factor input')).not.toBeInTheDocument()
+  expect(container.querySelector('mfrac')).not.toBeNull()
+  expect(container.querySelector('msubsup')).not.toBeNull()
+  expect(container.querySelector('msqrt')).not.toBeNull()
+})
+
 test('asks for confirmation before retrying a run', async () => {
   window.history.replaceState({}, '', '/experiments/1/viewer/8')
   vi.mocked(fetch).mockImplementation(async (input, init) => {

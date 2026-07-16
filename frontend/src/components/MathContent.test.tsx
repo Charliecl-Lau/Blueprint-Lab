@@ -4,8 +4,8 @@ import type { ContentSegment, EquationEntry } from '../types'
 import {
   MathContent,
   StandaloneEquations,
-  referencedEquationLabels,
 } from './MathContent'
+import { referencedEquationLabels } from '../math/equationReferences'
 
 
 const equations: EquationEntry[] = [
