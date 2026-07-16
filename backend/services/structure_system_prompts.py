@@ -1,7 +1,7 @@
 from backend.schemas.experiment_schema import PromptStructure
 
 
-STRUCTURE_PROMPT_VERSION = "6"
+STRUCTURE_PROMPT_VERSION = "9"
 
 OPENAI_STRUCTURE_SYSTEM_PROMPT = """You are Blueprint Lab, a prompt compiler for educational assessment generation.
 
@@ -88,9 +88,9 @@ Never modify user-supplied values.
 
 Equation Notation Requirement
 
-The generated prompt must require the final DOCX to use editable native Microsoft Word OMML equations. It must require every equation and every mathematical expression embedded in a question body, answer option, or model answer to be represented as a structured math AST rather than a linear equation string.
+The generated prompt must require the final DOCX to use editable native Microsoft Word OMML equations. For every equation or mathematical expression in a question body, answer option, or model answer, it must require one corresponding entry in that question's equations[] array and replace the original expression at its exact position with [[EQ:label]].
 
-The generated prompt must require ordered body_segments, option segments, and model_answer_segments whenever those fields contain math. Each segment must be either a text segment or a math segment containing the structured AST. Every displayed equation must put its AST in equations[].math. The allowed AST node types are text, symbol, number, operator, sequence, equation, fraction, differential, product, subscript, superscript, radical, and matrix. The generated prompt must explain that the backend deterministically converts this AST to native Microsoft Word OMML.
+Each equations[] entry must contain exactly label, expression, and location. Label must be a unique ASCII identifier that exactly matches its [[EQ:label]] placeholder. The generated prompt must forbid repeating the plain expression beside its placeholder. It must require expression to use Microsoft Word linear equation syntax with Unicode math characters and plain operators: / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals. Location must be question or solution. It must state that a question containing mathematical content with equations = [] is invalid.
 
 The generated prompt must explicitly forbid returning equations as images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\]).
 
@@ -120,11 +120,9 @@ body
 Optional fields may include
 
 model_answer
-model_answer_segments
 options
 metadata
 equations
-body_segments
 quality_check
 revision_options
 
@@ -308,7 +306,7 @@ Never invent missing information.
 
 Within <constraints>, the generated prompt must also instruct the assessment-generation model to:
 
-require the final DOCX to use editable native Microsoft Word OMML equations; represent every equation and every mathematical expression embedded in a question body, answer option, or model answer as a structured math AST rather than a linear string; use ordered body_segments, option segments, and model_answer_segments for mixed text and math; put displayed equation ASTs in equations[].math; allow the AST node types text, symbol, number, operator, sequence, equation, fraction, differential, product, subscript, superscript, radical, and matrix; explain that the backend deterministically converts the AST to native Microsoft Word OMML; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
+require the final DOCX to use editable native Microsoft Word OMML equations; for every equation or mathematical expression in a question body, answer option, or model answer, add one corresponding equations[] entry containing exactly label, expression, and location; use a unique ASCII identifier for label and replace the expression at its exact position with [[EQ:label]]; never repeat the plain expression beside its placeholder; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; set location to question or solution; state that mathematical content with equations = [] is invalid; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
 
 populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements, using "Not Assigned" for any traceability ID that was not supplied rather than inventing one
 
@@ -355,11 +353,9 @@ each question object must contain:
 Optional fields may include:
 
 "model_answer"
-"model_answer_segments"
 "options"
 "metadata"
 "equations"
-"body_segments"
 "quality_check"
 "revision_options"
 

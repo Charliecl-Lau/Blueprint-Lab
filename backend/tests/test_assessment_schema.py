@@ -169,11 +169,23 @@ def test_malformed_structured_fraction_is_rejected(complete_payload):
         AssessmentGenerationResponse.model_validate(complete_payload)
 
 
-def test_provider_schema_requires_structured_math_for_word_omml():
+def test_provider_schema_remains_flat_and_does_not_send_recursive_math_to_provider():
     question = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
-    assert "body_segments" in question["properties"]
-    assert "model_answer_segments" in question["properties"]
-    assert "equations" in question["properties"]
-    assert "math" in question["properties"]["equations"]["items"]["required"]
+    assert "$defs" not in ASSESSMENT_PROVIDER_SCHEMA
+    assert "body_segments" not in question["properties"]
+    assert "model_answer_segments" not in question["properties"]
+    equation = question["properties"]["equations"]["items"]
+    assert equation == {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string"},
+            "expression": {"type": "string"},
+            "location": {
+                "type": "string",
+                "enum": ["question", "solution"],
+            },
+        },
+        "required": ["label", "expression", "location"],
+    }
     option = question["properties"]["options"]["items"]
-    assert "segments" in option["properties"]
+    assert "segments" not in option["properties"]

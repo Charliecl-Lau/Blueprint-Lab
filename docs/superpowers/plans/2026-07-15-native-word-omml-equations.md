@@ -8,6 +8,68 @@
 
 **Tech Stack:** Python 3, Pydantic 2, python-docx, OOXML/OMML, pytest
 
+## Live Gemini integration findings (2026-07-16)
+
+The recursive provider-schema approach is disabled. A live request to
+`gemini-3.1-flash-lite` using the recursive math AST failed during provider-side
+schema processing before assessment generation began. Run 18 made four
+assessment attempts, and every attempt returned HTTP 500 with:
+
+> Limits exceeded while trying to flatten schema. Schema is too complex to process.
+
+The recursive contract contained 13 discriminated math-node variants and 17
+self-references through `$defs/mathNode`, used by question-body segments,
+model-answer segments, answer-option segments, and displayed equations. Local
+Pydantic validation and mocked SDK tests did not reveal the provider's schema
+flattening limit.
+
+`ASSESSMENT_PROVIDER_SCHEMA` has therefore been restored exactly to the flat
+schema on `main`, with no `$defs`, `$ref`, or `oneOf`. Live run 19 then completed
+successfully with two Gemini calls, proving that the recursive provider contract
+was the blocker.
+
+The flat-schema run also proved that prompt instructions alone do not produce
+native Word equations in the current pipeline. Run 19 stored
+`body_segments = null`, `model_answer_segments = null`, and `equations = []`;
+all mathematical expressions remained in the plain `body` and `model_answer`
+strings. Because `docx_exporter.py` only invokes the OMML serializer when those
+structured fields contain math nodes, the exported DOCX contains plain text for
+this run.
+
+Current conclusion:
+
+- Do not send the recursive math AST as the Gemini provider response schema.
+- Prompt-only requests are insufficient for deterministic OMML generation when
+  the provider schema exposes only the flat main-branch fields.
+- A future implementation needs a bounded, non-recursive provider format or a
+  separately designed equation-conversion stage. Do not add heuristic parsing
+  of arbitrary generated text without an explicit design decision.
+
+### Flat equation-entry experiment
+
+The next live experiment keeps the main assessment schema flat while adding one
+optional, non-recursive `equations` array to each question. Each entry contains
+only `label`, `expression`, and `location`; `expression` uses Microsoft Word
+linear equation notation, and `location` is `question` or `solution`. The schema
+contains no `$defs`, `$ref`, or `oneOf`. The generation prompt requires one such
+entry for every mathematical expression and treats mathematical content with an
+empty equation array as invalid.
+
+The backend converts these flat entries into an editable `<m:oMath>` container
+during DOCX export. A bounded Word-linear parser converts `/` fractions, `_`
+subscripts, `^` superscripts, combined scripts, and `sqrt(...)` or `√(...)`
+radicals into semantic `<m:f>`, `<m:sSub>`, `<m:sSup>`, and `<m:rad>` OMML.
+Malformed or unsupported expressions fall back to editable OMML text instead of
+breaking document export. This experiment tests whether Gemini reliably
+populates the flat equation array using that supported notation.
+
+Equation placement uses explicit `[[EQ:label]]` placeholders. Gemini must replace
+each mathematical expression in a question body, answer option, or model answer
+with a placeholder whose unique ASCII label matches an `equations[]` entry. The
+DOCX exporter replaces the placeholder in place with OMML and tracks the rendered
+label so it is not emitted again as a standalone equation paragraph. Unreferenced
+legacy equation entries continue to render separately for backward compatibility.
+
 ## Global Constraints
 
 - Do not use LaTeX, MathML conversion, images, screenshots, Microsoft Word automation, or heuristic equation parsing in production.

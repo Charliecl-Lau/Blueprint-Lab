@@ -17,7 +17,7 @@ def test_provider_structures_are_distinct_and_versioned():
     assert openai_prompt
     assert anthropic_prompt
     assert openai_prompt != anthropic_prompt
-    assert openai_version == anthropic_version == "6"
+    assert openai_version == anthropic_version == "9"
 
 
 def test_provider_structures_require_questions_array_contract():
@@ -28,22 +28,29 @@ def test_provider_structures_require_questions_array_contract():
         assert "body" in system_prompt
 
 
-def test_generation_and_structure_prompts_require_structured_omml_math():
+def test_generation_and_structure_prompts_require_flat_word_equation_entries():
     generation_prompt = build_generation_system_prompt(OPENAI_ACTUAL_PROMPT)
     for required_text in (
         "native Microsoft Word OMML",
-        "structured math AST",
-        "body_segments",
-        "model_answer_segments",
-        "equations[].math",
+        "equations[]",
+        "expression",
+        "Microsoft Word linear equation syntax",
+        "equations = []",
+        "sqrt(...)",
+        "[[EQ:label]]",
     ):
         assert required_text in generation_prompt
+    assert "structured math AST" not in generation_prompt
+    assert "body_segments" not in generation_prompt
 
     for structure in ("openai", "anthropic"):
         system_prompt, _ = get_structure_system_prompt(structure)
         assert "native Microsoft Word OMML" in system_prompt
-        assert "structured math AST" in system_prompt
-        assert "body_segments" in system_prompt
+        assert "equations[]" in system_prompt
+        assert "Microsoft Word linear equation syntax" in system_prompt
+        assert "[[EQ:label]]" in system_prompt
+        assert "structured math AST" not in system_prompt
+        assert "body_segments" not in system_prompt
 
 
 def test_structure_input_contains_details_and_enabled_factor_values_only():

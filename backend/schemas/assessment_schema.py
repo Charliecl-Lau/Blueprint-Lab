@@ -185,130 +185,7 @@ class AssessmentGenerationResponse(BaseModel):
     questions: List[QuestionResponse]
 
 
-MATH_NODE_REF = {"$ref": "#/$defs/mathNode"}
-
-CONTENT_SEGMENT_PROVIDER_SCHEMA = {
-    "oneOf": [
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["text"]},
-                "text": {"type": "string"},
-            },
-            "required": ["type", "text"],
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["math"]},
-                "math": MATH_NODE_REF,
-            },
-            "required": ["type", "math"],
-        },
-    ]
-}
-
-MATH_NODE_PROVIDER_SCHEMA = {
-    "oneOf": [
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": [kind]},
-                field: {"type": "string"},
-            },
-            "required": ["type", field],
-        }
-        for kind, field in (
-            ("text", "text"),
-            ("symbol", "name"),
-            ("number", "value"),
-            ("operator", "value"),
-            ("differential", "variable"),
-        )
-    ] + [
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["sequence"]},
-                "items": {"type": "array", "items": MATH_NODE_REF, "minItems": 1},
-            },
-            "required": ["type", "items"],
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["equation"]},
-                "left": MATH_NODE_REF,
-                "right": MATH_NODE_REF,
-            },
-            "required": ["type", "left", "right"],
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["fraction"]},
-                "numerator": MATH_NODE_REF,
-                "denominator": MATH_NODE_REF,
-            },
-            "required": ["type", "numerator", "denominator"],
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["product"]},
-                "terms": {"type": "array", "items": MATH_NODE_REF, "minItems": 2},
-                "operator": {
-                    "type": "string",
-                    "enum": ["implicit", "dot", "cross"],
-                },
-            },
-            "required": ["type", "terms"],
-        },
-        *[
-            {
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string", "enum": [kind]},
-                    "base": MATH_NODE_REF,
-                    field: MATH_NODE_REF,
-                },
-                "required": ["type", "base", field],
-            }
-            for kind, field in (
-                ("subscript", "subscript"),
-                ("superscript", "superscript"),
-            )
-        ],
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["radical"]},
-                "radicand": MATH_NODE_REF,
-                "degree": MATH_NODE_REF,
-            },
-            "required": ["type", "radicand"],
-        },
-        {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["matrix"]},
-                "rows": {
-                    "type": "array",
-                    "items": {
-                        "type": "array",
-                        "items": MATH_NODE_REF,
-                        "minItems": 1,
-                    },
-                    "minItems": 1,
-                },
-            },
-            "required": ["type", "rows"],
-        },
-    ]
-}
-
 ASSESSMENT_PROVIDER_SCHEMA = {
-    "$defs": {"mathNode": MATH_NODE_PROVIDER_SCHEMA},
     "type": "object",
     "properties": {
         "questions": {
@@ -321,10 +198,6 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                         "enum": ["mcq", "short_answer", "long_answer"],
                     },
                     "body": {"type": "string"},
-                    "body_segments": {
-                        "type": "array",
-                        "items": CONTENT_SEGMENT_PROVIDER_SCHEMA,
-                    },
                     "metadata": {
                         "type": "object",
                         "properties": {
@@ -360,10 +233,6 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                         ],
                     },
                     "model_answer": {"type": "string"},
-                    "model_answer_segments": {
-                        "type": "array",
-                        "items": CONTENT_SEGMENT_PROVIDER_SCHEMA,
-                    },
                     "options": {
                         "type": "array",
                         "items": {
@@ -371,10 +240,6 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                             "properties": {
                                 "body": {"type": "string"},
                                 "is_correct": {"type": "boolean"},
-                                "segments": {
-                                    "type": "array",
-                                    "items": CONTENT_SEGMENT_PROVIDER_SCHEMA,
-                                },
                             },
                             "required": ["body", "is_correct"],
                         },
@@ -385,13 +250,13 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                             "type": "object",
                             "properties": {
                                 "label": {"type": "string"},
-                                "math": MATH_NODE_REF,
+                                "expression": {"type": "string"},
                                 "location": {
                                     "type": "string",
                                     "enum": ["question", "solution"],
                                 },
                             },
-                            "required": ["label", "math", "location"],
+                            "required": ["label", "expression", "location"],
                         },
                     },
                     "quality_check": {

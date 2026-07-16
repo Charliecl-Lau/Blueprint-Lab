@@ -3,23 +3,22 @@ import re
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
-ACTUAL_PROMPT_GENERATOR_VERSION = "3"
+ACTUAL_PROMPT_GENERATOR_VERSION = "6"
 EQUATION_GENERATION_INSTRUCTION = (
     "The final DOCX must contain editable native Microsoft Word OMML equations. "
-    "Represent every equation and every mathematical expression embedded in a "
-    "question body, answer option, or model answer as a structured math AST; never "
-    "ask the backend to infer math from a linear string. Use body_segments, each "
-    "option's segments, and model_answer_segments as ordered text/math segments, "
-    "where a math segment has {\"type\": \"math\", \"math\": <AST>}. Put each "
-    "displayed equation's AST in equations[].math. AST node types are text(text), "
-    "symbol(name), number(value), operator(value), sequence(items), equation(left, "
-    "right), fraction(numerator, denominator), differential(variable), product(terms, "
-    "optional operator), subscript(base, subscript), superscript(base, superscript), "
-    "radical(radicand, optional degree), and matrix(rows). The backend deterministically "
-    "serializes this structured math AST to native Microsoft Word OMML. Plain body, "
-    "option body, and model_answer strings remain readable fallbacks, but must not be "
-    "the only representation of embedded math. Do not return equations as images, "
-    "screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics."
+    "For every equation or mathematical expression appearing in a question body, "
+    "answer option, or model answer, you MUST add one entry to that question's "
+    "equations[] array. Each entry MUST contain exactly label, expression, and location. "
+    "Use a unique ASCII identifier for label and replace the original mathematical "
+    "expression at its exact position in body, option body, or model_answer with "
+    "[[EQ:label]], where label exactly matches the equation entry. Never repeat the "
+    "plain expression beside its placeholder. "
+    "Write expression using Microsoft Word linear equation syntax with Unicode math "
+    "characters and plain operators so the backend can insert it into an editable OMML "
+    "equation. Use / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) "
+    "or sqrt(...) for radicals; set location to question or solution. A question containing mathematical "
+    "content with equations = [] is invalid. Do not return equations as images, screenshots, "
+    "raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics."
 )
 
 _FACTOR_DEFINITIONS = (

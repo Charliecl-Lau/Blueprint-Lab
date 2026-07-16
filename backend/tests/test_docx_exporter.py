@@ -67,7 +67,94 @@ def test_docx_contains_rich_research_content_and_native_word_equation():
     with ZipFile(BytesIO(content)) as archive:
         document_xml = archive.read("word/document.xml")
     assert b"<m:oMath" in document_xml
-    assert b"mu_alpha = mu_beta" in document_xml
+    assert document_xml.count(b"<m:sSub>") == 2
+    assert "α".encode() in document_xml
+    assert "β".encode() in document_xml
+
+
+def test_docx_converts_flat_word_linear_equations_to_built_up_omml():
+    content = build_assessment_docx(
+        run_id=20, prompt_id=21, condition_code="C010", run_number=1,
+        course="MSE202", topic="Thermodynamics",
+        questions=[{
+            "metadata": {},
+            "body": "Evaluate the expressions.",
+            "options": [],
+            "model_answer": "Use the equations shown.",
+            "equations": [
+                {
+                    "label": "Fraction",
+                    "expression": "DeltaH/(T DeltaS)",
+                    "location": "solution",
+                },
+                {
+                    "label": "Scripts",
+                    "expression": "x_a^2",
+                    "location": "solution",
+                },
+                {
+                    "label": "Radical",
+                    "expression": "sqrt(x_a)",
+                    "location": "solution",
+                },
+            ],
+        }],
+    )
+
+    with ZipFile(BytesIO(content)) as archive:
+        document_xml = archive.read("word/document.xml")
+
+    assert b"<m:f>" in document_xml
+    assert b"<m:num>" in document_xml
+    assert b"<m:den>" in document_xml
+    assert document_xml.count(b"<m:sSub>") >= 2
+    assert b"<m:sSup>" in document_xml
+    assert b"<m:rad>" in document_xml
+
+
+def test_docx_replaces_equation_placeholders_inline_without_duplicate_blocks():
+    content = build_assessment_docx(
+        run_id=22, prompt_id=23, condition_code="C011", run_number=1,
+        course="MSE202", topic="Thermodynamics",
+        questions=[{
+            "metadata": {},
+            "body": "Use [[EQ:gibbs_formula]] to calculate the change.",
+            "options": [{
+                "body": "The value is [[EQ:option_value]].",
+                "is_correct": True,
+            }],
+            "model_answer": (
+                "Using [[EQ:option_value]], substitution gives [[EQ:final_result]]."
+            ),
+            "equations": [
+                {
+                    "label": "gibbs_formula",
+                    "expression": "DeltaG=DeltaH-T DeltaS",
+                    "location": "question",
+                },
+                {
+                    "label": "option_value",
+                    "expression": "x_a^2",
+                    "location": "question",
+                },
+                {
+                    "label": "final_result",
+                    "expression": "DeltaG=-180 J/mol",
+                    "location": "solution",
+                },
+            ],
+        }],
+    )
+
+    with ZipFile(BytesIO(content)) as archive:
+        document_xml = archive.read("word/document.xml")
+
+    assert b"[[EQ:" not in document_xml
+    assert document_xml.count(b"<m:oMath>") == 4
+    assert b"gibbs_formula:" not in document_xml
+    assert b"option_value:" not in document_xml
+    assert b"final_result:" not in document_xml
+    assert b"<m:sSup>" in document_xml
 
 
 def test_docx_contains_recorded_end_to_end_token_usage():

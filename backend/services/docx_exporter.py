@@ -2,7 +2,7 @@ from io import BytesIO
 from typing import Optional
 
 from docx import Document
-from backend.services.omml import append_content, append_math
+from backend.services.omml import append_content, append_linear_math, append_math
 
 
 def build_assessment_docx(*, run_id: int, prompt_id: int,
@@ -66,22 +66,35 @@ def build_assessment_docx(*, run_id: int, prompt_id: int,
         )
         paragraph = document.add_paragraph()
         paragraph.add_run(f"Q{index}. ")
-        append_content(paragraph, question.get("body_segments"), question["body"])
+        rendered_labels = append_content(
+            paragraph,
+            question.get("body_segments"),
+            question["body"],
+            equations=question.get("equations", []),
+            location="question",
+        )
         for option in question.get("options", []):
             suffix = " [correct]" if option.get("is_correct") else ""
             paragraph = document.add_paragraph()
             paragraph.add_run("- ")
-            append_content(paragraph, option.get("segments"), option["body"])
+            rendered_labels.update(append_content(
+                paragraph,
+                option.get("segments"),
+                option["body"],
+                equations=question.get("equations", []),
+                location="question",
+            ))
             paragraph.add_run(suffix)
         for equation in question.get("equations", []):
             if equation.get("location") != "question":
                 continue
+            if equation.get("label") in rendered_labels:
+                continue
             paragraph = document.add_paragraph(f"{equation['label']}: ")
-            append_math(
-                paragraph,
-                equation.get("math")
-                or {"type": "text", "text": equation["expression"]},
-            )
+            if equation.get("math"):
+                append_math(paragraph, equation["math"])
+            else:
+                append_linear_math(paragraph, equation["expression"])
 
     document.add_heading("Solutions", level=2)
     for index, question in enumerate(questions, start=1):
@@ -91,20 +104,23 @@ def build_assessment_docx(*, run_id: int, prompt_id: int,
             answer = correct[0] if correct else "No solution provided."
         paragraph = document.add_paragraph()
         paragraph.add_run(f"Q{index}. ")
-        append_content(
+        rendered_labels = append_content(
             paragraph,
             question.get("model_answer_segments") if question.get("model_answer") else None,
             answer,
+            equations=question.get("equations", []),
+            location="solution",
         )
         for equation in question.get("equations", []):
             if equation.get("location") != "solution":
                 continue
+            if equation.get("label") in rendered_labels:
+                continue
             paragraph = document.add_paragraph(f"{equation['label']}: ")
-            append_math(
-                paragraph,
-                equation.get("math")
-                or {"type": "text", "text": equation["expression"]},
-            )
+            if equation.get("math"):
+                append_math(paragraph, equation["math"])
+            else:
+                append_linear_math(paragraph, equation["expression"])
 
     document.add_heading("Assessment Quality Check", level=2)
     for index, question in enumerate(questions, start=1):
