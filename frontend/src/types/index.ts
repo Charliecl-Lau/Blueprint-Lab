@@ -1,6 +1,7 @@
 export type Stage = 'pending' | 'prompting' | 'generating' | 'documenting' | 'complete' | 'error'
 export type PromptStructure = 'openai' | 'anthropic'
 export type AssessmentType = 'mcq' | 'short_answer' | 'mixed'
+export type CognitiveDemand = 'remember_understand' | 'apply_analyze' | 'evaluate_create'
 export type RecordingState = 'not_recorded' | 'in_progress' | 'recorded'
 
 export interface StageUsage {
@@ -106,6 +107,8 @@ export interface Experiment {
   difficulty: string
   number_of_questions: number
   estimated_time_minutes: number
+  cognitive_demand: CognitiveDemand
+  additional_instruction: string | null
   created_at: string
   conditions: Condition[]
   runs: Run[]
@@ -158,6 +161,8 @@ export interface CreateExperimentPayload {
   difficulty: string
   number_of_questions: number
   estimated_time_minutes: number
+  cognitive_demand: CognitiveDemand
+  additional_instruction: string | null
   prompt_structure: PromptStructure
   factors: PromptFactors
   factor_inputs: PromptFactorInputs

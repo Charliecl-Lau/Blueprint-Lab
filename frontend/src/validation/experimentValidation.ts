@@ -36,6 +36,8 @@ export interface ExperimentFormValues {
   difficulty: string
   questionCount: string
   estimatedTime: string
+  cognitiveDemand: string
+  additionalInstruction: string
   promptStructure: string
   enabled: Record<FactorKey, boolean>
   content: Record<FactorKey, string>
@@ -89,6 +91,15 @@ export function validateExperimentForm(values: ExperimentFormValues): Validation
       field: 'estimated-time',
       label: 'Estimated student completion time',
       message: 'Enter 1 to 480 minutes.',
+    })
+  }
+
+  if (!['remember_understand', 'apply_analyze', 'evaluate_create'].includes(values.cognitiveDemand)) {
+    errors.push({
+      section: 'Assessment Details',
+      field: 'cognitive-demand',
+      label: 'Cognitive demand',
+      message: 'Select a cognitive demand.',
     })
   }
 

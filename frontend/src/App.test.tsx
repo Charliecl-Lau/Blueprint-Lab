@@ -19,6 +19,8 @@ test('normalizes deprecated generation collections at the API boundary', () => {
     difficulty: 'medium',
     number_of_questions: 4,
     estimated_time_minutes: 30,
+    cognitive_demand: 'remember_understand',
+    additional_instruction: null,
     created_at: '2026-07-11T00:00:00Z',
     conditions: [],
     generations: [legacyRun],
@@ -42,8 +44,34 @@ test('shows the streamlined research inputs and removes production controls', ()
   expect(screen.getByRole('heading', { name: 'New Experiment' })).toBeInTheDocument()
   expect(screen.getByLabelText('Course name')).toBeInTheDocument()
   expect(screen.getByLabelText('Estimated student completion time')).toBeInTheDocument()
+  expect(screen.getByLabelText('Cognitive demand')).toHaveValue('remember_understand')
   expect(screen.queryByText('Subject area')).not.toBeInTheDocument()
   expect(screen.queryByText("Bloom's taxonomy")).not.toBeInTheDocument()
+})
+
+test('submits cognitive demand and optional additional instruction', async () => {
+  render(<App />)
+  fireEvent.change(screen.getByLabelText('Course name'), { target: { value: 'Statics' } })
+  fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Equilibrium' } })
+  fireEvent.change(screen.getByLabelText('Learning objectives'), { target: { value: 'Resolve forces' } })
+  fireEvent.change(screen.getByLabelText('Cognitive demand'), { target: { value: 'evaluate_create' } })
+  fireEvent.change(screen.getByLabelText('Additional instruction (optional)'), {
+    target: { value: 'Use one laboratory scenario.' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+
+  expect(screen.getByText('Evaluate/Create')).toBeVisible()
+  expect(screen.getByText('Use one laboratory scenario.')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Run Experiment' }))
+
+  await waitFor(() => expect(
+    vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST'),
+  ).toBe(true))
+  const [, init] = vi.mocked(fetch).mock.calls.find(([, value]) => value?.method === 'POST')!
+  expect(JSON.parse(String(init?.body))).toMatchObject({
+    cognitive_demand: 'evaluate_create',
+    additional_instruction: 'Use one laboratory scenario.',
+  })
 })
 
 test('reveals and validates content for a selected prompt factor', async () => {

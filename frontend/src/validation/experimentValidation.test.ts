@@ -12,6 +12,8 @@ const validForm: ExperimentFormValues = {
   difficulty: 'medium',
   questionCount: '5',
   estimatedTime: '30',
+  cognitiveDemand: 'remember_understand',
+  additionalInstruction: '',
   promptStructure: 'openai',
   enabled: {
     conceptBridge: false,
@@ -65,4 +67,12 @@ test('matches backend integer bounds and visual field order', () => {
     { field: 'number-of-questions', message: 'Enter 1 to 50 questions.' },
     { field: 'estimated-time', message: 'Enter 1 to 480 minutes.' },
   ])
+})
+
+test('requires a supported cognitive demand', () => {
+  expect(validateExperimentForm({ ...validForm, cognitiveDemand: '' }))
+    .toContainEqual(expect.objectContaining({
+      field: 'cognitive-demand',
+      message: 'Select a cognitive demand.',
+    }))
 })
