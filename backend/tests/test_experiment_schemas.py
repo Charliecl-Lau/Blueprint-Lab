@@ -128,10 +128,10 @@ def test_experiment_create_rejects_unknown_cognitive_demand(valid_payload):
 def test_additional_instruction_is_trimmed_and_limited(valid_payload):
     payload = ExperimentCreate(
         **valid_payload,
-        additional_instruction=f"  {'x' * 19996}  ",
+        additional_instruction=f"  {'x' * 20000}  ",
     )
 
-    assert payload.additional_instruction == "x" * 19996
+    assert payload.additional_instruction == "x" * 20000
 
     with pytest.raises(ValidationError):
         ExperimentCreate(**valid_payload, additional_instruction="x" * 20001)
