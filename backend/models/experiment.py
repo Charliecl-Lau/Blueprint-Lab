@@ -28,6 +28,10 @@ class Experiment(Base):
     difficulty: Mapped[str] = mapped_column(String, nullable=False)
     number_of_questions: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    cognitive_demand: Mapped[str] = mapped_column(
+        String, nullable=False, default="remember_understand"
+    )
+    additional_instruction: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )

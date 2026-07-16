@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 PromptStructure = Literal["openai", "anthropic"]
 AssessmentType = Literal["mcq", "short_answer", "mixed"]
+CognitiveDemand = Literal[
+    "remember_understand",
+    "apply_analyze",
+    "evaluate_create",
+]
 
 
 class PromptFactors(BaseModel):
@@ -35,6 +40,8 @@ class ExperimentCreate(BaseModel):
     difficulty: str = Field(min_length=1)
     number_of_questions: int = Field(default=4, ge=1, le=50)
     estimated_time_minutes: int = Field(default=30, ge=1, le=480)
+    cognitive_demand: CognitiveDemand = "remember_understand"
+    additional_instruction: Optional[str] = Field(default=None, max_length=20000)
     prompt_structure: PromptStructure = "openai"
     factors: PromptFactors = Field(default_factory=PromptFactors)
     factor_inputs: PromptFactorInputs = Field(default_factory=PromptFactorInputs)
@@ -43,6 +50,14 @@ class ExperimentCreate(BaseModel):
     @classmethod
     def trim_required_assessment_text(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("additional_instruction", mode="before")
+    @classmethod
+    def trim_additional_instruction(cls, value):
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        return value or None
 
     @model_validator(mode="after")
     def require_enabled_factor_content(self):
@@ -91,6 +106,8 @@ class ExperimentResponse(BaseModel):
     difficulty: str
     number_of_questions: int
     estimated_time_minutes: int
+    cognitive_demand: CognitiveDemand
+    additional_instruction: Optional[str]
     created_at: datetime
     conditions: list[ConditionResponse]
     generations: list[GenerationSummary]

@@ -36,6 +36,8 @@ _ASSESSMENT_FIELDS = {
     "difficulty": "Difficulty",
     "number_of_questions": "Number of questions",
     "estimated_time_minutes": "Estimated student completion time",
+    "cognitive_demand": "Cognitive demand",
+    "additional_instruction": "Additional instruction",
     "prompt_structure": "Prompt structure",
 }
 _FACTOR_LABELS = {
@@ -170,6 +172,8 @@ def create_experiment_with_run(
         difficulty=payload.difficulty,
         number_of_questions=payload.number_of_questions,
         estimated_time_minutes=payload.estimated_time_minutes,
+        cognitive_demand=payload.cognitive_demand,
+        additional_instruction=payload.additional_instruction,
     )
     condition = Condition(
         experiment=experiment,

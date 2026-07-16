@@ -15,6 +15,8 @@ def test_experiment_condition_metadata_round_trip(test_db):
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=3,
+        cognitive_demand="evaluate_create",
+        additional_instruction="Use one laboratory scenario.",
     )
     condition = Condition(
         experiment=experiment,
@@ -36,6 +38,8 @@ def test_experiment_condition_metadata_round_trip(test_db):
     assert saved.experiment.name == "Free-body diagram study"
     assert saved.condition_code == "C100"
     assert saved.factor_configuration == {"concept_bridge": "Vectors"}
+    assert saved.experiment.cognitive_demand == "evaluate_create"
+    assert saved.experiment.additional_instruction == "Use one laboratory scenario."
 
 
 def test_legacy_generation_children_round_trip(test_db):

@@ -36,6 +36,8 @@ def test_experiment_create_defaults_to_openai_and_all_factors_off():
     assert payload.prompt_structure == "openai"
     assert payload.factors == PromptFactors()
     assert payload.estimated_time_minutes == 30
+    assert payload.cognitive_demand == "remember_understand"
+    assert payload.additional_instruction is None
     assert payload.factors.concept_bridge is False
     assert payload.factors.few_shot is False
     assert payload.factors.reference_content is False
@@ -100,3 +102,36 @@ def test_enabled_reference_content_requires_trimmed_text(valid_payload):
 
     with pytest.raises(ValidationError):
         ExperimentCreate(**valid_payload)
+
+
+def test_assessment_detail_defaults_and_normalization(valid_payload):
+    payload = ExperimentCreate(**valid_payload, additional_instruction="   ")
+
+    assert payload.cognitive_demand == "remember_understand"
+    assert payload.additional_instruction is None
+
+
+@pytest.mark.parametrize(
+    "value", ["remember_understand", "apply_analyze", "evaluate_create"]
+)
+def test_experiment_create_accepts_supported_cognitive_demand(valid_payload, value):
+    payload = ExperimentCreate(**valid_payload, cognitive_demand=value)
+
+    assert payload.cognitive_demand == value
+
+
+def test_experiment_create_rejects_unknown_cognitive_demand(valid_payload):
+    with pytest.raises(ValidationError):
+        ExperimentCreate(**valid_payload, cognitive_demand="evaluate_apply")
+
+
+def test_additional_instruction_is_trimmed_and_limited(valid_payload):
+    payload = ExperimentCreate(
+        **valid_payload,
+        additional_instruction=f"  {'x' * 19996}  ",
+    )
+
+    assert payload.additional_instruction == "x" * 19996
+
+    with pytest.raises(ValidationError):
+        ExperimentCreate(**valid_payload, additional_instruction="x" * 20001)

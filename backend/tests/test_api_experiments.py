@@ -12,6 +12,8 @@ def valid_payload():
         "difficulty": "introductory",
         "number_of_questions": 2,
         "estimated_time_minutes": 30,
+        "cognitive_demand": "evaluate_create",
+        "additional_instruction": "Use one laboratory scenario.",
         "prompt_structure": "openai",
         "factors": {
             "concept_bridge": True,
@@ -47,6 +49,8 @@ def test_create_experiment_creates_condition_and_generation(client):
     data = response.json()
     assert data["course"] == "ENGR 101"
     assert data["estimated_time_minutes"] == 30
+    assert data["cognitive_demand"] == "evaluate_create"
+    assert data["additional_instruction"] == "Use one laboratory scenario."
     assert data["conditions"][0]["factor_inputs"]["reference_content"] == "Use SI units."
     assert data["conditions"][0]["condition_label"] == "ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF"
     assert data["generations"][0]["status"] == "pending"
@@ -66,6 +70,8 @@ def test_get_experiment_returns_generations(client):
 
     assert response.status_code == 200
     assert len(response.json()["generations"]) == 1
+    assert response.json()["cognitive_demand"] == "evaluate_create"
+    assert response.json()["additional_instruction"] == "Use one laboratory scenario."
 
 
 def test_get_missing_experiment_returns_404(client):
