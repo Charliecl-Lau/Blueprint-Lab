@@ -47,8 +47,7 @@ The Word document must contain the following sections in this order:
 1. Assessment Metadata
 2. Student-Facing Question
 3. Fully Worked Solution
-4. Assessment Quality Check
-5. Suggested Revision Options
+4. Suggested Revision Options
 
 ---
 
@@ -139,34 +138,7 @@ Do not assume students know advanced graduate-level thermodynamics unless explic
 
 ---
 
-## Section 4: Assessment Quality Check
-
-Evaluate the generated question using the following criteria:
-
-1. Understanding of fundamental thermodynamic concepts
-2. Alignment with the learning outcomes for MSE202 and MSE302
-3. Consistency with the concept map linking MSE202 and MSE302
-4. Appropriate difficulty for the specified level and for students at a top-tier institution
-5. Alignment with materials science interests and applications
-6. Clarity and fairness of the student-facing wording
-7. Correct setup of derivations, assumptions, and undergraduate-appropriate methods in the solution
-
-For each criterion, provide:
-
-* A short comment
-* A rating from 1 to 5
-
-Use the following rating scale:
-
-* 1 = Poor
-* 2 = Weak
-* 3 = Acceptable
-* 4 = Good
-* 5 = Excellent
-
----
-
-## Section 5: Suggested Revision Options
+## Section 4: Suggested Revision Options
 
 Provide 2–3 concise suggestions for how the instructor could modify the question.
 

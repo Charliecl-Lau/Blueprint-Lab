@@ -59,10 +59,9 @@ def test_docx_contains_rich_research_content_and_native_word_equation():
     assert "Run Number: 2" in text
     assert "Connects MSE202 free energy to MSE302 phase stability." in text
     assert "Chemical potentials are equal at equilibrium." in text
-    assert "Assessment Quality Check" in text
+    assert "Assessment Quality Check" not in text
     assert "Suggested Revision Options" in text
-    assert "End-to-end token usage" in text
-    assert "Not recorded." in text
+    assert "End-to-end token usage" not in text
 
     with ZipFile(BytesIO(content)) as archive:
         document_xml = archive.read("word/document.xml")
@@ -157,7 +156,7 @@ def test_docx_replaces_equation_placeholders_inline_without_duplicate_blocks():
     assert b"<m:sSup>" in document_xml
 
 
-def test_docx_contains_recorded_end_to_end_token_usage():
+def test_docx_omits_end_to_end_token_usage():
     content = build_assessment_docx(
         run_id=1,
         prompt_id=2,
@@ -166,23 +165,13 @@ def test_docx_contains_recorded_end_to_end_token_usage():
         course="ENGR 101",
         topic="Statics",
         questions=[],
-        token_usage={
-            "input_tokens": 30,
-            "output_tokens": 12,
-            "total_tokens": 42,
-            "model_calls": 2,
-            "recording_state": "recorded",
-            "stages": [],
-        },
     )
 
     document = Document(BytesIO(content))
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
-    assert "End-to-end token usage" in text
-    assert "Input: 30" in text
-    assert "Output: 12" in text
-    assert "Total: 42" in text
-    assert "Model calls: 2" in text
+    assert "End-to-end token usage" not in text
+    assert "Input:" not in text
+    assert "Model calls:" not in text
 
 
 def test_docx_builds_embedded_structured_math_as_semantic_omml():

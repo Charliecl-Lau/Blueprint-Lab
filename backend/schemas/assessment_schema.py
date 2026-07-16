@@ -160,12 +160,6 @@ class EquationSchema(BaseModel):
         return self
 
 
-class QualityCheckSchema(BaseModel):
-    criterion: str
-    rating: int = Field(ge=1, le=5)
-    comment: str
-
-
 class QuestionResponse(BaseModel):
     model_config = {"protected_namespaces": ()}
 
@@ -177,7 +171,6 @@ class QuestionResponse(BaseModel):
     model_answer: Optional[str] = None
     model_answer_segments: Optional[List[ContentSegment]] = None
     equations: List[EquationSchema] = Field(default_factory=list)
-    quality_check: List[QualityCheckSchema] = Field(min_length=1)
     revision_options: List[str] = Field(min_length=2, max_length=3)
 
 
@@ -259,23 +252,6 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                             "required": ["label", "expression", "location"],
                         },
                     },
-                    "quality_check": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "criterion": {"type": "string"},
-                                "rating": {
-                                    "type": "integer",
-                                    "minimum": 1,
-                                    "maximum": 5,
-                                },
-                                "comment": {"type": "string"},
-                            },
-                            "required": ["criterion", "rating", "comment"],
-                        },
-                        "minItems": 1,
-                    },
                     "revision_options": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -287,7 +263,6 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                     "type",
                     "body",
                     "metadata",
-                    "quality_check",
                     "revision_options",
                 ],
             },

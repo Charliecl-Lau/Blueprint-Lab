@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from backend.schemas.experiment_schema import PromptFactors
@@ -17,7 +19,7 @@ def test_provider_structures_are_distinct_and_versioned():
     assert openai_prompt
     assert anthropic_prompt
     assert openai_prompt != anthropic_prompt
-    assert openai_version == anthropic_version == "9"
+    assert openai_version == anthropic_version == "10"
 
 
 def test_provider_structures_require_questions_array_contract():
@@ -26,6 +28,14 @@ def test_provider_structures_require_questions_array_contract():
         assert '"questions"' in system_prompt
         assert "type" in system_prompt
         assert "body" in system_prompt
+        assert "Assessment Quality Requirements" not in system_prompt
+        assert "quality_check" not in system_prompt
+
+
+def test_reference_prompt_does_not_require_assessment_quality_check():
+    reference_prompt = Path("prompt/chatgpt-system-prompt.md").read_text(encoding="utf-8")
+
+    assert "Assessment Quality Check" not in reference_prompt
 
 
 def test_generation_and_structure_prompts_require_flat_word_equation_entries():
@@ -61,6 +71,8 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
+        cognitive_demand="evaluate_create",
+        additional_instruction="Use one laboratory scenario.",
         factors=PromptFactors(concept_bridge=True),
         factor_inputs={
             "concept_bridge": "Criterion for equilibrium",
@@ -72,7 +84,27 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
     assert "ConceptBridge=ON" in text
     assert "FewShot=OFF" in text
     assert "Criterion for equilibrium" in text
+    assert "Cognitive Demand: Evaluate/Create" in text
+    assert "Additional Instruction: Use one laboratory scenario." in text
     assert "must not appear" not in text
+
+
+def test_structure_input_omits_blank_additional_instruction():
+    text = build_structure_input(
+        course="MSE202",
+        topic="Gibbs Phase Rule",
+        learning_objectives="Apply the phase rule.",
+        assessment_type="short_answer",
+        difficulty="medium",
+        number_of_questions=1,
+        cognitive_demand="remember_understand",
+        additional_instruction="   ",
+        factors=PromptFactors(),
+        factor_inputs={},
+    )
+
+    assert "Cognitive Demand: Remember/Understand" in text
+    assert "Additional Instruction" not in text
 
 
 def test_condition_label_records_all_factor_states():

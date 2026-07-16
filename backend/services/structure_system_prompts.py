@@ -1,7 +1,7 @@
 from backend.schemas.experiment_schema import PromptStructure
 
 
-STRUCTURE_PROMPT_VERSION = "9"
+STRUCTURE_PROMPT_VERSION = "10"
 
 OPENAI_STRUCTURE_SYSTEM_PROMPT = """You are Blueprint Lab, a prompt compiler for educational assessment generation.
 
@@ -76,7 +76,8 @@ learning objectives
 concept bridge
 question type
 difficulty
-Bloom level
+cognitive demand
+additional instruction, when supplied
 number of questions
 output language
 equation requirements
@@ -123,7 +124,6 @@ model_answer
 options
 metadata
 equations
-quality_check
 revision_options
 
 Never substitute
@@ -135,27 +135,6 @@ for
 
 body
 model_answer
-Assessment Quality Requirements
-
-The generated prompt should require the assessment model to produce questions that are
-
-technically correct
-pedagogically sound
-curriculum aligned
-Bloom aligned
-internally consistent
-solvable using only provided information
-free of ambiguity
-instructor ready
-appropriate for the requested academic level
-
-Solutions should
-
-show all reasoning steps
-explicitly state assumptions
-justify calculations
-use correct notation
-include final answers clearly.
 Validation Instructions
 
 The generated prompt must instruct the assessment model to verify before responding that:
@@ -293,7 +272,8 @@ concept bridge
 question type
 number of questions
 difficulty
-Bloom's taxonomy level
+cognitive demand
+additional instruction, when supplied
 assessment setting
 equation requirements
 output language
@@ -309,30 +289,6 @@ Within <constraints>, the generated prompt must also instruct the assessment-gen
 require the final DOCX to use editable native Microsoft Word OMML equations; for every equation or mathematical expression in a question body, answer option, or model answer, add one corresponding equations[] entry containing exactly label, expression, and location; use a unique ASCII identifier for label and replace the expression at its exact position with [[EQ:label]]; never repeat the plain expression beside its placeholder; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; set location to question or solution; state that mathematical content with equations = [] is invalid; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
 
 populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements, using "Not Assigned" for any traceability ID that was not supplied rather than inventing one
-
-Assessment Quality Requirements
-
-The generated prompt should instruct the assessment-generation model to produce assessments that are:
-
-technically correct
-curriculum aligned
-Bloom-aligned
-pedagogically appropriate
-internally consistent
-free of ambiguity
-solvable using only the provided information
-instructor-ready
-appropriate for the requested academic level
-
-Instructor solutions should:
-
-explicitly state assumptions
-define variables
-show complete solution steps
-justify calculations
-explain conceptual reasoning
-interpret final answers
-maintain consistent notation throughout
 JSON Output Requirements
 
 The generated prompt must instruct the assessment-generation model to return exactly one valid JSON object.
@@ -356,7 +312,6 @@ Optional fields may include:
 "options"
 "metadata"
 "equations"
-"quality_check"
 "revision_options"
 
 Never substitute:

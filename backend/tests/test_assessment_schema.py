@@ -66,15 +66,15 @@ def test_concept_lists_cannot_be_empty(complete_payload, field):
         AssessmentGenerationResponse.model_validate(payload)
 
 
-def test_quality_check_is_required_and_non_empty(complete_payload):
-    for value in (None, []):
-        payload = deepcopy(complete_payload)
-        if value is None:
-            del payload["questions"][0]["quality_check"]
-        else:
-            payload["questions"][0]["quality_check"] = value
-        with pytest.raises(ValidationError):
-            AssessmentGenerationResponse.model_validate(payload)
+def test_quality_check_is_not_required_and_legacy_values_remain_readable(complete_payload):
+    without_quality_check = deepcopy(complete_payload)
+    del without_quality_check["questions"][0]["quality_check"]
+
+    parsed = AssessmentGenerationResponse.model_validate(without_quality_check)
+    legacy = AssessmentGenerationResponse.model_validate(complete_payload)
+
+    assert not hasattr(parsed.questions[0], "quality_check")
+    assert not hasattr(legacy.questions[0], "quality_check")
 
 
 @pytest.mark.parametrize("count", [0, 1, 4])
@@ -89,8 +89,10 @@ def test_revision_options_require_two_or_three_items(complete_payload, count):
 def test_provider_schema_requires_complete_assessment_contract():
     question = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
     assert set(question["required"]) >= {
-        "type", "body", "metadata", "quality_check", "revision_options"
+        "type", "body", "metadata", "revision_options"
     }
+    assert "quality_check" not in question["required"]
+    assert "quality_check" not in question["properties"]
     metadata = question["properties"]["metadata"]
     assert set(metadata["required"]) >= {
         "question_title",
@@ -104,7 +106,6 @@ def test_provider_schema_requires_complete_assessment_contract():
     }
     assert metadata["properties"]["mse202_concepts"]["minItems"] == 1
     assert metadata["properties"]["mse302_concepts"]["minItems"] == 1
-    assert question["properties"]["quality_check"]["minItems"] == 1
     assert question["properties"]["revision_options"]["minItems"] == 2
     assert question["properties"]["revision_options"]["maxItems"] == 3
 

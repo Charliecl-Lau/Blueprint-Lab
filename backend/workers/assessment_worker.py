@@ -12,7 +12,6 @@ from backend.database import SessionLocal
 from backend.models.experiment import utc_now
 from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
 from backend.schemas.experiment_schema import PromptFactors
-from backend.schemas.run_schema import token_usage_detail
 from backend.schemas.assessment_schema import (
     ASSESSMENT_PROVIDER_SCHEMA,
     AssessmentGenerationResponse,
@@ -176,6 +175,8 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 assessment_type=experiment.assessment_type,
                 difficulty=experiment.difficulty,
                 number_of_questions=experiment.number_of_questions,
+                cognitive_demand=experiment.cognitive_demand,
+                additional_instruction=experiment.additional_instruction,
                 factors=_factors_from_condition(condition),
                 factor_inputs=_structure_factor_inputs(condition, ordered_sources),
             )
@@ -297,7 +298,6 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 course=experiment.course,
                 topic=experiment.topic,
                 questions=assessment.parsed_json["questions"],
-                token_usage=token_usage_detail(run),
             )
             db.add(DocumentArtifact(
                 run_id=run.id,

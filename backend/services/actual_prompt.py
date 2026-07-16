@@ -1,9 +1,10 @@
 import re
+from typing import Optional
 
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
-ACTUAL_PROMPT_GENERATOR_VERSION = "6"
+ACTUAL_PROMPT_GENERATOR_VERSION = "7"
 EQUATION_GENERATION_INSTRUCTION = (
     "The final DOCX must contain editable native Microsoft Word OMML equations. "
     "For every equation or mathematical expression appearing in a question body, "
@@ -27,6 +28,11 @@ _FACTOR_DEFINITIONS = (
     ("reference_content", "Reference Content"),
     ("reasoning_guidance", "Reasoning Guidance"),
 )
+_COGNITIVE_DEMAND_LABELS = {
+    "remember_understand": "Remember/Understand",
+    "apply_analyze": "Apply/Analyze",
+    "evaluate_create": "Evaluate/Create",
+}
 _OPENAI_SECTIONS = (
     "Role",
     "Personality",
@@ -71,6 +77,8 @@ def build_structure_input(
     assessment_type: str,
     difficulty: str,
     number_of_questions: int,
+    cognitive_demand: str,
+    additional_instruction: Optional[str],
     factors: PromptFactors,
     factor_inputs: dict[str, str],
 ) -> str:
@@ -82,10 +90,15 @@ def build_structure_input(
         f"Assessment Type: {assessment_type}",
         f"Difficulty: {difficulty}",
         f"Number of Questions: {number_of_questions}",
+        f"Cognitive Demand: {_COGNITIVE_DEMAND_LABELS.get(cognitive_demand, cognitive_demand)}",
+    ]
+    if additional_instruction and additional_instruction.strip():
+        sections.append(f"Additional Instruction: {additional_instruction.strip()}")
+    sections.extend((
         "",
         "# Prompt Design Factors",
         f"Condition: {build_condition_label(factors)}",
-    ]
+    ))
     for name, label in _FACTOR_DEFINITIONS:
         if getattr(factors, name):
             sections.extend(("", f"## {label}", factor_inputs.get(name, "")))

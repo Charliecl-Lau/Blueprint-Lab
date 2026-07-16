@@ -84,11 +84,6 @@ def complete_question(*, question_type, body, model_answer):
         "body": body,
         "options": [],
         "model_answer": model_answer,
-        "quality_check": [{
-            "criterion": "Correctness",
-            "rating": 5,
-            "comment": "The equilibrium condition is technically correct.",
-        }],
         "revision_options": [
             "Add a numerical force balance.",
             "Ask students to state assumptions.",
@@ -105,6 +100,8 @@ def generation_fixture(test_db):
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=2,
+        cognitive_demand="evaluate_create",
+        additional_instruction="Use one laboratory scenario.",
     )
     test_db.add(experiment)
     test_db.flush()
@@ -175,6 +172,8 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
             assessment_type=generation_fixture.experiment.assessment_type,
             difficulty=generation_fixture.experiment.difficulty,
             number_of_questions=generation_fixture.experiment.number_of_questions,
+            cognitive_demand=generation_fixture.experiment.cognitive_demand,
+            additional_instruction=generation_fixture.experiment.additional_instruction,
             factors=PromptFactors(
                 concept_bridge=factors.concept_bridge_enabled,
                 few_shot=factors.few_shot_enabled,
@@ -255,8 +254,10 @@ def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test
         assert llm.generate.call_args.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
         question_schema = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
         assert set(question_schema["required"]) >= {
-            "type", "body", "metadata", "quality_check", "revision_options"
+            "type", "body", "metadata", "revision_options"
         }
+        assert "quality_check" not in question_schema["required"]
+        assert "quality_check" not in question_schema["properties"]
         assert "metadata" in question_schema["properties"]
         assert "$defs" not in ASSESSMENT_PROVIDER_SCHEMA
         assert "body_segments" not in question_schema["properties"]
