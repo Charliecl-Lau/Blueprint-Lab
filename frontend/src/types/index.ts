@@ -24,6 +24,34 @@ export interface TokenUsage {
   stages: StageUsage[]
 }
 
+export type MathNode =
+  | { type: 'text'; text: string }
+  | { type: 'symbol'; name: string }
+  | { type: 'number'; value: string }
+  | { type: 'operator'; value: string }
+  | { type: 'sequence'; items: MathNode[] }
+  | { type: 'equation'; left: MathNode; right: MathNode }
+  | { type: 'fraction'; numerator: MathNode; denominator: MathNode }
+  | { type: 'differential'; variable: string }
+  | { type: 'product'; terms: MathNode[]; operator?: 'implicit' | 'dot' | 'cross' }
+  | { type: 'subscript'; base: MathNode; subscript: MathNode }
+  | { type: 'superscript'; base: MathNode; superscript: MathNode }
+  | { type: 'radical'; radicand: MathNode; degree?: MathNode | null }
+  | { type: 'matrix'; rows: MathNode[][] }
+
+export interface ContentSegment {
+  type: 'text' | 'math'
+  text?: string
+  math?: MathNode
+}
+
+export interface EquationEntry {
+  label: string
+  expression?: string
+  math?: MathNode
+  location: 'question' | 'solution'
+}
+
 export interface PromptFactors {
   concept_bridge: boolean
   few_shot: boolean
@@ -128,14 +156,22 @@ export interface RecentRun {
   token_usage: TokenUsage
 }
 
-export interface MCQOption { id?: number; body: string; is_correct: boolean }
+export interface MCQOption {
+  id?: number
+  body: string
+  is_correct: boolean
+  segments?: ContentSegment[]
+}
 export interface Question {
   id?: number
   type: 'mcq' | 'long_answer' | 'short_answer'
   body: string
+  body_segments?: ContentSegment[]
   order?: number
   options?: MCQOption[]
   model_answer?: string | null
+  model_answer_segments?: ContentSegment[]
+  equations?: EquationEntry[]
 }
 
 export interface SSEEvent { run_id?: number; generation_id?: number; condition_id: number; stage: Stage }

@@ -11,6 +11,8 @@ const experiment: Experiment = {
   difficulty: 'medium',
   number_of_questions: 4,
   estimated_time_minutes: 30,
+  cognitive_demand: 'remember_understand',
+  additional_instruction: null,
   created_at: '2026-07-10T00:00:00Z',
   conditions: [],
   runs: [{ id: 8, condition_id: 3, run_number: 1, status: 'complete' }],

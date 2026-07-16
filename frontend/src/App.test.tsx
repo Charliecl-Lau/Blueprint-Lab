@@ -306,6 +306,8 @@ test('keeps the progress shortcut after returning home when recent runs cannot l
     difficulty: 'medium',
     number_of_questions: 4,
     estimated_time_minutes: 30,
+    cognitive_demand: 'remember_understand',
+    additional_instruction: null,
     created_at: '2026-07-14T02:00:00Z',
     conditions: [],
     runs: [{
