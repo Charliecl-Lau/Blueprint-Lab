@@ -20,3 +20,22 @@ def test_linear_parser_builds_fraction_scripts_and_radical_nodes():
 
 def test_linear_parser_falls_back_to_editable_text_for_malformed_input():
     assert parse_linear_expression("x_(") == {"type": "text", "text": "x_("}
+    assert parse_linear_expression("K^-") == {"type": "text", "text": "K^-"}
+
+
+def test_linear_parser_keeps_signed_values_inside_superscripts():
+    for expression, sign, value in (
+        ("K^-1", "-", {"type": "number", "value": "1"}),
+        ("x^+n", "+", {"type": "symbol", "name": "n"}),
+        ("10^−3", "−", {"type": "number", "value": "3"}),
+    ):
+        parsed = parse_linear_expression(expression)
+
+        assert parsed["type"] == "superscript"
+        assert parsed["superscript"] == {
+            "type": "sequence",
+            "items": [
+                {"type": "operator", "value": sign},
+                value,
+            ],
+        }

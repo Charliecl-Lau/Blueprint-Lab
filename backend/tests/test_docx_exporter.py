@@ -2,6 +2,7 @@ from io import BytesIO
 from zipfile import ZipFile
 
 from docx import Document
+from lxml import etree
 
 from backend.services.docx_exporter import build_assessment_docx
 
@@ -109,6 +110,40 @@ def test_docx_converts_flat_word_linear_equations_to_built_up_omml():
     assert document_xml.count(b"<m:sSub>") >= 2
     assert b"<m:sSup>" in document_xml
     assert b"<m:rad>" in document_xml
+
+
+def test_docx_keeps_complete_signed_exponent_inside_omml_superscript():
+    content = build_assessment_docx(
+        run_id=30,
+        prompt_id=31,
+        condition_code="C001",
+        run_number=1,
+        course="MSE202",
+        topic="Signed powers",
+        questions=[{
+            "metadata": {},
+            "body": "Interpret the unit.",
+            "options": [],
+            "model_answer": "Use the unit shown.",
+            "equations": [{
+                "label": "InverseUnit",
+                "expression": "K^-1",
+                "location": "solution",
+            }],
+        }],
+    )
+
+    with ZipFile(BytesIO(content)) as archive:
+        document_xml = archive.read("word/document.xml")
+
+    root = etree.fromstring(document_xml)
+    namespace = {
+        "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+    }
+    superscripts = root.xpath("//m:sSup/m:sup", namespaces=namespace)
+
+    assert len(superscripts) == 1
+    assert "".join(superscripts[0].itertext()) == "-1"
 
 
 def test_docx_replaces_equation_placeholders_inline_without_duplicate_blocks():
