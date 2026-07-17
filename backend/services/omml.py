@@ -120,12 +120,22 @@ class _LinearEquationParser:
         node = self._parse_atom()
         while self._peek() in ("_", "^"):
             operator = self._take()
-            script = self._parse_atom()
+            script = self._parse_script_value()
             if operator == "_":
                 node = {"type": "subscript", "base": node, "subscript": script}
             else:
                 node = {"type": "superscript", "base": node, "superscript": script}
         return node
+
+    def _parse_script_value(self) -> dict:
+        sign = self._peek()
+        if sign not in ("+", "-", "−"):
+            return self._parse_atom()
+        self._take()
+        return _sequence([
+            {"type": "operator", "value": sign},
+            self._parse_atom(),
+        ])
 
     def _parse_atom(self) -> dict:
         token = self._take()
