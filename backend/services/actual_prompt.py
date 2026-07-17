@@ -5,7 +5,7 @@ from typing import Optional
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
-ACTUAL_PROMPT_GENERATOR_VERSION = "7"
+ACTUAL_PROMPT_GENERATOR_VERSION = "8"
 OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "1"
 OPENAI_TEMPLATE_PROVENANCE = "local-template:docs/actual_prompt_template.md"
 _OPENAI_TEMPLATE_PATH = (
