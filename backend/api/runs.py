@@ -17,7 +17,7 @@ from backend.schemas.run_schema import (
     RunSummary,
     token_usage_detail,
 )
-from backend.services.run_service import create_run, retry_llm_evaluation, retry_run
+from backend.services.run_service import create_run, retry_run
 from backend.workers.assessment_worker import run_generation_pipeline
 
 router = APIRouter(tags=["runs"])
@@ -243,15 +243,6 @@ def get_run(run_id: int, include_raw_response: bool = False, db: Session = Depen
 def post_retry(run_id: int, db: Session = Depends(get_db)):
     run = retry_run(db, run_id); run_generation_pipeline.delay(run.id); return run
 
-
-@router.post(
-    "/assessments/{assessment_id}/evaluations/llm/retry",
-    response_model=RunSummary,
-)
-def post_llm_evaluation_retry(
-    assessment_id: int, db: Session = Depends(get_db)
-):
-    return retry_llm_evaluation(db, assessment_id)
 
 @router.get("/runs/{run_id}/export-docx")
 def export_run(run_id: int, db: Session = Depends(get_db)):
