@@ -43,7 +43,9 @@ export function AssessmentViewerPage() {
   const experimentRuns = Object.values(runs).filter(
     (item) => item.experiment_id === id || experimentRunIds.has(item.id),
   )
-  const viewerReady = experimentRuns.filter((item) => item.viewer_ready_at)
+  const viewerReady = experimentRuns.filter(
+    (item) => item.viewer_ready_at || item.status === 'complete',
+  )
   const selectedId = routeRunId ?? selectedRunId ?? viewerReady[0]?.id
   const selected = selectedId ? runs[selectedId] : undefined
 
@@ -59,8 +61,10 @@ export function AssessmentViewerPage() {
   const condition = selected?.condition ?? experiment?.conditions.find((item) => item.id === selected?.condition_id)
   const evaluationStatus = selected?.evaluation_status === 'failed' || selected?.status === 'evaluation_failed'
     ? 'Evaluation unavailable'
-    : selected?.evaluation_status === 'complete' || selected?.status === 'complete'
+    : selected?.evaluation_status === 'complete'
       ? 'Evaluation complete'
+      : selected?.evaluation_status === 'not_started'
+        ? 'Evaluation unavailable'
       : 'Evaluation in progress'
 
   const retry = async () => {

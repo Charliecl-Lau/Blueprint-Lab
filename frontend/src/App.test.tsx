@@ -654,6 +654,78 @@ test('Viewer streams evaluation tokens and enables Grade Assessment on completio
   expect(screen.getByText('67')).toBeVisible()
 })
 
+test('Viewer keeps legacy completed assessments visible with evaluation unavailable', async () => {
+  window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Legacy phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-14T09:00:00Z',
+          conditions: [],
+          runs: [{
+            id: 8,
+            experiment_id: 1,
+            condition_id: 3,
+            run_number: 1,
+            status: 'complete',
+            viewer_ready_at: null,
+          }],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          viewer_ready_at: '2026-07-14T09:05:00Z',
+          evaluation_status: 'not_started',
+          grading_available: false,
+          grading_question_id: null,
+          artifact_available: true,
+          assessment: {
+            id: 5,
+            question_ids: [],
+            output_hash: 'legacy-hash',
+            schema_version: '1',
+            parsed_json: { questions: [{
+              type: 'short_answer',
+              body: 'State the phase stability condition.',
+              model_answer: 'The stable phase minimizes Gibbs free energy.',
+            }] },
+          },
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByText('State the phase stability condition.')).toBeVisible()
+  expect(screen.getByRole('status', { name: 'Evaluation status' })).toHaveTextContent(
+    'Evaluation unavailable',
+  )
+  expect(screen.getByRole('button', { name: 'Evaluation unavailable' })).toBeDisabled()
+  expect(screen.queryByRole('link', { name: 'Grade Assessment' })).not.toBeInTheDocument()
+})
+
 test('keeps usage in the viewer and renders readable conditions and MathML questions', async () => {
   window.history.replaceState({}, '', '/experiments/1/viewer/8')
   vi.mocked(fetch).mockImplementation(async (input) => {

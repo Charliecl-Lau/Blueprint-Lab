@@ -61,6 +61,14 @@ def run_detail(run: Run, include_raw_response: bool = False):
     grading_available = bool(questions) and run.status == "complete" and all(
         _has_current_llm_evaluation(question) for question in questions
     )
+    viewer_ready_at = run.viewer_ready_at
+    if (
+        viewer_ready_at is None
+        and run.status == "complete"
+        and run.assessment is not None
+        and run.assessment.parsed_json is not None
+    ):
+        viewer_ready_at = run.completed_at or run.created_at
     prompt = None
     if run.prompt:
         prompt = {
@@ -94,15 +102,16 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "condition_id": run.condition_id,
         "run_number": run.run_number,
         "status": run.status,
-        "viewer_ready_at": run.viewer_ready_at,
+        "viewer_ready_at": viewer_ready_at,
         "progress_message": run.progress_message,
         "evaluation_status": (
-            "complete"
-            if run.status == "complete"
-            else "failed"
+            "failed"
             if run.status == "evaluation_failed"
+            else "complete"
+            if grading_available
             else "in_progress"
-            if run.viewer_ready_at is not None
+            if run.status in {"evaluating_quality", "saving_results"}
+            or (viewer_ready_at is not None and run.status != "complete")
             else "not_started"
         ),
         "grading_available": grading_available,

@@ -1,8 +1,16 @@
 import json
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from backend.models import Experiment, Run
+from backend.config import settings
+from backend.models import (
+    AssessmentQuestion,
+    Evaluation,
+    Experiment,
+    ModelCallUsage,
+    Run,
+)
 from backend.services.llm_client import LLMResult, TokenUsage
 from backend.tests.test_evaluation_worker import _evaluation_json
 
@@ -88,51 +96,168 @@ def llm_result(raw_text, response_id, usage):
     )
 
 
+def run_generation_with_mocked_gemini(test_db, run_id, usage=(20, 8, 28)):
+    generation_llm = MagicMock()
+    generation_llm.generate.return_value = llm_result(
+        assessment_response(), f"{run_id}-assessment", usage
+    )
+    with (
+        patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
+        patch("backend.workers.assessment_worker.LLMClient", return_value=generation_llm),
+        patch("backend.workers.assessment_worker.redis_client"),
+        patch("backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"),
+    ):
+        test_db.close = MagicMock()
+        from backend.workers.assessment_worker import run_generation_pipeline
+
+        run_generation_pipeline.run(run_id)
+    return generation_llm
+
+
+def run_evaluation_with_mocked_gemini(
+    test_db, run_id, raw_text=None, response_suffix="evaluation"
+):
+    evaluation_model = settings.llm_evaluation_model or settings.llm_model
+    evaluation_llm = MagicMock(model=evaluation_model)
+    evaluation_llm.generate.return_value = llm_result(
+        raw_text or _evaluation_json(), f"{run_id}-{response_suffix}", (12, 8, 20)
+    )
+    with (
+        patch("backend.workers.evaluation_worker.SessionLocal", return_value=test_db),
+        patch("backend.workers.evaluation_worker.LLMClient", return_value=evaluation_llm),
+        patch("backend.workers.evaluation_worker.redis_client"),
+        patch("backend.workers.evaluation_worker.build_assessment_docx", return_value=b"docx"),
+    ):
+        from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
+
+        run_llm_evaluation_pipeline.run(run_id)
+    return evaluation_llm
+
+
+def test_viewer_ready_boundary_then_evaluation_adds_usage_without_mutation(client, test_db):
+    created = create_valid_experiment(client, key="viewer-ready-boundary")
+    run_generation_with_mocked_gemini(test_db, created.run_id)
+
+    run = test_db.get(Run, created.run_id)
+    test_db.refresh(run)
+    generated_snapshot = deepcopy(run.assessment.parsed_json)
+    generated_hash = run.assessment.output_hash
+    question_ids = [item.id for item in run.assessment.questions]
+    initial = client.get(f"/runs/{run.id}").json()
+
+    assert run.viewer_ready_at is not None
+    assert run.status == "evaluating_quality"
+    assert run.assessment.parsed_json == generated_snapshot
+    assert initial["token_usage"]["stages"][-1]["stage"] == "assessment"
+    assert initial["token_usage"]["total_tokens"] == 28
+
+    run_evaluation_with_mocked_gemini(test_db, run.id)
+    test_db.refresh(run)
+    completed = client.get(f"/runs/{run.id}").json()
+
+    assert run.status == "complete"
+    assert run.assessment.parsed_json == generated_snapshot
+    assert run.assessment.output_hash == generated_hash
+    assert completed["token_usage"]["total_tokens"] == 48
+    assert completed["token_usage"]["stages"][-1]["stage"] == "evaluation"
+    assert (
+        test_db.query(Evaluation)
+        .filter(Evaluation.question_id.in_(question_ids), Evaluation.status == "finalized")
+        .count()
+        == len(question_ids)
+    )
+    grading = client.get(f"/assessment-questions/{question_ids[0]}/grading-context")
+    assert grading.status_code == 200
+    assert grading.json()["llm_evaluation"]["evaluation_type"] == "llm"
+    assert grading.json()["human_evaluation"]["evaluation_type"] == "human"
+
+
+def test_failed_evaluation_retries_only_evaluation_and_preserves_assessment(client, test_db):
+    created = create_valid_experiment(client, key="evaluation-only-retry")
+    generation_llm = run_generation_with_mocked_gemini(test_db, created.run_id)
+    run = test_db.get(Run, created.run_id)
+    snapshot = deepcopy(run.assessment.parsed_json)
+    output_hash = run.assessment.output_hash
+    assessment_id = run.assessment.id
+
+    run_evaluation_with_mocked_gemini(
+        test_db,
+        run.id,
+        raw_text='{"criteria": []}',
+        response_suffix="evaluation-failed",
+    )
+    test_db.refresh(run)
+    assert run.status == "evaluation_failed"
+    assert run.assessment.parsed_json == snapshot
+
+    with patch("backend.workers.evaluation_worker.run_llm_evaluation_pipeline.delay") as retry_delay:
+        retry = client.post(f"/assessments/{assessment_id}/evaluations/llm/retry")
+    assert retry.status_code == 200
+    retry_delay.assert_called_once_with(run.id)
+    assert retry.json()["status"] == "evaluating_quality"
+
+    run_evaluation_with_mocked_gemini(
+        test_db, run.id, response_suffix="evaluation-retry"
+    )
+    test_db.refresh(run)
+    usage_stages = [
+        item.stage
+        for item in test_db.query(ModelCallUsage)
+        .filter_by(run_id=run.id)
+        .order_by(ModelCallUsage.id)
+    ]
+    assert run.status == "complete"
+    assert run.assessment.parsed_json == snapshot
+    assert run.assessment.output_hash == output_hash
+    assert generation_llm.generate.call_count == 1
+    assert usage_stages.count("assessment") == 1
+    assert usage_stages.count("evaluation") == 2
+
+
+def test_legacy_completed_assessment_can_backfill_evaluation_without_regeneration(
+    client, test_db
+):
+    created = create_valid_experiment(client, key="legacy-evaluation-backfill")
+    generation_llm = run_generation_with_mocked_gemini(test_db, created.run_id)
+    run = test_db.get(Run, created.run_id)
+    snapshot = deepcopy(run.assessment.parsed_json)
+    output_hash = run.assessment.output_hash
+    assessment_id = run.assessment.id
+
+    test_db.query(AssessmentQuestion).filter_by(assessment_id=assessment_id).delete()
+    run.status = "complete"
+    run.viewer_ready_at = None
+    test_db.commit()
+    test_db.expire_all()
+
+    legacy_detail = client.get(f"/runs/{run.id}").json()
+    assert legacy_detail["viewer_ready_at"] is not None
+    assert legacy_detail["evaluation_status"] == "not_started"
+    assert legacy_detail["grading_available"] is False
+
+    with patch("backend.workers.evaluation_worker.run_llm_evaluation_pipeline.delay") as delay:
+        retry = client.post(f"/assessments/{assessment_id}/evaluations/llm/retry")
+    assert retry.status_code == 200
+    delay.assert_called_once_with(run.id)
+
+    run_evaluation_with_mocked_gemini(
+        test_db, run.id, response_suffix="legacy-evaluation-backfill"
+    )
+    test_db.refresh(run)
+    assert run.status == "complete"
+    assert run.assessment.parsed_json == snapshot
+    assert run.assessment.output_hash == output_hash
+    assert generation_llm.generate.call_count == 1
+    assert len(run.assessment.questions) == len(snapshot["questions"])
+
+
 def test_two_runs_finish_independently_and_reopen_with_isolated_tokens(client, test_db):
     first = create_valid_experiment(client, key="first")
     second = create_valid_experiment(client, key="second")
 
     def run_worker_with_mocked_gemini(run_id, usage):
-        generation_llm = MagicMock()
-        generation_llm.generate.return_value = llm_result(
-            assessment_response(), f"{run_id}-assessment", usage
-        )
-        evaluation_llm = MagicMock(model="gemini-evaluator")
-        evaluation_llm.generate.return_value = llm_result(
-            _evaluation_json(), f"{run_id}-evaluation", (12, 8, 20)
-        )
-        with (
-            patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
-            patch(
-                "backend.workers.assessment_worker.LLMClient",
-                return_value=generation_llm,
-            ),
-            patch("backend.workers.assessment_worker.redis_client"),
-            patch(
-                "backend.workers.assessment_worker."
-                "run_llm_evaluation_pipeline.delay"
-            ),
-        ):
-            test_db.close = MagicMock()
-            from backend.workers.assessment_worker import run_generation_pipeline
-            run_generation_pipeline.run(run_id)
-        with (
-            patch("backend.workers.evaluation_worker.SessionLocal", return_value=test_db),
-            patch(
-                "backend.workers.evaluation_worker.LLMClient",
-                return_value=evaluation_llm,
-            ),
-            patch("backend.workers.evaluation_worker.redis_client"),
-            patch(
-                "backend.workers.evaluation_worker.build_assessment_docx",
-                return_value=b"docx",
-            ),
-        ):
-            from backend.workers.evaluation_worker import (
-                run_llm_evaluation_pipeline,
-            )
-
-            run_llm_evaluation_pipeline.run(run_id)
+        run_generation_with_mocked_gemini(test_db, run_id, usage)
+        run_evaluation_with_mocked_gemini(test_db, run_id)
 
     run_worker_with_mocked_gemini(first.run_id, usage=(20, 8, 28))
     run_worker_with_mocked_gemini(second.run_id, usage=(200, 80, 280))
