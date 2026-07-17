@@ -21,6 +21,8 @@ from backend.services.actual_prompt import (
     OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION,
     OPENAI_TEMPLATE_PROVENANCE,
     ActualPromptValidationError,
+    build_assessment_repair_system_prompt,
+    build_assessment_repair_user_message,
     build_structure_input,
     build_generation_system_prompt,
     render_openai_actual_prompt,
@@ -379,7 +381,54 @@ def run_generation_pipeline(self, run_id: int) -> None:
             _publish_progress(
                 experiment.id, run.id, condition.id, "generating"
             )
-            generated = generate_questions(result.raw_text)
+            try:
+                generated = generate_questions(result.raw_text)
+            except ValidationError as validation_error:
+                run.progress_message = "Repairing Assessment"
+                db.commit()
+                _publish_progress(
+                    experiment.id, run.id, condition.id, "generating"
+                )
+                try:
+                    result = _call_gemini(
+                        self,
+                        db,
+                        run,
+                        llm,
+                        stage="repair",
+                        system_prompt=build_assessment_repair_system_prompt(
+                            prompt.actual_prompt
+                        ),
+                        user_message=build_assessment_repair_user_message(
+                            result.raw_text,
+                            str(validation_error),
+                        ),
+                        model_settings=run.model_settings,
+                        response_schema=ASSESSMENT_PROVIDER_SCHEMA,
+                    )
+                except Exception as exc:
+                    _record_error(
+                        db,
+                        run,
+                        "assessment_repair_provider_error",
+                        exc,
+                    )
+                    _publish_progress(
+                        experiment.id, run.id, condition.id, "error"
+                    )
+                    return
+
+                assessment.raw_response_text = result.raw_text
+                assessment.output_hash = sha256_text(result.raw_text)
+                run.request_id = result.provider_request_id
+                run.model = result.model_name
+                run.version = result.model_version
+                run.finish_reason = result.finish_reason
+                run.duration_ms = int(
+                    (time.perf_counter() - generation_started) * 1000
+                )
+                db.commit()
+                generated = generate_questions(result.raw_text)
             assessment.parsed_json = generated.model_dump()
             run.generated_json = assessment.parsed_json
             persist_assessment_questions(db, assessment)

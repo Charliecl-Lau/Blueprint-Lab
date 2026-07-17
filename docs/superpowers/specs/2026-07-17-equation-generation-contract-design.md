@@ -102,7 +102,7 @@ Validation errors will identify the question field and offending invariant so
 the worker can request one focused repair. The repair receives the original
 response and exact validation error, preserves the assessment content, and
 changes only the JSON needed to satisfy the equation contract. The repair call
-uses the same provider schema and is recorded as an `assessment_repair` model
+uses the same provider schema and is recorded as a `repair` model
 call for usage accounting.
 
 Only Pydantic schema-validation failures trigger repair. Invalid JSON and
@@ -120,7 +120,7 @@ For a future OpenAI-structure run:
 3. The provider returns structured JSON under the strengthened provider schema.
 4. `AssessmentGenerationResponse` validates each question and its equation
    references.
-5. On a validation error, the worker makes one `assessment_repair` call with the
+5. On a validation error, the worker makes one `repair` call with the
    rejected JSON and validation feedback, then validates the repaired JSON.
 6. Only validated JSON is persisted as `parsed_json` and passed to both the DOCX
    exporter and assessment viewer.
@@ -143,7 +143,7 @@ Tests will follow red-green development and cover:
   equation references; and
 - repair of the run-49 pattern where one scalar assignment remains outside an
   equation reference;
-- model-usage accounting for the `assessment_repair` call; and
+- model-usage accounting for the `repair` call; and
 - worker behavior that records an assessment parse error and creates no
   artifact when the single repair response is still invalid.
 

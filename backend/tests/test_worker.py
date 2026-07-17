@@ -17,6 +17,7 @@ from backend.services.actual_prompt import (
     EQUATION_GENERATION_INSTRUCTION,
     OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION,
     OPENAI_TEMPLATE_PROVENANCE,
+    build_assessment_repair_system_prompt,
     build_generation_system_prompt,
     build_structure_input,
     render_openai_actual_prompt,
@@ -403,35 +404,126 @@ def test_generation_pipeline_preserves_raw_response_when_parsing_fails(generatio
         assert generation_fixture.prompt.prompt_hash
 
 
-def test_generation_pipeline_rejects_plain_formula_text_before_docx_creation(
+def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
+    generation_fixture,
+    test_db,
+):
+    rejected_question = complete_question(
+        question_type="short_answer",
+        body=(
+            "The gas constant is R = 8.314 J/(mol K). "
+            "Use [[EQ:entropy_relation]]."
+        ),
+        model_answer="Use the entropy relation to calculate the result.",
+    )
+    rejected_question["equations"] = [{
+        "label": "entropy_relation",
+        "expression": "DeltaS_mix = -R(x_A ln(x_A) + x_B ln(x_B))",
+        "location": "question",
+    }]
+    repaired_question = complete_question(
+        question_type="short_answer",
+        body=(
+            "The gas constant is [[EQ:gas_constant]]. "
+            "Use [[EQ:entropy_relation]]."
+        ),
+        model_answer="Use the entropy relation to calculate the result.",
+    )
+    repaired_question["equations"] = [
+        {
+            "label": "gas_constant",
+            "expression": "R = 8.314 J/(mol K)",
+            "location": "question",
+        },
+        {
+            "label": "entropy_relation",
+            "expression": "DeltaS_mix = -R(x_A ln(x_A) + x_B ln(x_B))",
+            "location": "question",
+        },
+    ]
+    llm = MagicMock()
+    rejected_raw = __import__("json").dumps({"questions": [rejected_question]})
+    repaired_raw = __import__("json").dumps({"questions": [repaired_question]})
+    llm.generate.side_effect = [
+        result(rejected_raw, 20, 8, 28),
+        result(repaired_raw, 12, 6, 18),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.status == "complete", generation_fixture.error_message
+    assert generation_fixture.assessment.raw_response_text == repaired_raw
+    assert generation_fixture.assessment.output_hash == sha256_text(repaired_raw)
+    assert generation_fixture.assessment.parsed_json["questions"][0]["body"] == (
+        repaired_question["body"]
+    )
+    assert generation_fixture.document_artifact.content == b"PK-generation-docx"
+    assert llm.generate.call_count == 2
+    expected_error = (
+        "1 validation error for AssessmentGenerationResponse\n"
+        "questions.0\n"
+        "  Value error, body: mathematical expression must use an equation reference"
+    )
+    repair_call = llm.generate.call_args_list[1]
+    assert repair_call.kwargs["system_prompt"] == (
+        build_assessment_repair_system_prompt(
+            generation_fixture.prompt.actual_prompt
+        )
+    )
+    assert rejected_raw in repair_call.kwargs["user_message"]
+    assert expected_error in repair_call.kwargs["user_message"]
+    assert repair_call.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
+    usage_stages = [
+        usage.stage
+        for usage in test_db.query(ModelCallUsage)
+        .filter_by(run_id=generation_fixture.id)
+        .order_by(ModelCallUsage.id)
+        .all()
+    ]
+    assert usage_stages == ["assessment", "repair"]
+    assert generation_fixture.model_call_count == 2
+    assert generation_fixture.total_tokens == 46
+    mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+
+
+def test_generation_pipeline_stops_after_one_invalid_repair(
     generation_fixture,
     test_db,
 ):
     question = complete_question(
         question_type="short_answer",
-        body=(
-            "The enthalpy of mixing is DeltaH_mix = 0. "
-            "Use [[EQ:entropy_relation]]."
-        ),
-        model_answer="Therefore DeltaG_mix = -T DeltaS_mix.",
+        body="The gas constant is R = 8.314 J/(mol K).",
+        model_answer="Use the supplied value.",
     )
-    question["equations"] = [{
-        "label": "entropy_relation",
-        "expression": "DeltaS_mix = -R(x_A ln(x_A) + x_B ln(x_B))",
-        "location": "question",
-    }]
+    question["equations"] = []
+    rejected_raw = __import__("json").dumps({"questions": [question]})
     llm = MagicMock()
-    raw_text = __import__("json").dumps({"questions": [question]})
-    llm.generate.return_value = result(raw_text, 20, 8, 28)
+    llm.generate.side_effect = [
+        result(rejected_raw, 20, 8, 28),
+        result(rejected_raw, 12, 6, 18),
+    ]
 
     mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
 
     test_db.refresh(generation_fixture)
     assert generation_fixture.status == "error"
-    assert generation_fixture.error_type == "assessment_parse_error"
-    assert generation_fixture.assessment.raw_response_text == raw_text
+    assert generation_fixture.error_type == "assessment_parse_error", (
+        generation_fixture.error_message
+    )
     assert generation_fixture.assessment.parsed_json is None
     assert generation_fixture.document_artifact is None
+    assert llm.generate.call_count == 2
+    usage_stages = [
+        usage.stage
+        for usage in test_db.query(ModelCallUsage)
+        .filter_by(run_id=generation_fixture.id)
+        .order_by(ModelCallUsage.id)
+        .all()
+    ]
+    assert usage_stages == ["assessment", "repair"]
+    assert generation_fixture.model_call_count == 2
+    assert generation_fixture.total_tokens == 46
     mock_redis.evaluation_delay.assert_not_called()
 
 

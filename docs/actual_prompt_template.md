@@ -89,9 +89,14 @@ Return exactly one valid JSON object with the following structure.
  "questions": [
    {
      "type": "{question_type}",
-     "body": "Use [[EQ:question_equation]].",
+     "body": "The gas constant is [[EQ:gas_constant]]. Use [[EQ:question_equation]].",
      "model_answer": "Apply [[EQ:solution_equation]].",
      "equations": [
+       {
+         "label": "gas_constant",
+         "expression": "R = 8.314 J/(mol K)",
+         "location": "question"
+       },
        {
          "label": "question_equation",
          "expression": "G_mix = H_mix - T S_mix",

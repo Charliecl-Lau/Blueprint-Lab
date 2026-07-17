@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import backend.services.actual_prompt as actual_prompt
 from backend.schemas.experiment_schema import PromptFactors
 from backend.services.actual_prompt import (
     ActualPromptValidationError,
@@ -51,6 +52,7 @@ def test_generation_and_structure_prompts_require_flat_word_equation_entries():
         "[[EQ:label]]",
     ):
         assert required_text in generation_prompt
+    assert "numeric assignments" in generation_prompt
     assert "structured math AST" not in generation_prompt
     assert "body_segments" not in generation_prompt
 
@@ -152,8 +154,13 @@ def test_openai_template_rendering_is_stable_and_preserves_json():
 def test_openai_template_demonstrates_required_equation_references():
     prompt = render_openai()
 
-    assert '"body": "Use [[EQ:question_equation]]."' in prompt
+    assert (
+        '"body": "The gas constant is [[EQ:gas_constant]]. '
+        'Use [[EQ:question_equation]]."'
+    ) in prompt
     assert '"model_answer": "Apply [[EQ:solution_equation]]."' in prompt
+    assert '"label": "gas_constant"' in prompt
+    assert '"expression": "R = 8.314 J/(mol K)"' in prompt
     assert '"label": "question_equation"' in prompt
     assert '"location": "question"' in prompt
     assert '"label": "solution_equation"' in prompt
@@ -231,6 +238,34 @@ def test_openai_template_delegates_materials_context_derivation():
         "Materials Science Context:\n"
         "Derive from the supplied course, topic, and learning objective."
     ) in render_openai()
+
+
+def test_assessment_repair_prompt_preserves_content_and_reports_validation_error():
+    system_builder = getattr(
+        actual_prompt,
+        "build_assessment_repair_system_prompt",
+        None,
+    )
+    message_builder = getattr(
+        actual_prompt,
+        "build_assessment_repair_user_message",
+        None,
+    )
+
+    assert system_builder is not None
+    assert message_builder is not None
+
+    system_prompt = system_builder(OPENAI_ACTUAL_PROMPT)
+    user_message = message_builder(
+        '{"questions":[{"body":"R = 8.314 J/(mol K)"}]}',
+        "body: mathematical expression must use an equation reference",
+    )
+
+    assert OPENAI_ACTUAL_PROMPT in system_prompt
+    assert "Return the complete corrected JSON object" in system_prompt
+    assert "Preserve the assessment content" in system_prompt
+    assert "body: mathematical expression must use an equation reference" in user_message
+    assert '"body":"R = 8.314 J/(mol K)"' in user_message
 
 
 def test_openai_template_load_failure_is_classified(monkeypatch, tmp_path):
