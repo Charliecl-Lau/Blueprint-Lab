@@ -1,10 +1,16 @@
 import re
+from pathlib import Path
 from typing import Optional
 
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
 ACTUAL_PROMPT_GENERATOR_VERSION = "7"
+OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "1"
+OPENAI_TEMPLATE_PROVENANCE = "local-template:docs/actual_prompt_template.md"
+_OPENAI_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[2] / "docs" / "actual_prompt_template.md"
+)
 EQUATION_GENERATION_INSTRUCTION = (
     "The final DOCX must contain editable native Microsoft Word OMML equations. "
     "For every equation or mathematical expression appearing in a question body, "
@@ -36,11 +42,29 @@ _COGNITIVE_DEMAND_LABELS = {
 _OPENAI_SECTIONS = (
     "Role",
     "Personality",
-    "Goal",
-    "Measure of Success",
+    "Goal (Dynamic)",
+    "Prompt Parameters (Dynamic)",
+    "Concept Mapping",
+    "Prompt Design Factors",
     "Constraints",
-    "Output",
+    "Output Format",
     "Stop Rules",
+)
+_OPENAI_PLACEHOLDERS = (
+    "learning_objective",
+    "course",
+    "topic",
+    "question_type",
+    "difficulty",
+    "cognitive_demand",
+    "number_of_questions",
+    "estimated_time",
+    "mse202_concepts",
+    "mse302_concepts",
+    "concept_bridge",
+    "materials_science_context",
+    "prompt_design_factors",
+    "additional_instruction_block",
 )
 _ANTHROPIC_SECTIONS = (
     "context",
@@ -67,6 +91,92 @@ def build_condition_label(factors: PromptFactors) -> str:
         f"ReferenceContent={'ON' if factors.reference_content else 'OFF'}; "
         f"ReasoningGuidance={'ON' if factors.reasoning_guidance else 'OFF'}"
     )
+
+
+def _format_prompt_design_factors(
+    factors: PromptFactors, factor_inputs: dict[str, str]
+) -> str:
+    blocks = []
+    for name, label in _FACTOR_DEFINITIONS:
+        if getattr(factors, name):
+            blocks.append(f"{label}:\n{factor_inputs[name].strip()}")
+    return "\n\n".join(blocks) if blocks else "None Selected"
+
+
+def render_openai_actual_prompt(
+    *,
+    course: str,
+    topic: str,
+    learning_objectives: str,
+    assessment_type: str,
+    difficulty: str,
+    number_of_questions: int,
+    estimated_time_minutes: int,
+    cognitive_demand: str,
+    additional_instruction: Optional[str],
+    factors: PromptFactors,
+    factor_inputs: dict[str, str],
+) -> str:
+    try:
+        rendered = _OPENAI_TEMPLATE_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ActualPromptValidationError(
+            "OpenAI Actual Prompt template cannot be loaded"
+        ) from exc
+
+    normalized_course = course.strip().casefold()
+    normalized_topic = topic.strip()
+    values = {
+        "learning_objective": learning_objectives.strip(),
+        "course": course.strip(),
+        "topic": normalized_topic,
+        "question_type": assessment_type,
+        "difficulty": difficulty.strip(),
+        "cognitive_demand": _COGNITIVE_DEMAND_LABELS.get(
+            cognitive_demand, cognitive_demand
+        ),
+        "number_of_questions": str(number_of_questions),
+        "estimated_time": f"{estimated_time_minutes} minutes",
+        "mse202_concepts": (
+            normalized_topic if normalized_course == "mse202" else "Not Provided"
+        ),
+        "mse302_concepts": (
+            normalized_topic if normalized_course == "mse302" else "Not Provided"
+        ),
+        "concept_bridge": (
+            factor_inputs["concept_bridge"].strip()
+            if factors.concept_bridge
+            else "Not Provided"
+        ),
+        "materials_science_context": (
+            "Derive from the supplied course, topic, and learning objective."
+        ),
+        "prompt_design_factors": _format_prompt_design_factors(
+            factors, factor_inputs
+        ),
+        "additional_instruction_block": (
+            "Additional Instruction:\n" + additional_instruction.strip()
+            if additional_instruction and additional_instruction.strip()
+            else ""
+        ),
+    }
+    for name in _OPENAI_PLACEHOLDERS:
+        rendered = rendered.replace("{" + name + "}", values[name])
+
+    unresolved = [
+        name
+        for name in _OPENAI_PLACEHOLDERS
+        if "{" + name + "}" in rendered
+    ]
+    if unresolved:
+        raise ActualPromptValidationError(
+            "OpenAI Actual Prompt contains unresolved placeholders: "
+            + ", ".join(unresolved)
+        )
+
+    rendered = rendered.strip()
+    validate_actual_prompt("openai", rendered)
+    return rendered
 
 
 def build_structure_input(
@@ -125,13 +235,25 @@ def validate_actual_prompt(
 
 
 def _validate_openai(raw_text: str) -> None:
-    headings = re.findall(r"(?m)^# ([^\r\n]+)$", raw_text)
+    headings = [
+        line for line in raw_text.splitlines() if line in _OPENAI_SECTIONS
+    ]
     if headings != list(_OPENAI_SECTIONS):
         raise ActualPromptValidationError(
             "OpenAI Actual Prompt must contain each required section exactly once and in order"
         )
-    if not raw_text.startswith("# Role\n"):
-        raise ActualPromptValidationError("OpenAI Actual Prompt must begin with # Role")
+    if not raw_text.startswith("Role\n"):
+        raise ActualPromptValidationError("OpenAI Actual Prompt must begin with Role")
+    unresolved = [
+        name
+        for name in _OPENAI_PLACEHOLDERS
+        if "{" + name + "}" in raw_text
+    ]
+    if unresolved:
+        raise ActualPromptValidationError(
+            "OpenAI Actual Prompt contains unresolved placeholders: "
+            + ", ".join(unresolved)
+        )
 
 
 def _validate_anthropic(raw_text: str) -> None:
