@@ -31,8 +31,8 @@ The implementation will change:
 - prompt-contract validation tests;
 - the provider JSON schema for assessment generation;
 - Pydantic validation of generated question equation references; and
-- worker tests proving invalid generation output is rejected before artifact
-  creation.
+- one validation-driven assessment repair attempt before invalid generation
+  output is rejected without artifact creation.
 
 The implementation will not change the MathML renderer, OMML serializer,
 database schema, API response shape, or existing-run behavior.
@@ -50,7 +50,8 @@ The Output Format example will include:
 - one equation referenced from `model_answer` with `location: "solution"`;
 - unique ASCII labels shared exactly by the content reference and equation
   entry; and
-- Word-linear expressions using `/`, `_`, `^`, and `sqrt(...)` notation.
+- Word-linear expressions using `/`, `_`, `^`, and `sqrt(...)` notation,
+  including short constant assignments such as `R = 8.314 J/(mol K)`.
 
 The existing generation-time equation instruction remains prepended to every
 Actual Prompt. The local template will reinforce rather than contradict it.
@@ -98,8 +99,17 @@ keeps false positives bounded while catching the demonstrated failure where
 complete formulas containing `=` were left in the body and solution.
 
 Validation errors will identify the question field and offending invariant so
-generation failures remain diagnosable. The worker's existing assessment parse
-error path will record the failure and will not create a DOCX artifact.
+the worker can request one focused repair. The repair receives the original
+response and exact validation error, preserves the assessment content, and
+changes only the JSON needed to satisfy the equation contract. The repair call
+uses the same provider schema and is recorded as an `assessment_repair` model
+call for usage accounting.
+
+Only Pydantic schema-validation failures trigger repair. Invalid JSON and
+provider failures continue through their existing error paths. If the repaired
+response still fails validation, the existing assessment parse-error path
+records the failure and does not create a DOCX artifact. The accepted repaired
+provider response becomes the assessment's raw response and output hash.
 
 ## Data Flow
 
@@ -110,7 +120,9 @@ For a future OpenAI-structure run:
 3. The provider returns structured JSON under the strengthened provider schema.
 4. `AssessmentGenerationResponse` validates each question and its equation
    references.
-5. Only validated JSON is persisted as `parsed_json` and passed to both the DOCX
+5. On a validation error, the worker makes one `assessment_repair` call with the
+   rejected JSON and validation feedback, then validates the repaired JSON.
+6. Only validated JSON is persisted as `parsed_json` and passed to both the DOCX
    exporter and assessment viewer.
 
 The renderer paths remain deterministic consumers. Correctness is enforced at
@@ -129,8 +141,11 @@ Tests will follow red-green development and cover:
 - rejection of question/solution location mismatches;
 - rejection of the run-47 pattern where formulas containing `=` remain outside
   equation references; and
+- repair of the run-49 pattern where one scalar assignment remains outside an
+  equation reference;
+- model-usage accounting for the `assessment_repair` call; and
 - worker behavior that records an assessment parse error and creates no
-  artifact for an invalid response.
+  artifact when the single repair response is still invalid.
 
 Focused prompt, schema, worker, OMML, and MathML tests will run before the full
 backend and frontend verification suites. The frontend and DOCX renderer tests
@@ -144,7 +159,8 @@ shared generation contract.
   references.
 - Formula-like plain text matching the conservative detector cannot be accepted
   as a complete generated assessment.
-- Invalid generations stop before DOCX creation and expose the existing
-  assessment-parse error state.
+- A correctable validation failure receives exactly one focused repair attempt.
+- An invalid repair stops before DOCX creation and exposes the existing
+  assessment-parse error state without a repair loop.
 - Existing assessments and artifacts are unchanged.
 - Backend tests, frontend tests, lint, and production build pass.
