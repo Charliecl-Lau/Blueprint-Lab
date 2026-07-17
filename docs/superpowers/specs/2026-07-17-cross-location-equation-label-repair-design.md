@@ -23,6 +23,18 @@ complete description of the cross-location conflicts. The generation and repair
 instructions require unique labels and a location but do not explicitly state
 that one label cannot span question and solution content.
 
+Local database run 50 provides a controlled comparison. It completed at 6:40 AM
+EDT with the same Actual Prompt hash as deployed run 19, the same
+`gemini-3.1-flash-lite` model, temperature `0.2`, top-p `0.95`, maximum output
+of 32,768 tokens, no seed, and no source documents. Its first provider response
+used disjoint question and solution labels and passed validation. Deployed run
+19 reused six labels across the two locations, and its repair response retained
+the conflicts. The defect is therefore exposed by nondeterministic provider
+output under an ambiguous contract, not by a localhost/Railway configuration
+difference. Local run 49 also recorded a separate equation-reference validation
+failure shortly before run 50, confirming that the local environment could
+produce invalid equation contracts as well.
+
 ## Equation Reference Contract
 
 Each equation label belongs to exactly one content side:
