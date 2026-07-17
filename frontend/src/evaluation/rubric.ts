@@ -1,6 +1,5 @@
 import type { CriterionKey } from '../types'
 
-
 export const criterionKeys = [
   'technical_correctness',
   'course_alignment',
@@ -17,9 +16,7 @@ const weights: Record<CriterionKey, number> = {
   materials_context: 10,
 }
 
-export function calculateDraftScores(
-  scores: Partial<Record<CriterionKey, number>>,
-) {
+export function calculateDraftScores(scores: Partial<Record<CriterionKey, number>>) {
   const complete = criterionKeys.every((key) => (
     Number.isInteger(scores[key]) && scores[key]! >= 1 && scores[key]! <= 5
   ))
@@ -31,13 +28,13 @@ export function calculateDraftScores(
   )
   const critical_gate = scores.technical_correctness! < 3 ? 'FAIL' : 'PASS'
   const overall_decision = critical_gate === 'FAIL'
-    ? 'Not ready – critical issue'
+    ? 'Not ready \u2013 critical issue'
     : weighted_score >= 90
       ? 'Instructor-ready'
       : weighted_score >= 80
-        ? 'Strong – minor revision'
+        ? 'Strong \u2013 minor revision'
         : weighted_score >= 70
-          ? 'Usable – moderate revision'
+          ? 'Usable \u2013 moderate revision'
           : weighted_score >= 60
             ? 'Substantial revision'
             : 'Not ready'
