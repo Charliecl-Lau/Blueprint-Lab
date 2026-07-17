@@ -187,6 +187,7 @@ def build_structure_input(
     assessment_type: str,
     difficulty: str,
     number_of_questions: int,
+    estimated_time_minutes: int,
     cognitive_demand: str,
     additional_instruction: Optional[str],
     factors: PromptFactors,
@@ -200,6 +201,7 @@ def build_structure_input(
         f"Assessment Type: {assessment_type}",
         f"Difficulty: {difficulty}",
         f"Number of Questions: {number_of_questions}",
+        f"Estimated Time: {estimated_time_minutes} minutes",
         f"Cognitive Demand: {_COGNITIVE_DEMAND_LABELS.get(cognitive_demand, cognitive_demand)}",
     ]
     if additional_instruction and additional_instruction.strip():

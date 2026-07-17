@@ -72,6 +72,7 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
+        estimated_time_minutes=45,
         cognitive_demand="evaluate_create",
         additional_instruction="Use one laboratory scenario.",
         factors=PromptFactors(concept_bridge=True),
@@ -86,6 +87,7 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
     assert "FewShot=OFF" in text
     assert "Criterion for equilibrium" in text
     assert "Cognitive Demand: Evaluate/Create" in text
+    assert "Estimated Time: 45 minutes" in text
     assert "Additional Instruction: Use one laboratory scenario." in text
     assert "must not appear" not in text
 
@@ -98,6 +100,7 @@ def test_structure_input_omits_blank_additional_instruction():
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
+        estimated_time_minutes=45,
         cognitive_demand="remember_understand",
         additional_instruction="   ",
         factors=PromptFactors(),
