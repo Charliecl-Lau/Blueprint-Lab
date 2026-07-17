@@ -487,6 +487,107 @@ def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
     mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
 
 
+def test_generation_pipeline_repairs_cross_location_equation_labels(
+    generation_fixture,
+    test_db,
+):
+    rejected_question = complete_question(
+        question_type="short_answer",
+        body="Calculate [[EQ:g_mix_def]] at [[EQ:temp]].",
+        model_answer=(
+            "Apply [[EQ:g_mix_def]] at [[EQ:temp]] to obtain "
+            "[[EQ:g_mix_result]]."
+        ),
+    )
+    rejected_question["equations"] = [
+        {
+            "label": "g_mix_def",
+            "expression": "G_mix = H_mix - T S_mix",
+            "location": "question",
+        },
+        {
+            "label": "temp",
+            "expression": "T = 1000 K",
+            "location": "question",
+        },
+        {
+            "label": "g_mix_result",
+            "expression": "G_mix = -5.76 kJ/mol",
+            "location": "solution",
+        },
+    ]
+    repaired_question = complete_question(
+        question_type="short_answer",
+        body="Calculate [[EQ:g_mix_question]] at [[EQ:temp_question]].",
+        model_answer=(
+            "Apply [[EQ:g_mix_solution]] at [[EQ:temp_solution]] to obtain "
+            "[[EQ:g_mix_result]]."
+        ),
+    )
+    repaired_question["equations"] = [
+        {
+            "label": "g_mix_question",
+            "expression": "G_mix = H_mix - T S_mix",
+            "location": "question",
+        },
+        {
+            "label": "temp_question",
+            "expression": "T = 1000 K",
+            "location": "question",
+        },
+        {
+            "label": "g_mix_solution",
+            "expression": "G_mix = H_mix - T S_mix",
+            "location": "solution",
+        },
+        {
+            "label": "temp_solution",
+            "expression": "T = 1000 K",
+            "location": "solution",
+        },
+        {
+            "label": "g_mix_result",
+            "expression": "G_mix = -5.76 kJ/mol",
+            "location": "solution",
+        },
+    ]
+    rejected_raw = __import__("json").dumps({"questions": [rejected_question]})
+    repaired_raw = __import__("json").dumps({"questions": [repaired_question]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(rejected_raw, 20, 8, 28),
+        result(repaired_raw, 12, 6, 18),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.status == "complete", generation_fixture.error_message
+    assert generation_fixture.assessment.raw_response_text == repaired_raw
+    assert generation_fixture.document_artifact.content == b"PK-generation-docx"
+    assert llm.generate.call_count == 2
+    repair_call = llm.generate.call_args_list[1]
+    assert (
+        "equation labels referenced from both question and solution: "
+        "g_mix_def, temp"
+        in repair_call.kwargs["user_message"]
+    )
+    assert "Audit every equation label in every question" in (
+        repair_call.kwargs["system_prompt"]
+    )
+    usage_stages = [
+        usage.stage
+        for usage in test_db.query(ModelCallUsage)
+        .filter_by(run_id=generation_fixture.id)
+        .order_by(ModelCallUsage.id)
+        .all()
+    ]
+    assert usage_stages == ["assessment", "repair"]
+    assert generation_fixture.model_call_count == 2
+    assert generation_fixture.total_tokens == 46
+    mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+
+
 def test_generation_pipeline_stops_after_one_invalid_repair(
     generation_fixture,
     test_db,

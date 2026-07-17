@@ -137,6 +137,43 @@ def test_flat_equation_references_accept_question_and_solution_locations(
     ]
 
 
+def test_flat_equation_references_report_all_cross_location_labels(
+    complete_payload,
+):
+    shared_labels = [
+        "g_mix_def",
+        "g_mix_res",
+        "h_mix_val",
+        "s_mix_def",
+        "temp",
+        "xa_val",
+    ]
+    question = complete_payload["questions"][0]
+    question["body"] = "Use " + " ".join(
+        f"[[EQ:{label}]]" for label in shared_labels
+    )
+    question["model_answer"] = "Apply " + " ".join(
+        f"[[EQ:{label}]]" for label in reversed(shared_labels)
+    )
+    question["equations"] = [
+        {
+            "label": label,
+            "expression": f"{label} = value",
+            "location": "question",
+        }
+        for label in shared_labels
+    ]
+
+    with pytest.raises(ValidationError) as exc_info:
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+    assert (
+        "equation labels referenced from both question and solution: "
+        "g_mix_def, g_mix_res, h_mix_val, s_mix_def, temp, xa_val"
+        in str(exc_info.value)
+    )
+
+
 def test_flat_equation_references_reject_duplicate_labels(complete_payload):
     question = complete_payload["questions"][0]
     question["body"] = "Evaluate [[EQ:relation]]."

@@ -230,6 +230,15 @@ class QuestionResponse(BaseModel):
             if label not in equation_by_label:
                 raise ValueError(f"unknown equation label: {label}")
 
+        shared_labels = sorted(
+            set(question_references) & set(solution_references)
+        )
+        if shared_labels:
+            raise ValueError(
+                "equation labels referenced from both question and solution: "
+                + ", ".join(shared_labels)
+            )
+
         for label in question_references:
             if equation_by_label[label].location != "question":
                 raise ValueError(
