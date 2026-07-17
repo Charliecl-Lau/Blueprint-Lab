@@ -22,7 +22,7 @@ class ModelCallUsage(Base):
     __tablename__ = "model_call_usages"
     __table_args__ = (
         CheckConstraint(
-            "stage IN ('actual_prompt','planning','validation','assessment','repair','structured_output_retry')",
+            "stage IN ('actual_prompt','planning','validation','assessment','evaluation','repair','structured_output_retry')",
             name="ck_model_call_usages_stage",
         ),
         CheckConstraint(

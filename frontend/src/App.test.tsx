@@ -31,6 +31,7 @@ test('normalizes deprecated generation collections at the API boundary', () => {
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useRunStore.getState().reset()
   window.history.replaceState({}, '', '/')
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -116,6 +117,50 @@ test('submits exact enabled factor content and estimated time', async () => {
     factor_inputs: { concept_bridge: 'Connect vectors to force balance.' },
   })
   expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy()
+})
+
+test('submits and navigates when randomUUID is unavailable', async () => {
+  vi.stubGlobal('crypto', {
+    getRandomValues: (bytes: Uint8Array) => {
+      bytes.fill(7)
+      return bytes
+    },
+  })
+  vi.mocked(fetch).mockImplementation(async (_input, init) => {
+    if (init?.method === 'POST') {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 42,
+          conditions: [],
+          runs: [{ id: 8, condition_id: 3, run_number: 1, status: 'pending' }],
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => [] } as Response
+  })
+
+  render(<App />)
+  fireEvent.change(screen.getByLabelText('Course name'), { target: { value: 'Statics' } })
+  fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Equilibrium' } })
+  fireEvent.change(screen.getByLabelText('Learning objectives'), { target: { value: 'Resolve forces' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Run Experiment' }))
+
+  await waitFor(() => expect(window.location.pathname).toBe('/runs/8/progress'))
+  const [, init] = vi.mocked(fetch).mock.calls.find(([, value]) => value?.method === 'POST')!
+  expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy()
+})
+
+test('keeps submission errors beside the fixed run action', async () => {
+  vi.mocked(fetch).mockRejectedValue(new Error('Unable to reach the server.'))
+  render(<App />)
+  fireEvent.change(screen.getByLabelText('Course name'), { target: { value: 'Statics' } })
+  fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Equilibrium' } })
+  fireEvent.change(screen.getByLabelText('Learning objectives'), { target: { value: 'Resolve forces' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Run Experiment' }))
+
+  const action = screen.getByTestId('fixed-run-action')
+  expect(await within(action).findByRole('alert')).toHaveTextContent('Unable to reach the server.')
 })
 
 test('navigates the three form sections from the side panel and section buttons', () => {
@@ -392,6 +437,295 @@ test('does not display token usage on run progress', async () => {
   expect(await screen.findByText('Equilibrium')).toBeVisible()
   expect(screen.queryByRole('region', { name: 'Token usage' })).not.toBeInTheDocument()
   expect(screen.queryByText('Token usage is loading.')).not.toBeInTheDocument()
+})
+
+test('shows the main progress card and unlocks the Viewer at completion', async () => {
+  window.history.replaceState({}, '', '/runs/8/progress')
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          viewer_ready_at: '2026-07-17T10:00:00Z',
+          progress_message: 'Complete',
+          evaluation_status: 'in_progress',
+          assessment: {
+            id: 5,
+            question_ids: [11],
+            parsed_json: { questions: [] },
+            output_hash: 'hash',
+            schema_version: '1',
+          },
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-17T09:00:00Z',
+          conditions: [],
+          runs: [],
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByText('Complete')).toBeVisible()
+  expect(screen.queryByRole('list', { name: 'Assessment generation progress' })).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'View Assessment' })).toHaveAttribute(
+    'href',
+    '/experiments/1/viewer/8',
+  )
+})
+
+test('generation failure stays on the main progress page without evaluation controls', async () => {
+  window.history.replaceState({}, '', '/runs/8/progress')
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'error',
+          viewer_ready_at: null,
+          progress_message: 'Assessment generation failed',
+          error: { type: 'generation_provider_error', message: 'Provider unavailable' },
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-17T09:00:00Z',
+          conditions: [],
+          runs: [],
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByText('Provider unavailable')).toBeVisible()
+  expect(screen.queryByRole('link', { name: 'View Assessment' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Retry LLM Evaluation' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Retry run' })).not.toBeInTheDocument()
+})
+
+test('Viewer polls background evaluation and enables Grade Assessment on completion', async () => {
+  window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  let runRequests = 0
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-17T09:00:00Z',
+          conditions: [],
+          runs: [{
+            id: 8,
+            experiment_id: 1,
+            condition_id: 3,
+            run_number: 1,
+            status: 'complete',
+            viewer_ready_at: '2026-07-17T10:00:00Z',
+          }],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8')) {
+      runRequests += 1
+      const evaluationComplete = runRequests >= 3
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          viewer_ready_at: '2026-07-17T10:00:00Z',
+          evaluation_status: evaluationComplete ? 'complete' : 'in_progress',
+          grading_available: evaluationComplete,
+          grading_question_id: 11,
+          artifact_available: true,
+          token_usage: {
+            input_tokens: evaluationComplete ? 45 : 30,
+            output_tokens: evaluationComplete ? 22 : 12,
+            total_tokens: evaluationComplete ? 67 : 42,
+            model_calls: evaluationComplete ? 3 : 2,
+            recording_state: 'recorded',
+            stages: [],
+          },
+          assessment: {
+            id: 5,
+            question_ids: [11],
+            output_hash: 'hash',
+            schema_version: '1',
+            parsed_json: { questions: [] },
+          },
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByRole('status', { name: 'Evaluation status' })).toHaveTextContent(
+    'Evaluation in progress',
+  )
+  expect(screen.getByRole('button', { name: 'Evaluation in progress' })).toBeDisabled()
+  expect(screen.getByText('42')).toBeVisible()
+
+  expect(await screen.findByRole(
+    'link',
+    { name: 'Grade Assessment' },
+    { timeout: 3500 },
+  )).toHaveAttribute(
+    'href',
+    '/assessments/5/questions/11/grade',
+  )
+  expect(screen.getByText('67')).toBeVisible()
+})
+
+test('Viewer keeps legacy completed assessments visible with evaluation unavailable', async () => {
+  window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (
+      url.endsWith('/api/assessments/5/evaluations/llm/retry')
+      && init?.method === 'POST'
+    ) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          model_settings: {},
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Legacy phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-14T09:00:00Z',
+          conditions: [],
+          runs: [{
+            id: 8,
+            experiment_id: 1,
+            condition_id: 3,
+            run_number: 1,
+            status: 'complete',
+            viewer_ready_at: null,
+          }],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          viewer_ready_at: '2026-07-14T09:05:00Z',
+          evaluation_status: 'not_started',
+          grading_available: false,
+          grading_question_id: null,
+          artifact_available: true,
+          assessment: {
+            id: 5,
+            question_ids: [],
+            output_hash: 'legacy-hash',
+            schema_version: '1',
+            parsed_json: { questions: [{
+              type: 'short_answer',
+              body: 'State the phase stability condition.',
+              model_answer: 'The stable phase minimizes Gibbs free energy.',
+            }] },
+          },
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByText('State the phase stability condition.')).toBeVisible()
+  expect(screen.getByRole('status', { name: 'Evaluation status' })).toHaveTextContent(
+    'Evaluation unavailable',
+  )
+  expect(screen.getByRole('button', { name: 'Retry LLM Evaluation' })).toBeEnabled()
+  expect(screen.queryByRole('link', { name: 'Grade Assessment' })).not.toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Retry LLM Evaluation' }))
+  expect(await screen.findByRole('status', { name: 'Evaluation status' })).toHaveTextContent(
+    'Evaluation in progress',
+  )
 })
 
 test('keeps usage in the viewer and renders readable conditions and MathML questions', async () => {

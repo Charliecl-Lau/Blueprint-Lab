@@ -1,4 +1,10 @@
-export type Stage = 'pending' | 'prompting' | 'generating' | 'documenting' | 'complete' | 'error'
+export type Stage =
+  | 'pending'
+  | 'prompting'
+  | 'generating'
+  | 'documenting'
+  | 'complete'
+  | 'error'
 export type PromptStructure = 'openai' | 'anthropic'
 export type AssessmentType = 'mcq' | 'short_answer' | 'mixed'
 export type CognitiveDemand = 'remember_understand' | 'apply_analyze' | 'evaluate_create'
@@ -86,6 +92,8 @@ export interface PromptProvenance {
 }
 
 export interface AssessmentOutput {
+  id: number
+  question_ids: number[]
   parsed_json: { questions: Question[] } | null
   output_hash: string
   schema_version: string
@@ -108,6 +116,11 @@ export interface Run {
   condition_id: number
   run_number: number
   status: Stage
+  viewer_ready_at?: string | null
+  progress_message?: string | null
+  evaluation_status?: 'not_started' | 'in_progress' | 'complete' | 'failed'
+  grading_available?: boolean
+  grading_question_id?: number | null
   model_settings?: Record<string, unknown>
   model_name?: string | null
   model_version?: string | null
@@ -165,6 +178,23 @@ export interface MCQOption {
 export interface Question {
   id?: number
   type: 'mcq' | 'long_answer' | 'short_answer'
+  metadata?: {
+    prompt_template_id?: string
+    actual_prompt_id?: string
+    output_id?: string
+    final_question_id?: string
+    question_title: string
+    question_type: 'mcq' | 'long_answer' | 'short_answer'
+    difficulty_level: string
+    intended_assessment_setting: string
+    mse202_concepts: string[]
+    mse302_concepts: string[]
+    concept_map_bridge: string
+    materials_science_context: string
+    estimated_time?: string
+    learning_objectives?: string[]
+    id_requirements?: string
+  }
   body: string
   body_segments?: ContentSegment[]
   order?: number
@@ -172,6 +202,152 @@ export interface Question {
   model_answer?: string | null
   model_answer_segments?: ContentSegment[]
   equations?: EquationEntry[]
+  revision_options?: string[]
+}
+
+export type CriterionKey =
+  | 'technical_correctness'
+  | 'course_alignment'
+  | 'blooms_alignment'
+  | 'clarity_solution'
+  | 'materials_context'
+
+export type EvaluationStatus = 'draft' | 'finalized' | 'failed' | 'reopened'
+
+export type RecommendedAction =
+  | 'Accept without revision'
+  | 'Accept with minor revision'
+  | 'Revise before use'
+  | 'Major revision required'
+  | 'Reject assessment'
+
+export interface EvaluationCriterion {
+  criterion_key: CriterionKey
+  score: number | null
+  comment?: string | null
+  suggested_modification?: string | null
+  issue_flags: string[]
+  justification?: string | null
+  strengths: string[]
+  weaknesses: string[]
+  suggested_improvements: string[]
+  suggested_modifications: string[]
+}
+
+export interface Evaluation {
+  id: number
+  assessment_id: number
+  question_id: number
+  evaluation_type: 'llm' | 'human'
+  evaluator_identity: string
+  evaluation_model: string | null
+  evaluation_model_version: string | null
+  rubric_version: string
+  rubric_snapshot: RubricSnapshot
+  weighted_score: number | null
+  critical_gate: string | null
+  overall_decision: string | null
+  instructor_readiness: string | null
+  highest_priority_issue: string | null
+  highest_priority_revision: string | null
+  overall_comments: string | null
+  major_strengths: string[]
+  major_weaknesses: string[]
+  recommended_action: string | null
+  status: EvaluationStatus
+  revision: number
+  evaluation_timestamp: string | null
+  created_at: string
+  updated_at: string
+  finalized_at: string | null
+  criteria: EvaluationCriterion[]
+}
+
+export interface RubricCriterion {
+  key: CriterionKey
+  title: string
+  weight: number
+  covers: string
+  description: string
+  comment_prompt: string
+  anchors: Record<'1' | '3' | '5', string>
+}
+
+export interface RubricSnapshot {
+  version: string
+  criteria: RubricCriterion[]
+}
+
+export interface HumanCriterionPatch {
+  criterion_key: CriterionKey
+  score?: number | null
+  comment?: string | null
+  suggested_modification?: string | null
+  issue_flags?: string[]
+}
+
+export interface HumanEvaluationPatch {
+  revision: number
+  criteria?: HumanCriterionPatch[]
+  highest_priority_issue?: string | null
+  overall_comments?: string | null
+  recommended_action?: RecommendedAction | null
+}
+
+export interface AssessmentQuestionSummary {
+  id: number
+  assessment_id: number
+  ordinal: number
+  assessment_version: number
+  content_hash: string
+  question: Question
+}
+
+export interface GradingContext {
+  experiment_id: number
+  run_id: number
+  assessment_id: number
+  question_id: number
+  question: Question
+  rubric: RubricSnapshot
+  llm_evaluation: Evaluation
+  human_evaluation: Evaluation
+  previous_question_id: number | null
+  next_question_id: number | null
+  viewer_path: string
+}
+
+export type ComparisonIndicator =
+  | 'agreement'
+  | 'minor_difference'
+  | 'significant_difference'
+
+export interface CriterionComparison {
+  criterion_key: CriterionKey
+  human_score: number
+  llm_score: number
+  difference: number
+  absolute_difference: number
+  indicator: ComparisonIndicator
+}
+
+export interface EvaluationComparison {
+  criteria: CriterionComparison[]
+  mean_absolute_score_difference: number
+  exact_agreement_rate: number
+  agreement_within_one_point: number
+  largest_disagreement: CriterionComparison
+  human_weighted_score: number
+  llm_weighted_score: number
+  weighted_score_difference: number
+  human_overall_decision: string
+  llm_overall_decision: string
+  decision_difference: boolean
+}
+
+export interface EvaluationAccessDetail {
+  first_opened_at: string
+  opened_before_finalization: boolean
 }
 
 export interface SSEEvent { run_id?: number; generation_id?: number; condition_id: number; stage: Stage }

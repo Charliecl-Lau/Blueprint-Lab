@@ -34,7 +34,14 @@ class RunSummary(BaseModel):
     id: int
     condition_id: int
     run_number: int
-    status: Literal["pending", "prompting", "generating", "documenting", "complete", "error"]
+    status: Literal[
+        "pending",
+        "prompting",
+        "generating",
+        "documenting",
+        "complete",
+        "error",
+    ]
     model_settings: dict
     model_config = {"from_attributes": True, "protected_namespaces": ()}
 
@@ -71,6 +78,11 @@ class RunDetail(BaseModel):
     condition_id: int
     run_number: int
     status: str
+    viewer_ready_at: Optional[datetime] = None
+    progress_message: Optional[str] = None
+    evaluation_status: Literal["not_started", "in_progress", "complete", "failed"]
+    grading_available: bool
+    grading_question_id: Optional[int] = None
     model_settings: dict
     token_usage: TokenTotals
     prompt: Optional[dict] = None

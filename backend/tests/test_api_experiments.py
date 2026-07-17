@@ -58,7 +58,7 @@ def test_create_experiment_creates_condition_and_generation(client):
     delay.assert_called_once_with(data["generations"][0]["id"])
 
 
-def test_get_experiment_returns_generations(client):
+def test_get_experiment_returns_generations(client, test_db):
     with patch("backend.api.experiments.run_generation_pipeline.delay"):
         created = client.post(
             "/experiments",
@@ -66,12 +66,20 @@ def test_get_experiment_returns_generations(client):
             json=valid_payload(),
         ).json()
 
+    run = test_db.get(Run, created["runs"][0]["id"])
+    run.viewer_ready_at = run.created_at
+    run.progress_message = "Preparing generated assessment for evaluation"
+    test_db.commit()
     response = client.get(f"/experiments/{created['id']}")
 
     assert response.status_code == 200
     assert len(response.json()["generations"]) == 1
     assert response.json()["cognitive_demand"] == "evaluate_create"
     assert response.json()["additional_instruction"] == "Use one laboratory scenario."
+    assert response.json()["runs"][0]["viewer_ready_at"] is not None
+    assert response.json()["runs"][0]["progress_message"] == (
+        "Preparing generated assessment for evaluation"
+    )
 
 
 def test_get_missing_experiment_returns_404(client):

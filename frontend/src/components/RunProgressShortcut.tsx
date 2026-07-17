@@ -4,7 +4,12 @@ import { runsApi } from '../api/runs'
 import { useRunStore } from '../store/runStore'
 import type { RecentRun } from '../types'
 
-const ACTIVE = new Set(['pending', 'prompting', 'generating', 'documenting'])
+const ACTIVE = new Set([
+  'pending',
+  'prompting',
+  'generating',
+  'documenting',
+])
 
 export function RunProgressShortcut() {
   const runs = useRunStore((state) => state.runs)

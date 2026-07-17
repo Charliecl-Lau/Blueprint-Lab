@@ -116,6 +116,57 @@ def test_unknown_run_and_condition_return_404(client):
     assert client.get("/runs/999999").status_code == 404
     assert client.post("/runs/999999/retry").status_code == 404
     assert client.post("/conditions/999999/runs", json={}).status_code == 404
+    assert (
+        client.post("/assessments/999999/evaluations/llm/retry").status_code
+        == 404
+    )
+
+
+def test_evaluation_retry_endpoint_reuses_viewer_ready_run(client, test_db):
+    experiment, condition = _experiment_and_condition(test_db)
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="complete",
+        model_settings={},
+        input_tokens=28,
+        output_tokens=8,
+        total_tokens=36,
+        model_call_count=2,
+        viewer_ready_at=utc_now(),
+        completed_at=utc_now(),
+        progress_message="Complete",
+    )
+    run.assessment = Assessment(
+        raw_response_text='{"questions": [{"body": "Saved"}]}',
+        parsed_json={"questions": [{"body": "Saved"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    run.document_artifact = DocumentArtifact(
+        filename="saved.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=b"docx",
+    )
+    test_db.add(run)
+    test_db.commit()
+
+    with patch(
+        "backend.workers.evaluation_worker.run_llm_evaluation_pipeline.delay"
+    ) as evaluation_delay:
+        response = client.post(
+            f"/assessments/{run.assessment.id}/evaluations/llm/retry"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == run.id
+    assert response.json()["status"] == "complete"
+    assert run.assessment.parsed_json == {"questions": [{"body": "Saved"}]}
+    evaluation_delay.assert_called_once_with(run.id)
 
 
 def test_canonical_create_detail_retry_raw_and_export(client, test_db):

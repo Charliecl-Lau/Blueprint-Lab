@@ -7,6 +7,7 @@ from backend.services.llm_client import LLMResult, TokenUsage
 from backend.services.run_service import create_run, retry_run
 from backend.services.source_documents import create_source_document
 from backend.tests.test_worker import complete_question
+from backend.tests.test_evaluation_worker import _evaluation_json
 
 
 def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_db):
@@ -79,6 +80,11 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
         patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
         patch("backend.workers.assessment_worker.LLMClient") as mock_client,
         patch("backend.workers.assessment_worker.redis_client"),
+        patch(
+            "backend.services.document_artifact.build_assessment_docx",
+            return_value=b"docx",
+        ),
+        patch("backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"),
     ):
         test_db.close = MagicMock()
         mock_client.return_value.generate.side_effect = provider_result
@@ -87,6 +93,38 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
         run_generation_pipeline(run_1.id)
         run_2 = retry_run(test_db, run_1.id)
         run_generation_pipeline(run_2.id)
+
+    evaluation_client = MagicMock(model="gemini-evaluator")
+    evaluation_client.generate.side_effect = [
+        LLMResult(
+            _evaluation_json(),
+            "evaluation-1",
+            "gemini-evaluator",
+            "evaluation-v1",
+            "STOP",
+            TokenUsage(12, 8, 20, None, None, {}),
+        ),
+        LLMResult(
+            _evaluation_json(),
+            "evaluation-2",
+            "gemini-evaluator",
+            "evaluation-v1",
+            "STOP",
+            TokenUsage(12, 8, 20, None, None, {}),
+        ),
+    ]
+    with (
+        patch("backend.workers.evaluation_worker.SessionLocal", return_value=test_db),
+        patch(
+            "backend.workers.evaluation_worker.LLMClient",
+            return_value=evaluation_client,
+        ),
+        patch("backend.workers.evaluation_worker.redis_client"),
+    ):
+        from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
+
+        run_llm_evaluation_pipeline.run(run_1.id)
+        run_llm_evaluation_pipeline.run(run_2.id)
 
     test_db.refresh(run_1)
     test_db.refresh(run_2)
@@ -100,10 +138,10 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
     assert run_1.source_documents[0].source_document.content == uploaded_bytes
     assert run_1.document_artifact.content
     assert run_2.document_artifact.content
-    assert run_1.total_tokens == 10
-    assert run_2.total_tokens == 20
-    assert run_1.model_call_count == 1
-    assert run_2.model_call_count == 1
+    assert run_1.total_tokens == 30
+    assert run_2.total_tokens == 40
+    assert run_1.model_call_count == 2
+    assert run_2.model_call_count == 2
     assert mock_client.return_value.generate.call_count == 2
     source_text = uploaded_bytes.decode()
     calls = mock_client.return_value.generate.call_args_list

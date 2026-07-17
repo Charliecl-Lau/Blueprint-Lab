@@ -40,7 +40,8 @@ class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','prompting','generating','documenting','complete','error')"
+            "status IN ('pending','prompting','generating','documenting','complete','error')",
+            name="ck_runs_status",
         ),
         UniqueConstraint("condition_id", "run_number"),
         Index("ix_runs_experiment_id", "experiment_id"),
@@ -90,6 +91,8 @@ class Run(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    viewer_ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    progress_message: Mapped[Optional[str]] = mapped_column(Text)
     experiment: Mapped["Experiment"] = relationship(back_populates="runs")
     condition: Mapped["Condition"] = relationship(back_populates="runs")
     prompt: Mapped[Optional["Prompt"]] = relationship(back_populates="run", uselist=False, cascade="all, delete-orphan")
@@ -158,6 +161,9 @@ class Assessment(Base):
     schema_version: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     run: Mapped[Run] = relationship(back_populates="assessment")
+    questions: Mapped[list["AssessmentQuestion"]] = relationship(
+        back_populates="assessment", cascade="all, delete-orphan"
+    )
 
 
 class DocumentArtifact(Base):

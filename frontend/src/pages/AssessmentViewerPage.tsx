@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { evaluationsApi } from '../api/evaluations'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
 import { AppHeader } from '../components/AppHeader'
 import { MathContent, StandaloneEquations } from '../components/MathContent'
 import { TokenUsage } from '../components/TokenUsage'
+import { useSSE } from '../hooks/useSSE'
 import { referencedEquationLabels } from '../math/equationReferences'
 import { useRunStore } from '../store/runStore'
 import type { CognitiveDemand } from '../types'
@@ -25,10 +27,12 @@ export function AssessmentViewerPage() {
   const selectedRunId = useRunStore((state) => state.selectedRunId)
   const mergeExperiment = useRunStore((state) => state.mergeExperiment)
   const mergeRun = useRunStore((state) => state.mergeRun)
+  const applyRunSnapshot = useRunStore((state) => state.applyRunSnapshot)
   const addRetriedRun = useRunStore((state) => state.addRetriedRun)
   const selectRun = useRunStore((state) => state.selectRun)
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [retryingEvaluation, setRetryingEvaluation] = useState(false)
 
   useEffect(() => {
     if (id) experimentsApi.get(id).then(mergeExperiment)
@@ -41,15 +45,38 @@ export function AssessmentViewerPage() {
   const experimentRuns = Object.values(runs).filter(
     (item) => item.experiment_id === id || experimentRunIds.has(item.id),
   )
-  const complete = experimentRuns.filter((item) => item.status === 'complete')
-  const selectedId = routeRunId ?? selectedRunId ?? complete[0]?.id
+  const viewerReady = experimentRuns.filter(
+    (item) => item.viewer_ready_at || item.status === 'complete',
+  )
+  const selectedId = routeRunId ?? selectedRunId ?? viewerReady[0]?.id
   const selected = selectedId ? runs[selectedId] : undefined
+
   useEffect(() => {
     if (selectedId && !selected?.assessment) runsApi.get(selectedId).then(mergeRun)
   }, [mergeRun, selected?.assessment, selectedId])
+  const receive = useCallback((snapshot: Parameters<typeof applyRunSnapshot>[0]) => {
+    applyRunSnapshot(snapshot)
+  }, [applyRunSnapshot])
+  useSSE(selectedId ?? null, receive)
+
+  useEffect(() => {
+    if (!selectedId || selected?.evaluation_status === 'complete') return
+    const timer = window.setInterval(() => {
+      void runsApi.get(selectedId).then(mergeRun).catch(() => undefined)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [mergeRun, selected?.evaluation_status, selectedId])
 
   const questions = selected?.assessment?.parsed_json?.questions ?? selected?.generated_json?.questions ?? []
   const condition = selected?.condition ?? experiment?.conditions.find((item) => item.id === selected?.condition_id)
+  const evaluationStatus = selected?.evaluation_status === 'failed'
+    ? 'Evaluation unavailable'
+    : selected?.evaluation_status === 'complete'
+      ? 'Evaluation complete'
+      : selected?.evaluation_status === 'not_started'
+        ? 'Evaluation unavailable'
+      : 'Evaluation in progress'
+
   const retry = async () => {
     if (!selectedId) return
     setRetrying(true)
@@ -63,13 +90,24 @@ export function AssessmentViewerPage() {
     }
   }
 
+  const retryEvaluation = async () => {
+    if (!selected?.assessment?.id) return
+    setRetryingEvaluation(true)
+    try {
+      const run = await evaluationsApi.retryLlm(selected.assessment.id)
+      mergeRun({ ...run, evaluation_status: 'in_progress' })
+    } finally {
+      setRetryingEvaluation(false)
+    }
+  }
+
   return (
     <main className="experiment-page">
       <AppHeader subtitle="Run viewer" />
       <div className="viewer-shell">
         <aside>
           <h2>Runs</h2>
-          {complete.map((item) => (
+          {viewerReady.map((item) => (
             <button
               className={item.id === selectedId ? 'selected' : ''}
               key={item.id}
@@ -87,11 +125,47 @@ export function AssessmentViewerPage() {
             <div>
               <h1>{experiment?.topic ?? 'Assessment'}</h1>
               <p>{condition?.condition_code ?? `Condition ${selected?.condition_id ?? '—'}`} · Run {selected?.run_number ?? '—'}</p>
+              {selected && (
+                <span
+                  className={`evaluation-status ${selected.evaluation_status ?? 'in_progress'}`}
+                  role="status"
+                  aria-label="Evaluation status"
+                >
+                  {evaluationStatus}
+                </span>
+              )}
             </div>
             {selectedId && (
-              <div>
+              <div className="viewer-action-group">
+                {selected?.grading_available && selected.grading_question_id && selected.assessment?.id ? (
+                  <Link
+                    className="primary"
+                    to={`/assessments/${selected.assessment.id}/questions/${selected.grading_question_id}/grade`}
+                  >
+                    Grade Assessment
+                  </Link>
+                ) : selected?.assessment?.id && (
+                  selected.evaluation_status === 'failed'
+                  || selected.evaluation_status === 'not_started'
+                ) ? (
+                  <button
+                    className="primary"
+                    disabled={retryingEvaluation}
+                    onClick={retryEvaluation}
+                  >
+                    {retryingEvaluation ? 'Retrying LLM Evaluation…' : 'Retry LLM Evaluation'}
+                  </button>
+                ) : (
+                  <button className="primary" disabled>{evaluationStatus}</button>
+                )}
+                <button
+                  className="secondary"
+                  disabled={!selected?.artifact_available}
+                  onClick={() => selected?.artifact_available && runsApi.exportDocx(selectedId)}
+                >
+                  {selected?.artifact_available ? 'Export Word document' : 'Preparing document'}
+                </button>
                 <button className="retry-run-button" onClick={() => setRetryDialogOpen(true)}>Retry run</button>
-                <button className="primary" onClick={() => runsApi.exportDocx(selectedId)}>Export Word document</button>
               </div>
             )}
           </div>
@@ -129,7 +203,7 @@ export function AssessmentViewerPage() {
                 <StandaloneEquations equations={equations} location="solution" referencedLabels={referencedLabels} />
               </div>
             })}
-            {!questions.length && <p>Select a completed run to inspect its questions.</p>}
+            {!questions.length && <p>Select a validated run to inspect its questions.</p>}
           </section>
         </article>
       </div>

@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend.config import settings
 from backend.database import SessionLocal, get_db
 from backend.models.run import Run
+from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.schemas.run_schema import (
     RecentRun,
     RunCreate,
@@ -22,7 +23,91 @@ from backend.workers.assessment_worker import run_generation_pipeline
 router = APIRouter(tags=["runs"])
 _TERMINAL_RUN_STATES = {"complete", "error"}
 
+
+def _ordered_questions(run: Run):
+    if run.assessment is None:
+        return []
+    return sorted(run.assessment.questions, key=lambda item: (item.ordinal, item.id))
+
+
+def _has_current_llm_evaluation(question) -> bool:
+    evaluator_identity = settings.llm_evaluation_model or settings.llm_model
+    return any(
+        evaluation.evaluation_type == "llm"
+        and evaluation.evaluator_identity == evaluator_identity
+        and evaluation.rubric_version == RUBRIC_VERSION
+        and evaluation.status == "finalized"
+        for evaluation in question.evaluations
+    )
+
+
+def _current_llm_evaluations(question):
+    evaluator_identity = settings.llm_evaluation_model or settings.llm_model
+    return [
+        evaluation
+        for evaluation in question.evaluations
+        if evaluation.evaluation_type == "llm"
+        and evaluation.evaluator_identity == evaluator_identity
+        and evaluation.rubric_version == RUBRIC_VERSION
+    ]
+
+
+def _evaluation_status(questions) -> str:
+    if not questions:
+        return "not_started"
+    if all(_has_current_llm_evaluation(question) for question in questions):
+        return "complete"
+
+    latest_incomplete = []
+    has_finalized = False
+    for question in questions:
+        evaluations = _current_llm_evaluations(question)
+        has_finalized = has_finalized or any(
+            item.status == "finalized" for item in evaluations
+        )
+        incomplete = [
+            item for item in evaluations if item.status != "finalized"
+        ]
+        if incomplete:
+            latest_incomplete.append(
+                max(incomplete, key=lambda item: (item.attempt, item.id or 0))
+            )
+
+    if any(item.status in {"draft", "reopened"} for item in latest_incomplete):
+        return "in_progress"
+    if any(item.status == "failed" for item in latest_incomplete):
+        return "failed"
+    return "in_progress" if has_finalized else "not_started"
+
+
+def _grading_question_id(run: Run, reviewer_id: str):
+    questions = _ordered_questions(run)
+    if not questions:
+        return None
+    for question in questions:
+        reviewed = any(
+            evaluation.evaluation_type == "human"
+            and evaluation.evaluator_identity == reviewer_id
+            and evaluation.status == "finalized"
+            for evaluation in question.evaluations
+        )
+        if not reviewed:
+            return question.id
+    return questions[0].id
+
 def run_detail(run: Run, include_raw_response: bool = False):
+    questions = _ordered_questions(run)
+    grading_available = bool(questions) and run.status == "complete" and all(
+        _has_current_llm_evaluation(question) for question in questions
+    )
+    viewer_ready_at = run.viewer_ready_at
+    if (
+        viewer_ready_at is None
+        and run.status == "complete"
+        and run.assessment is not None
+        and run.assessment.parsed_json is not None
+    ):
+        viewer_ready_at = run.completed_at or run.created_at
     prompt = None
     if run.prompt:
         prompt = {
@@ -56,9 +141,20 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "condition_id": run.condition_id,
         "run_number": run.run_number,
         "status": run.status,
+        "viewer_ready_at": viewer_ready_at,
+        "progress_message": run.progress_message,
+        "evaluation_status": _evaluation_status(questions),
+        "grading_available": grading_available,
+        "grading_question_id": (
+            _grading_question_id(run, settings.local_reviewer_id)
+            if grading_available
+            else None
+        ),
         "model_settings": run.model_settings,
         "prompt": prompt,
         "assessment": None if not run.assessment else {
+            "id": run.assessment.id,
+            "question_ids": [question.id for question in questions],
             "parsed_json": run.assessment.parsed_json,
             "output_hash": run.assessment.output_hash,
             "schema_version": run.assessment.schema_version,
@@ -185,6 +281,7 @@ def get_run(run_id: int, include_raw_response: bool = False, db: Session = Depen
 @router.post("/runs/{run_id}/retry", response_model=RunSummary)
 def post_retry(run_id: int, db: Session = Depends(get_db)):
     run = retry_run(db, run_id); run_generation_pipeline.delay(run.id); return run
+
 
 @router.get("/runs/{run_id}/export-docx")
 def export_run(run_id: int, db: Session = Depends(get_db)):

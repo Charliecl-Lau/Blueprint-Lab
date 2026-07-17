@@ -10,7 +10,7 @@ from backend.celery_app import celery_app
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models.experiment import utc_now
-from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
+from backend.models.run import Assessment, Prompt, Run
 from backend.schemas.experiment_schema import PromptFactors
 from backend.schemas.assessment_schema import (
     ASSESSMENT_PROVIDER_SCHEMA,
@@ -26,18 +26,22 @@ from backend.services.actual_prompt import (
     render_openai_actual_prompt,
     validate_actual_prompt,
 )
-from backend.services.docx_exporter import build_assessment_docx
+from backend.services.assessment_evaluation import (
+    EvaluationValidationError,
+    persist_assessment_questions,
+)
 from backend.services.generation_context import build_generation_context
 from backend.services.generator import generate_questions
+from backend.services.document_artifact import save_assessment_artifact
 from backend.services.llm_client import LLMClient, TruncatedResponseError
 from backend.services.reproducibility import (
     build_actual_prompt_hash,
     build_generation_envelope_hash,
-    sha256_bytes,
     sha256_text,
 )
 from backend.services.structure_system_prompts import get_structure_system_prompt
 from backend.services.usage_tracking import record_model_call
+from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
 
 
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
@@ -84,6 +88,7 @@ def _structure_factor_inputs(condition, ordered_sources) -> dict[str, str]:
 def _record_error(db: Session, run: Run, error_type: str, exc: Exception) -> None:
     db.rollback()
     run.status = "error"
+    run.progress_message = "Assessment generation failed"
     run.error_type = error_type
     run.error_message = str(exc)[:_MAX_ERROR_MESSAGE_LENGTH]
     run.completed_at = utc_now()
@@ -94,7 +99,9 @@ def _retry_provider_failure(
     task, db: Session, run: Run, error_type: str, exc: Exception
 ) -> None:
     _record_error(db, run, error_type, exc)
-    _publish_progress(run.experiment_id, run.id, run.condition_id, "error")
+    _publish_progress(
+        run.experiment_id, run.id, run.condition_id, "error"
+    )
     raise task.retry(exc=exc, countdown=10)
 
 
@@ -159,15 +166,31 @@ def run_generation_pipeline(self, run_id: int) -> None:
         run = db.get(Run, run_id)
         if run is None:
             return
+        if (
+            run.status == "complete"
+            and run.assessment is not None
+            and run.assessment.parsed_json is not None
+            and run.document_artifact is not None
+        ):
+            run_llm_evaluation_pipeline.delay(run.id)
+            return
 
         experiment = run.experiment
         condition = run.condition
+        run.error_type = None
+        run.error_message = None
+        run.completed_at = None
+        if run.started_at is None:
+            run.started_at = utc_now()
         ordered_sources = sorted(run.source_documents, key=lambda item: (item.ordinal, item.id))
         llm = LLMClient(model=run.model)
         prompt = run.prompt
         if prompt is None:
+            run.progress_message = "Preparing Prompt"
             _set_status(db, run, "prompting")
-            _publish_progress(experiment.id, run.id, condition.id, "prompting")
+            _publish_progress(
+                experiment.id, run.id, condition.id, "prompting"
+            )
             factors = _factors_from_condition(condition)
             structure_input = build_structure_input(
                 course=experiment.course,
@@ -203,7 +226,10 @@ def run_generation_pipeline(self, run_id: int) -> None:
                         db, run, "actual_prompt_validation_error", exc
                     )
                     _publish_progress(
-                        experiment.id, run.id, condition.id, "error"
+                        experiment.id,
+                        run.id,
+                        condition.id,
+                        "error",
                     )
                     return
                 structure_system_prompt = OPENAI_TEMPLATE_PROVENANCE
@@ -280,11 +306,41 @@ def run_generation_pipeline(self, run_id: int) -> None:
             validate_actual_prompt(condition.prompt_structure, prompt.actual_prompt)
         except ActualPromptValidationError as exc:
             _record_error(db, run, "actual_prompt_validation_error", exc)
-            _publish_progress(experiment.id, run.id, condition.id, "error")
+            _publish_progress(
+                experiment.id, run.id, condition.id, "error"
+            )
             return
 
+        if run.assessment is not None and run.assessment.parsed_json is not None:
+            try:
+                persist_assessment_questions(db, run.assessment)
+                run.status = "documenting"
+                run.progress_message = "Creating assessment document"
+                db.commit()
+                _publish_progress(
+                    experiment.id, run.id, condition.id, "documenting"
+                )
+                save_assessment_artifact(db, run)
+                run.viewer_ready_at = run.viewer_ready_at or utc_now()
+                run.status = "complete"
+                run.progress_message = "Complete"
+                run.completed_at = utc_now()
+                db.commit()
+                _publish_progress(
+                    experiment.id, run.id, condition.id, "complete"
+                )
+            except Exception as exc:
+                _record_error(db, run, "document_generation_error", exc)
+                _publish_progress(experiment.id, run.id, condition.id, "error")
+                return
+            run_llm_evaluation_pipeline.delay(run.id)
+            return
+
+        run.progress_message = "Generating Assessment"
         _set_status(db, run, "generating")
-        _publish_progress(experiment.id, run.id, condition.id, "generating")
+        _publish_progress(
+            experiment.id, run.id, condition.id, "generating"
+        )
         generation_started = time.perf_counter()
         try:
             result = _call_gemini(
@@ -318,42 +374,45 @@ def run_generation_pipeline(self, run_id: int) -> None:
         db.refresh(assessment)
 
         try:
+            run.progress_message = "Validating Assessment"
+            _set_status(db, run, "generating")
+            _publish_progress(
+                experiment.id, run.id, condition.id, "generating"
+            )
             generated = generate_questions(result.raw_text)
             assessment.parsed_json = generated.model_dump()
             run.generated_json = assessment.parsed_json
+            persist_assessment_questions(db, assessment)
+            run.status = "documenting"
+            run.progress_message = "Creating assessment document"
             db.commit()
-        except (ValueError, ValidationError) as exc:
-            _record_error(db, run, "assessment_parse_error", exc)
-            _publish_progress(experiment.id, run.id, condition.id, "error")
-            return
-
-        try:
-            _set_status(db, run, "documenting")
-            _publish_progress(experiment.id, run.id, condition.id, "documenting")
-            docx_bytes = build_assessment_docx(
-                run_id=run.id,
-                prompt_id=prompt.id,
-                condition_code=condition.condition_code,
-                run_number=run.run_number,
-                course=experiment.course,
-                topic=experiment.topic,
-                questions=assessment.parsed_json["questions"],
+            _publish_progress(
+                experiment.id, run.id, condition.id, "documenting"
             )
-            db.add(DocumentArtifact(
-                run_id=run.id,
-                filename=f"blueprint-lab-run-{run.id}.docx",
-                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                content=docx_bytes,
-                content_hash=sha256_bytes(docx_bytes),
-            ))
-            db.commit()
+            save_assessment_artifact(db, run)
+            run.viewer_ready_at = utc_now()
             run.status = "complete"
+            run.progress_message = "Complete"
             run.completed_at = utc_now()
             db.commit()
-            _publish_progress(experiment.id, run.id, condition.id, "complete")
+        except (ValueError, ValidationError, EvaluationValidationError) as exc:
+            error_type = (
+                "document_generation_error"
+                if run.status == "documenting"
+                else "assessment_parse_error"
+            )
+            _record_error(db, run, error_type, exc)
+            _publish_progress(
+                experiment.id, run.id, condition.id, "error"
+            )
+            return
         except Exception as exc:
-            _record_error(db, run, "artifact_generation_error", exc)
+            _record_error(db, run, "document_generation_error", exc)
             _publish_progress(experiment.id, run.id, condition.id, "error")
-            raise self.retry(exc=exc, countdown=10)
+            return
+        _publish_progress(
+            experiment.id, run.id, condition.id, "complete"
+        )
+        run_llm_evaluation_pipeline.delay(run.id)
     finally:
         db.close()

@@ -8,9 +8,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.config import settings
+from backend.models.evaluation import Evaluation
 from backend.models.experiment import Condition
-from backend.models.run import Run
+from backend.models.run import Assessment, Run
 from backend.models.source_document import RunSourceDocument, SourceDocument
+from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 
 
@@ -85,3 +88,56 @@ def retry_run(db: Session, run_id: int) -> Run:
         raise HTTPException(status_code=404, detail="Run not found")
     bindings = [_SnapshotBinding(source_document_id=item.source_document_id, role=item.role, ordinal=item.ordinal, included_text_hash=item.included_text_hash) for item in original.source_documents]
     return _create_run(db, original.condition_id, bindings, ModelSettings(**original.model_settings))
+
+
+def retry_llm_evaluation(db: Session, assessment_id: int) -> Run:
+    assessment = db.get(Assessment, assessment_id)
+    if assessment is None:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    run = assessment.run
+    if (
+        run.status != "complete"
+        or assessment.parsed_json is None
+        or run.document_artifact is None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Assessment generation has not completed",
+        )
+    from backend.services.assessment_evaluation import persist_assessment_questions
+
+    questions = persist_assessment_questions(db, assessment)
+    evaluation_model = settings.llm_evaluation_model or settings.llm_model
+    current_evaluations = db.scalars(
+        select(Evaluation).where(
+            Evaluation.assessment_id == assessment.id,
+            Evaluation.evaluation_type == "llm",
+            Evaluation.evaluator_identity == evaluation_model,
+            Evaluation.rubric_version == RUBRIC_VERSION,
+        )
+    ).all()
+    finalized_question_ids = {
+        item.question_id
+        for item in current_evaluations
+        if item.status == "finalized"
+    }
+    if questions and all(
+        question.id in finalized_question_ids for question in questions
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="LLM evaluation is already complete",
+        )
+    if any(item.status in {"draft", "reopened"} for item in current_evaluations):
+        raise HTTPException(
+            status_code=409,
+            detail="LLM evaluation is already in progress",
+        )
+
+    db.commit()
+    db.refresh(run)
+
+    from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
+
+    run_llm_evaluation_pipeline.delay(run.id)
+    return run

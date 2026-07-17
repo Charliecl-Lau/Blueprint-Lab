@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from backend.api.experiments import router as experiments_router
+from backend.api.evaluations import router as evaluations_router
 from backend.api.generations import router as generations_router
 from backend.api.runs import router as runs_router
 from backend.api.source_documents import router as source_documents_router
@@ -11,6 +12,7 @@ from backend.services.experiment_service import (
     ExperimentValidationError,
     validation_issues_from_request_errors,
 )
+from backend.services.evaluation_service import EvaluationServiceError
 
 app = FastAPI(title="Blueprint Lab")
 
@@ -37,6 +39,14 @@ async def structured_experiment_service_errors(
         content={"detail": {"errors": [issue.to_dict() for issue in exc.issues]}},
     )
 
+
+@app.exception_handler(EvaluationServiceError)
+async def evaluation_service_errors(
+    request: Request, exc: EvaluationServiceError
+):
+    del request
+    return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -45,6 +55,7 @@ app.add_middleware(
 )
 
 app.include_router(experiments_router)
+app.include_router(evaluations_router)
 app.include_router(generations_router)
 app.include_router(runs_router)
 app.include_router(source_documents_router)

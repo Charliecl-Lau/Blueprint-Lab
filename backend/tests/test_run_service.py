@@ -1,14 +1,16 @@
 import hashlib
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from backend.models.experiment import Condition, Experiment
-from backend.models.run import Prompt, Run
+from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
 from backend.models.source_document import SourceDocument
 from backend.schemas.run_schema import ModelSettings, SourceBinding
-from backend.services.run_service import create_run, retry_run
+from backend.services.assessment_evaluation import persist_assessment_questions
+from backend.services.run_service import create_run, retry_llm_evaluation, retry_run
 
 
 def condition(db):
@@ -97,3 +99,44 @@ def test_integrity_retry_preserves_flushed_parent_objects(test_db):
     assert run.run_number == 1
     assert test_db.get(Experiment, parent_id) is not None
     assert test_db.get(Condition, item.id) is not None
+
+
+def test_evaluation_retry_reuses_saved_run_and_enqueues_only_evaluation(test_db):
+    item = condition(test_db)
+    run = create_run(test_db, item.id, [])
+    run.status = "complete"
+    run.viewer_ready_at = run.created_at
+    run.completed_at = run.created_at
+    run.progress_message = "Complete"
+    run.assessment = Assessment(
+        raw_response_text='{"questions": [{"body": "Saved"}]}',
+        parsed_json={"questions": [{"body": "Saved"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    run.document_artifact = DocumentArtifact(
+        filename="saved.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=b"docx",
+    )
+    test_db.commit()
+    persist_assessment_questions(test_db, run.assessment)
+    test_db.commit()
+    assessment_id = run.assessment.id
+
+    with patch(
+        "backend.workers.evaluation_worker.run_llm_evaluation_pipeline.delay"
+    ) as evaluation_delay:
+        retried = retry_llm_evaluation(test_db, assessment_id)
+
+    assert retried.id == run.id
+    assert retried.assessment.id == assessment_id
+    assert retried.status == "complete"
+    assert retried.completed_at == retried.created_at
+    assert retried.progress_message == "Complete"
+    assert retried.error_type is None
+    assert retried.error_message is None
+    evaluation_delay.assert_called_once_with(run.id)

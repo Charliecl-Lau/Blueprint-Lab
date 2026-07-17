@@ -69,7 +69,7 @@ export function ProgressPage() {
         </section>
         {run?.status === 'complete' && run.experiment_id && (
           <Link className="primary inline-action" to={`/experiments/${run.experiment_id}/viewer/${run.id}`}>
-            Review run
+            View Assessment
           </Link>
         )}
         <div className="progress-exit">
