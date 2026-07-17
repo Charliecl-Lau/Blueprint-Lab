@@ -4,6 +4,7 @@ import type { RunSnapshot } from '../types'
 export function useSSE(
   runId: number | null,
   onSnapshot: (snapshot: RunSnapshot) => void,
+  reconnectKey = 0,
 ) {
   useEffect(() => {
     if (!runId || typeof EventSource === 'undefined') return
@@ -22,5 +23,5 @@ export function useSSE(
     es.onerror = () => es.close()
 
     return () => es.close()
-  }, [runId, onSnapshot])
+  }, [runId, onSnapshot, reconnectKey])
 }

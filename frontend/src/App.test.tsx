@@ -31,6 +31,7 @@ test('normalizes deprecated generation collections at the API boundary', () => {
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   useRunStore.getState().reset()
   window.history.replaceState({}, '', '/')
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -392,6 +393,265 @@ test('does not display token usage on run progress', async () => {
   expect(await screen.findByText('Equilibrium')).toBeVisible()
   expect(screen.queryByRole('region', { name: 'Token usage' })).not.toBeInTheDocument()
   expect(screen.queryByText('Token usage is loading.')).not.toBeInTheDocument()
+})
+
+test('shows six persisted stages and unlocks the Viewer during evaluation', async () => {
+  window.history.replaceState({}, '', '/runs/8/progress')
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'evaluating_quality',
+          viewer_ready_at: '2026-07-17T10:00:00Z',
+          progress_message: 'Evaluating clarity and solution quality',
+          evaluation_status: 'in_progress',
+          assessment: {
+            id: 5,
+            question_ids: [11],
+            parsed_json: { questions: [] },
+            output_hash: 'hash',
+            schema_version: '1',
+          },
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-17T09:00:00Z',
+          conditions: [],
+          runs: [],
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByText('Evaluating clarity and solution quality')).toBeVisible()
+  expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+    expect.stringContaining('Preparing Prompt'),
+    expect.stringContaining('Generating Assessment'),
+    expect.stringContaining('Validating Assessment'),
+    expect.stringContaining('Evaluating Assessment Quality'),
+    expect.stringContaining('Saving Results'),
+    expect.stringContaining('Complete'),
+  ])
+  expect(screen.getByRole('link', { name: 'View Assessment' })).toHaveAttribute(
+    'href',
+    '/experiments/1/viewer/8',
+  )
+})
+
+test('evaluation failure keeps Viewer access and offers only evaluation retry', async () => {
+  window.history.replaceState({}, '', '/runs/8/progress')
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'evaluation_failed',
+          viewer_ready_at: '2026-07-17T10:00:00Z',
+          progress_message: 'Assessment quality evaluation failed',
+          evaluation_status: 'failed',
+          assessment: {
+            id: 5,
+            question_ids: [11],
+            parsed_json: { questions: [] },
+            output_hash: 'hash',
+            schema_version: '1',
+          },
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-17T09:00:00Z',
+          conditions: [],
+          runs: [],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/assessments/5/evaluations/llm/retry') && init?.method === 'POST') {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'evaluating_quality',
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByRole('link', { name: 'View Assessment' })).toBeVisible()
+  const retry = screen.getByRole('button', { name: 'Retry LLM Evaluation' })
+  expect(screen.queryByRole('button', { name: 'Retry run' })).not.toBeInTheDocument()
+  await userEvent.click(retry)
+  expect(vi.mocked(fetch).mock.calls.some(([input, init]) => (
+    String(input).endsWith('/api/assessments/5/evaluations/llm/retry')
+    && init?.method === 'POST'
+  ))).toBe(true)
+})
+
+test('Viewer streams evaluation tokens and enables Grade Assessment on completion', async () => {
+  class MockEventSource {
+    static instance: MockEventSource | null = null
+    url: string
+    onmessage: ((event: MessageEvent<string>) => void) | null = null
+    onerror: (() => void) | null = null
+    close = vi.fn()
+
+    constructor(url: string) {
+      this.url = url
+      MockEventSource.instance = this
+    }
+
+    emit(snapshot: unknown) {
+      this.onmessage?.({ data: JSON.stringify(snapshot) } as MessageEvent<string>)
+    }
+  }
+  vi.stubGlobal('EventSource', MockEventSource)
+  window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-17T09:00:00Z',
+          conditions: [],
+          runs: [{
+            id: 8,
+            experiment_id: 1,
+            condition_id: 3,
+            run_number: 1,
+            status: 'evaluating_quality',
+            viewer_ready_at: '2026-07-17T10:00:00Z',
+          }],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'evaluating_quality',
+          viewer_ready_at: '2026-07-17T10:00:00Z',
+          evaluation_status: 'in_progress',
+          grading_available: false,
+          grading_question_id: 11,
+          artifact_available: false,
+          token_usage: {
+            input_tokens: 30,
+            output_tokens: 12,
+            total_tokens: 42,
+            model_calls: 2,
+            recording_state: 'in_progress',
+            stages: [],
+          },
+          assessment: {
+            id: 5,
+            question_ids: [11],
+            output_hash: 'hash',
+            schema_version: '1',
+            parsed_json: { questions: [] },
+          },
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByRole('status', { name: 'Evaluation status' })).toHaveTextContent(
+    'Evaluation in progress',
+  )
+  expect(screen.getByRole('button', { name: 'Evaluation in progress' })).toBeDisabled()
+  expect(screen.getByText('42')).toBeVisible()
+  await waitFor(() => expect(MockEventSource.instance).not.toBeNull())
+
+  MockEventSource.instance!.emit({
+    id: 8,
+    experiment_id: 1,
+    condition_id: 3,
+    run_number: 1,
+    status: 'complete',
+    viewer_ready_at: '2026-07-17T10:00:00Z',
+    evaluation_status: 'complete',
+    grading_available: true,
+    grading_question_id: 11,
+    artifact_available: true,
+    token_usage: {
+      input_tokens: 45,
+      output_tokens: 22,
+      total_tokens: 67,
+      model_calls: 3,
+      recording_state: 'recorded',
+      stages: [],
+    },
+  })
+
+  expect(await screen.findByRole('link', { name: 'Grade Assessment' })).toHaveAttribute(
+    'href',
+    '/assessments/5/questions/11/grade',
+  )
+  expect(screen.getByText('67')).toBeVisible()
 })
 
 test('keeps usage in the viewer and renders readable conditions and MathML questions', async () => {
