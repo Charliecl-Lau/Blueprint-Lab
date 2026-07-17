@@ -1,14 +1,16 @@
 import hashlib
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from backend.models.experiment import Condition, Experiment
-from backend.models.run import Prompt, Run
+from backend.models.run import Assessment, Prompt, Run
 from backend.models.source_document import SourceDocument
 from backend.schemas.run_schema import ModelSettings, SourceBinding
-from backend.services.run_service import create_run, retry_run
+from backend.services.assessment_evaluation import persist_assessment_questions
+from backend.services.run_service import create_run, retry_llm_evaluation, retry_run
 
 
 def condition(db):
@@ -28,7 +30,7 @@ def test_retry_creates_next_run_without_mutating_original(test_db):
     retried = retry_run(test_db, original.id)
     assert retried.id != original.id
     assert retried.run_number == original.run_number + 1
-    assert retried.status == "pending"
+    assert retried.status == "preparing_prompt"
     assert (
         retried.input_tokens,
         retried.output_tokens,
@@ -97,3 +99,34 @@ def test_integrity_retry_preserves_flushed_parent_objects(test_db):
     assert run.run_number == 1
     assert test_db.get(Experiment, parent_id) is not None
     assert test_db.get(Condition, item.id) is not None
+
+
+def test_evaluation_retry_reuses_saved_run_and_enqueues_only_evaluation(test_db):
+    item = condition(test_db)
+    run = create_run(test_db, item.id, [])
+    run.status = "evaluation_failed"
+    run.viewer_ready_at = run.created_at
+    run.error_type = "evaluation_error"
+    run.error_message = "temporary failure"
+    run.assessment = Assessment(
+        raw_response_text='{"questions": [{"body": "Saved"}]}',
+        parsed_json={"questions": [{"body": "Saved"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    test_db.commit()
+    persist_assessment_questions(test_db, run.assessment)
+    test_db.commit()
+    assessment_id = run.assessment.id
+
+    with patch(
+        "backend.workers.evaluation_worker.run_llm_evaluation_pipeline.delay"
+    ) as evaluation_delay:
+        retried = retry_llm_evaluation(test_db, assessment_id)
+
+    assert retried.id == run.id
+    assert retried.assessment.id == assessment_id
+    assert retried.status == "evaluating_quality"
+    assert retried.error_type is None
+    assert retried.error_message is None
+    evaluation_delay.assert_called_once_with(run.id)

@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.models.experiment import Condition
-from backend.models.run import Run
+from backend.models.run import Assessment, Run
 from backend.models.source_document import RunSourceDocument, SourceDocument
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 
@@ -50,7 +50,7 @@ def _create_run(db: Session, condition_id: int, source_bindings, model_settings:
                     experiment_id=condition.experiment_id,
                     condition_id=condition.id,
                     run_number=number,
-                    status="pending",
+                    status="preparing_prompt",
                     model_settings=values,
                     input_tokens=0,
                     output_tokens=0,
@@ -85,3 +85,33 @@ def retry_run(db: Session, run_id: int) -> Run:
         raise HTTPException(status_code=404, detail="Run not found")
     bindings = [_SnapshotBinding(source_document_id=item.source_document_id, role=item.role, ordinal=item.ordinal, included_text_hash=item.included_text_hash) for item in original.source_documents]
     return _create_run(db, original.condition_id, bindings, ModelSettings(**original.model_settings))
+
+
+def retry_llm_evaluation(db: Session, assessment_id: int) -> Run:
+    assessment = db.get(Assessment, assessment_id)
+    if assessment is None:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    run = assessment.run
+    if run.viewer_ready_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Assessment generation has not completed validation",
+        )
+    if run.status != "evaluation_failed":
+        raise HTTPException(
+            status_code=409,
+            detail="LLM evaluation is not in a failed state",
+        )
+
+    run.status = "evaluating_quality"
+    run.progress_message = "Preparing generated assessment for evaluation"
+    run.error_type = None
+    run.error_message = None
+    run.completed_at = None
+    db.commit()
+    db.refresh(run)
+
+    from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
+
+    run_llm_evaluation_pipeline.delay(run.id)
+    return run

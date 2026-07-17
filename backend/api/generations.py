@@ -32,7 +32,11 @@ def regenerate_generation(generation_id: int, response: Response, db: Session = 
     run_generation_pipeline.delay(run.id)
     response.headers["Deprecation"] = "true"
     response.headers["Link"] = f'</runs/{generation_id}/retry>; rel="successor-version"'
-    return {"run_id": run.id, "generation_id": run.id, "status": "pending"}
+    return {
+        "run_id": run.id,
+        "generation_id": run.id,
+        "status": "preparing_prompt",
+    }
 
 
 @router.get("/{generation_id}/export-docx")

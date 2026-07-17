@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from backend.models import Experiment, Run
 from backend.services.llm_client import LLMResult, TokenUsage
+from backend.tests.test_evaluation_worker import _evaluation_json
 
 
 def valid_payload():
@@ -92,27 +93,55 @@ def test_two_runs_finish_independently_and_reopen_with_isolated_tokens(client, t
     second = create_valid_experiment(client, key="second")
 
     def run_worker_with_mocked_gemini(run_id, usage):
-        llm = MagicMock()
-        llm.generate.return_value = llm_result(
+        generation_llm = MagicMock()
+        generation_llm.generate.return_value = llm_result(
             assessment_response(), f"{run_id}-assessment", usage
+        )
+        evaluation_llm = MagicMock(model="gemini-evaluator")
+        evaluation_llm.generate.return_value = llm_result(
+            _evaluation_json(), f"{run_id}-evaluation", (12, 8, 20)
         )
         with (
             patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
-            patch("backend.workers.assessment_worker.LLMClient", return_value=llm),
+            patch(
+                "backend.workers.assessment_worker.LLMClient",
+                return_value=generation_llm,
+            ),
             patch("backend.workers.assessment_worker.redis_client"),
-            patch("backend.workers.assessment_worker.build_assessment_docx", return_value=b"docx"),
+            patch(
+                "backend.workers.assessment_worker."
+                "run_llm_evaluation_pipeline.delay"
+            ),
         ):
             test_db.close = MagicMock()
             from backend.workers.assessment_worker import run_generation_pipeline
             run_generation_pipeline.run(run_id)
+        with (
+            patch("backend.workers.evaluation_worker.SessionLocal", return_value=test_db),
+            patch(
+                "backend.workers.evaluation_worker.LLMClient",
+                return_value=evaluation_llm,
+            ),
+            patch("backend.workers.evaluation_worker.redis_client"),
+            patch(
+                "backend.workers.evaluation_worker.build_assessment_docx",
+                return_value=b"docx",
+            ),
+        ):
+            from backend.workers.evaluation_worker import (
+                run_llm_evaluation_pipeline,
+            )
+
+            run_llm_evaluation_pipeline.run(run_id)
 
     run_worker_with_mocked_gemini(first.run_id, usage=(20, 8, 28))
     run_worker_with_mocked_gemini(second.run_id, usage=(200, 80, 280))
 
     reopened = client.get(f"/runs/{first.run_id}").json()
     assert reopened["status"] == "complete", reopened
-    assert reopened["token_usage"]["total_tokens"] == 28
-    assert client.get(f"/runs/{second.run_id}").json()["token_usage"]["total_tokens"] == 280
+    assert reopened["token_usage"]["total_tokens"] == 48
+    assert reopened["token_usage"]["stages"][-1]["stage"] == "evaluation"
+    assert client.get(f"/runs/{second.run_id}").json()["token_usage"]["total_tokens"] == 300
 
 
 def test_incomplete_submission_creates_no_research_rows_or_task(client, test_db):

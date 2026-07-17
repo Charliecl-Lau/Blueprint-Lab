@@ -10,19 +10,57 @@ from sse_starlette.sse import EventSourceResponse
 from backend.config import settings
 from backend.database import SessionLocal, get_db
 from backend.models.run import Run
+from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.schemas.run_schema import (
     RecentRun,
     RunCreate,
     RunSummary,
     token_usage_detail,
 )
-from backend.services.run_service import create_run, retry_run
+from backend.services.run_service import create_run, retry_llm_evaluation, retry_run
 from backend.workers.assessment_worker import run_generation_pipeline
 
 router = APIRouter(tags=["runs"])
-_TERMINAL_RUN_STATES = {"complete", "error"}
+_TERMINAL_RUN_STATES = {"complete", "generation_failed", "evaluation_failed"}
+
+
+def _ordered_questions(run: Run):
+    if run.assessment is None:
+        return []
+    return sorted(run.assessment.questions, key=lambda item: (item.ordinal, item.id))
+
+
+def _has_current_llm_evaluation(question) -> bool:
+    evaluator_identity = settings.llm_evaluation_model or settings.llm_model
+    return any(
+        evaluation.evaluation_type == "llm"
+        and evaluation.evaluator_identity == evaluator_identity
+        and evaluation.rubric_version == RUBRIC_VERSION
+        and evaluation.status == "finalized"
+        for evaluation in question.evaluations
+    )
+
+
+def _grading_question_id(run: Run, reviewer_id: str):
+    questions = _ordered_questions(run)
+    if not questions:
+        return None
+    for question in questions:
+        reviewed = any(
+            evaluation.evaluation_type == "human"
+            and evaluation.evaluator_identity == reviewer_id
+            and evaluation.status == "finalized"
+            for evaluation in question.evaluations
+        )
+        if not reviewed:
+            return question.id
+    return questions[0].id
 
 def run_detail(run: Run, include_raw_response: bool = False):
+    questions = _ordered_questions(run)
+    grading_available = bool(questions) and run.status == "complete" and all(
+        _has_current_llm_evaluation(question) for question in questions
+    )
     prompt = None
     if run.prompt:
         prompt = {
@@ -56,9 +94,28 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "condition_id": run.condition_id,
         "run_number": run.run_number,
         "status": run.status,
+        "viewer_ready_at": run.viewer_ready_at,
+        "progress_message": run.progress_message,
+        "evaluation_status": (
+            "complete"
+            if run.status == "complete"
+            else "failed"
+            if run.status == "evaluation_failed"
+            else "in_progress"
+            if run.viewer_ready_at is not None
+            else "not_started"
+        ),
+        "grading_available": grading_available,
+        "grading_question_id": (
+            _grading_question_id(run, settings.local_reviewer_id)
+            if grading_available
+            else None
+        ),
         "model_settings": run.model_settings,
         "prompt": prompt,
         "assessment": None if not run.assessment else {
+            "id": run.assessment.id,
+            "question_ids": [question.id for question in questions],
             "parsed_json": run.assessment.parsed_json,
             "output_hash": run.assessment.output_hash,
             "schema_version": run.assessment.schema_version,
@@ -185,6 +242,16 @@ def get_run(run_id: int, include_raw_response: bool = False, db: Session = Depen
 @router.post("/runs/{run_id}/retry", response_model=RunSummary)
 def post_retry(run_id: int, db: Session = Depends(get_db)):
     run = retry_run(db, run_id); run_generation_pipeline.delay(run.id); return run
+
+
+@router.post(
+    "/assessments/{assessment_id}/evaluations/llm/retry",
+    response_model=RunSummary,
+)
+def post_llm_evaluation_retry(
+    assessment_id: int, db: Session = Depends(get_db)
+):
+    return retry_llm_evaluation(db, assessment_id)
 
 @router.get("/runs/{run_id}/export-docx")
 def export_run(run_id: int, db: Session = Depends(get_db)):

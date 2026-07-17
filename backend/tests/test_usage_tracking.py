@@ -86,6 +86,39 @@ def test_record_model_call_aggregates_two_responses_once(test_db):
     ) == (30, 12, 42, 2)
 
 
+def test_evaluation_usage_updates_run_totals_and_stage_detail(test_db):
+    from backend.schemas.run_schema import token_usage_detail
+
+    run = _run(test_db)
+    record_model_call(
+        test_db,
+        run=run,
+        call_id="generation",
+        stage="assessment",
+        attempt=1,
+        result=result("generation-response", 20, 8, 28),
+    )
+    record_model_call(
+        test_db,
+        run=run,
+        call_id="evaluation",
+        stage="evaluation",
+        attempt=1,
+        result=result("evaluation-response", 12, 8, 20),
+    )
+
+    detail = token_usage_detail(run)
+
+    assert (run.input_tokens, run.output_tokens, run.total_tokens) == (32, 16, 48)
+    assert detail["stages"][-1] == {
+        "stage": "evaluation",
+        "input_tokens": 12,
+        "output_tokens": 8,
+        "total_tokens": 20,
+        "model_calls": 1,
+    }
+
+
 def test_provider_response_id_deduplicates_a_second_call_id(test_db):
     run = _run(test_db)
     first = record_model_call(

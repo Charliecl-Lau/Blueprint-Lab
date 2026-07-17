@@ -3,7 +3,17 @@ import json
 import pytest
 
 from backend.api.runs import _stream_run_progress
-from backend.models import Condition, Experiment, Run
+from backend.config import settings
+from backend.api.runs import run_detail
+from backend.models import (
+    Assessment,
+    Condition,
+    Evaluation,
+    Experiment,
+    Run,
+)
+from backend.services.assessment_evaluation import persist_assessment_questions
+from backend.services.assessment_rubric import RUBRIC_SNAPSHOT, RUBRIC_VERSION
 
 
 def _run(test_db, *, status):
@@ -57,7 +67,7 @@ async def first_event(stream):
 
 @pytest.mark.asyncio
 async def test_progress_stream_emits_database_snapshot_before_redis(test_db):
-    run = _run(test_db, status="generating")
+    run = _run(test_db, status="evaluating_quality")
     sessions = []
 
     def session_factory():
@@ -80,8 +90,11 @@ async def test_progress_stream_emits_database_snapshot_before_redis(test_db):
 
 
 @pytest.mark.asyncio
-async def test_terminal_snapshot_closes_without_waiting_for_redis(test_db):
-    run = _run(test_db, status="complete")
+@pytest.mark.parametrize(
+    "status", ["complete", "generation_failed", "evaluation_failed"]
+)
+async def test_terminal_snapshot_closes_without_waiting_for_redis(test_db, status):
+    run = _run(test_db, status=status)
     redis_opened = False
 
     def redis_factory():
@@ -99,5 +112,57 @@ async def test_terminal_snapshot_closes_without_waiting_for_redis(test_db):
     ]
 
     assert len(events) == 1
-    assert json.loads(events[0]["data"])["status"] == "complete"
+    assert json.loads(events[0]["data"])["status"] == status
     assert redis_opened is False
+
+
+def test_run_detail_exposes_viewer_evaluation_and_grading_state(test_db):
+    run = _run(test_db, status="complete")
+    run.viewer_ready_at = run.created_at
+    run.progress_message = "Complete"
+    run.assessment = Assessment(
+        raw_response_text='{"questions": [{"body": "Saved"}]}',
+        parsed_json={"questions": [{"body": "Saved"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    test_db.commit()
+    question = persist_assessment_questions(test_db, run.assessment)[0]
+    run.assessment.questions
+    test_db.add(
+        Evaluation.from_run(
+            run,
+            question=question,
+            evaluation_type="llm",
+            evaluator_identity=(
+                settings.llm_evaluation_model or settings.llm_model
+            ),
+            evaluation_model=(settings.llm_evaluation_model or settings.llm_model),
+            rubric_version=RUBRIC_VERSION,
+            rubric_snapshot=RUBRIC_SNAPSHOT,
+        )
+    )
+    test_db.flush()
+    question.evaluations[0].status = "finalized"
+    test_db.commit()
+
+    detail = run_detail(run)
+
+    assert detail["viewer_ready_at"] == run.viewer_ready_at
+    assert detail["progress_message"] == "Complete"
+    assert detail["evaluation_status"] == "complete"
+    assert detail["grading_available"] is True
+    assert detail["grading_question_id"] == question.id
+    assert detail["assessment"]["id"] == run.assessment.id
+    assert detail["assessment"]["question_ids"] == [question.id]
+
+
+def test_evaluation_failure_is_terminal_but_remains_viewer_ready(test_db):
+    run = _run(test_db, status="evaluation_failed")
+    run.viewer_ready_at = run.created_at
+    test_db.commit()
+
+    detail = run_detail(run)
+
+    assert detail["evaluation_status"] == "failed"
+    assert detail["grading_available"] is False

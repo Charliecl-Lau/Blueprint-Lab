@@ -53,7 +53,7 @@ def test_create_experiment_creates_condition_and_generation(client):
     assert data["additional_instruction"] == "Use one laboratory scenario."
     assert data["conditions"][0]["factor_inputs"]["reference_content"] == "Use SI units."
     assert data["conditions"][0]["condition_label"] == "ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF"
-    assert data["generations"][0]["status"] == "pending"
+    assert data["generations"][0]["status"] == "preparing_prompt"
     assert data["runs"] == data["generations"]
     delay.assert_called_once_with(data["generations"][0]["id"])
 

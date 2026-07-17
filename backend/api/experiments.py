@@ -14,7 +14,7 @@ from backend.workers.assessment_worker import run_generation_pipeline
 
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
-_TERMINAL_STAGES = {"complete", "error"}
+_TERMINAL_STAGES = {"complete", "generation_failed", "evaluation_failed"}
 
 
 async def _stream_experiment_progress(experiment_id: int, total_generations: int):
