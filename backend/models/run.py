@@ -40,7 +40,9 @@ class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','prompting','generating','documenting','complete','error')"
+            "status IN ('preparing_prompt','generating_assessment','validating_assessment',"
+            "'evaluating_quality','saving_results','complete','generation_failed','evaluation_failed')",
+            name="ck_runs_status",
         ),
         UniqueConstraint("condition_id", "run_number"),
         Index("ix_runs_experiment_id", "experiment_id"),
@@ -68,7 +70,9 @@ class Run(Base):
     experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
     condition_id: Mapped[int] = mapped_column(ForeignKey("conditions.id"), nullable=False)
     run_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="preparing_prompt"
+    )
     provider: Mapped[Optional[str]] = mapped_column(String)
     model: Mapped[Optional[str]] = mapped_column(String)
     version: Mapped[Optional[str]] = mapped_column(String)
@@ -90,6 +94,8 @@ class Run(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    viewer_ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    progress_message: Mapped[Optional[str]] = mapped_column(Text)
     experiment: Mapped["Experiment"] = relationship(back_populates="runs")
     condition: Mapped["Condition"] = relationship(back_populates="runs")
     prompt: Mapped[Optional["Prompt"]] = relationship(back_populates="run", uselist=False, cascade="all, delete-orphan")
@@ -158,6 +164,9 @@ class Assessment(Base):
     schema_version: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     run: Mapped[Run] = relationship(back_populates="assessment")
+    questions: Mapped[list["AssessmentQuestion"]] = relationship(
+        back_populates="assessment", cascade="all, delete-orphan"
+    )
 
 
 class DocumentArtifact(Base):
