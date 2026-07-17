@@ -191,7 +191,7 @@ def create_experiment_with_run(
         experiment=experiment,
         condition=condition,
         run_number=1,
-        status="preparing_prompt",
+        status="pending",
         model_settings={},
         input_tokens=0,
         output_tokens=0,

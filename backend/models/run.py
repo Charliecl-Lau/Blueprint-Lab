@@ -40,8 +40,7 @@ class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('preparing_prompt','generating_assessment','validating_assessment',"
-            "'evaluating_quality','saving_results','complete','generation_failed','evaluation_failed')",
+            "status IN ('pending','prompting','generating','documenting','complete','error')",
             name="ck_runs_status",
         ),
         UniqueConstraint("condition_id", "run_number"),
@@ -70,9 +69,7 @@ class Run(Base):
     experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
     condition_id: Mapped[int] = mapped_column(ForeignKey("conditions.id"), nullable=False)
     run_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    status: Mapped[str] = mapped_column(
-        String, nullable=False, default="preparing_prompt"
-    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     provider: Mapped[Optional[str]] = mapped_column(String)
     model: Mapped[Optional[str]] = mapped_column(String)
     version: Mapped[Optional[str]] = mapped_column(String)

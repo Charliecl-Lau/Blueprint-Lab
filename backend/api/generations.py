@@ -35,7 +35,7 @@ def regenerate_generation(generation_id: int, response: Response, db: Session = 
     return {
         "run_id": run.id,
         "generation_id": run.id,
-        "status": "preparing_prompt",
+        "status": "pending",
     }
 
 

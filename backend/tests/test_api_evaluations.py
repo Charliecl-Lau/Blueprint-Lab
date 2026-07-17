@@ -42,7 +42,12 @@ def test_questions_evaluations_and_grading_context_routes(client, test_db):
 
 def test_grading_context_returns_409_before_llm_completion(client, test_db):
     run = evaluated_run(test_db, question_count=1)
-    run.status = "evaluation_failed"
+    llm_evaluation = next(
+        item
+        for item in run.assessment.questions[0].evaluations
+        if item.evaluation_type == "llm"
+    )
+    llm_evaluation.status = "failed"
     test_db.commit()
 
     response = client.get(
@@ -154,9 +159,13 @@ def test_comparison_is_unavailable_before_human_finalization(client, test_db):
 
 def test_llm_retry_route_dispatches_only_evaluation_worker(client, test_db):
     run = evaluated_run(test_db, question_count=1)
-    run.status = "evaluation_failed"
     run.viewer_ready_at = run.created_at
-    run.error_type = "evaluation_error"
+    llm_evaluation = next(
+        item
+        for item in run.assessment.questions[0].evaluations
+        if item.evaluation_type == "llm"
+    )
+    llm_evaluation.status = "failed"
     test_db.commit()
 
     with (
@@ -172,6 +181,6 @@ def test_llm_retry_route_dispatches_only_evaluation_worker(client, test_db):
         )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "evaluating_quality"
+    assert response.json()["status"] == "complete"
     evaluation_delay.assert_called_once_with(run.id)
     generation_delay.assert_not_called()

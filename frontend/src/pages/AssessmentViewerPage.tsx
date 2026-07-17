@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { evaluationsApi } from '../api/evaluations'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
 import { AppHeader } from '../components/AppHeader'
@@ -31,6 +32,7 @@ export function AssessmentViewerPage() {
   const selectRun = useRunStore((state) => state.selectRun)
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [retryingEvaluation, setRetryingEvaluation] = useState(false)
 
   useEffect(() => {
     if (id) experimentsApi.get(id).then(mergeExperiment)
@@ -57,9 +59,17 @@ export function AssessmentViewerPage() {
   }, [applyRunSnapshot])
   useSSE(selectedId ?? null, receive)
 
+  useEffect(() => {
+    if (!selectedId || selected?.evaluation_status === 'complete') return
+    const timer = window.setInterval(() => {
+      void runsApi.get(selectedId).then(mergeRun).catch(() => undefined)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [mergeRun, selected?.evaluation_status, selectedId])
+
   const questions = selected?.assessment?.parsed_json?.questions ?? selected?.generated_json?.questions ?? []
   const condition = selected?.condition ?? experiment?.conditions.find((item) => item.id === selected?.condition_id)
-  const evaluationStatus = selected?.evaluation_status === 'failed' || selected?.status === 'evaluation_failed'
+  const evaluationStatus = selected?.evaluation_status === 'failed'
     ? 'Evaluation unavailable'
     : selected?.evaluation_status === 'complete'
       ? 'Evaluation complete'
@@ -77,6 +87,17 @@ export function AssessmentViewerPage() {
       navigate(`/runs/${retried.id}/progress`)
     } finally {
       setRetrying(false)
+    }
+  }
+
+  const retryEvaluation = async () => {
+    if (!selected?.assessment?.id) return
+    setRetryingEvaluation(true)
+    try {
+      const run = await evaluationsApi.retryLlm(selected.assessment.id)
+      mergeRun({ ...run, evaluation_status: 'in_progress' })
+    } finally {
+      setRetryingEvaluation(false)
     }
   }
 
@@ -123,6 +144,17 @@ export function AssessmentViewerPage() {
                   >
                     Grade Assessment
                   </Link>
+                ) : selected?.assessment?.id && (
+                  selected.evaluation_status === 'failed'
+                  || selected.evaluation_status === 'not_started'
+                ) ? (
+                  <button
+                    className="primary"
+                    disabled={retryingEvaluation}
+                    onClick={retryEvaluation}
+                  >
+                    {retryingEvaluation ? 'Retrying LLM Evaluation…' : 'Retry LLM Evaluation'}
+                  </button>
                 ) : (
                   <button className="primary" disabled>{evaluationStatus}</button>
                 )}

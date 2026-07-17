@@ -21,7 +21,7 @@ from backend.services.run_service import create_run, retry_run
 from backend.workers.assessment_worker import run_generation_pipeline
 
 router = APIRouter(tags=["runs"])
-_TERMINAL_RUN_STATES = {"complete", "generation_failed", "evaluation_failed"}
+_TERMINAL_RUN_STATES = {"complete", "error"}
 
 
 def _ordered_questions(run: Run):
@@ -39,6 +39,45 @@ def _has_current_llm_evaluation(question) -> bool:
         and evaluation.status == "finalized"
         for evaluation in question.evaluations
     )
+
+
+def _current_llm_evaluations(question):
+    evaluator_identity = settings.llm_evaluation_model or settings.llm_model
+    return [
+        evaluation
+        for evaluation in question.evaluations
+        if evaluation.evaluation_type == "llm"
+        and evaluation.evaluator_identity == evaluator_identity
+        and evaluation.rubric_version == RUBRIC_VERSION
+    ]
+
+
+def _evaluation_status(questions) -> str:
+    if not questions:
+        return "not_started"
+    if all(_has_current_llm_evaluation(question) for question in questions):
+        return "complete"
+
+    latest_incomplete = []
+    has_finalized = False
+    for question in questions:
+        evaluations = _current_llm_evaluations(question)
+        has_finalized = has_finalized or any(
+            item.status == "finalized" for item in evaluations
+        )
+        incomplete = [
+            item for item in evaluations if item.status != "finalized"
+        ]
+        if incomplete:
+            latest_incomplete.append(
+                max(incomplete, key=lambda item: (item.attempt, item.id or 0))
+            )
+
+    if any(item.status in {"draft", "reopened"} for item in latest_incomplete):
+        return "in_progress"
+    if any(item.status == "failed" for item in latest_incomplete):
+        return "failed"
+    return "in_progress" if has_finalized else "not_started"
 
 
 def _grading_question_id(run: Run, reviewer_id: str):
@@ -104,16 +143,7 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "status": run.status,
         "viewer_ready_at": viewer_ready_at,
         "progress_message": run.progress_message,
-        "evaluation_status": (
-            "failed"
-            if run.status == "evaluation_failed"
-            else "complete"
-            if grading_available
-            else "in_progress"
-            if run.status in {"evaluating_quality", "saving_results"}
-            or (viewer_ready_at is not None and run.status != "complete")
-            else "not_started"
-        ),
+        "evaluation_status": _evaluation_status(questions),
         "grading_available": grading_available,
         "grading_question_id": (
             _grading_question_id(run, settings.local_reviewer_id)

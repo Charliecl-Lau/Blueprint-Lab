@@ -57,6 +57,10 @@ def run_pipeline_synchronously(run, test_db, llm):
         patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
         patch("backend.workers.assessment_worker.redis_client") as mock_redis,
         patch(
+            "backend.services.document_artifact.build_assessment_docx",
+            return_value=b"PK-generation-docx",
+        ),
+        patch(
             "backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"
         ) as evaluation_delay,
     ):
@@ -120,7 +124,7 @@ def generation_fixture(test_db):
     generation = Generation(
         experiment_id=experiment.id,
         condition_id=condition.id,
-        status="preparing_prompt",
+        status="pending",
         input_tokens=0,
         output_tokens=0,
         total_tokens=0,
@@ -136,6 +140,10 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         patch("backend.workers.assessment_worker.LLMClient") as MockLLM,
         patch("backend.workers.assessment_worker.SessionLocal") as MockSession,
         patch("backend.workers.assessment_worker.redis_client") as mock_redis,
+        patch(
+            "backend.services.document_artifact.build_assessment_docx",
+            return_value=b"PK-generation-docx",
+        ),
         patch(
             "backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"
         ) as evaluation_delay,
@@ -162,11 +170,10 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         run_generation_pipeline(generation_fixture.id)
 
         test_db.refresh(generation_fixture)
-        assert generation_fixture.status == "evaluating_quality"
+        assert generation_fixture.status == "complete"
+        assert generation_fixture.completed_at is not None
         assert generation_fixture.viewer_ready_at is not None
-        assert generation_fixture.progress_message == (
-            "Preparing generated assessment for evaluation"
-        )
+        assert generation_fixture.progress_message == "Complete"
         assert generation_fixture.assessment.parsed_json["questions"][0]["body"] == "Explain equilibrium."
         assert generation_fixture.assessment.raw_response_text == raw_text
         assert generation_fixture.assessment.output_hash == sha256_text(raw_text)
@@ -231,7 +238,7 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         assert generation_fixture.prompt.actual_prompt_hash
         assert generation_fixture.prompt.generation_envelope_hash
         assert generation_fixture.prompt.structure_duration_ms is not None
-        assert generation_fixture.document_artifact is None
+        assert generation_fixture.document_artifact.content == b"PK-generation-docx"
         assert len(generation_fixture.assessment.questions) == 1
         evaluation_delay.assert_called_once_with(generation_fixture.id)
         assert generation_fixture.model_name == "gemini"
@@ -302,7 +309,7 @@ def test_anthropic_prompt_provider_failure_is_stage_specific(
             run_pipeline_synchronously(generation_fixture, test_db, llm)
 
     test_db.refresh(generation_fixture)
-    assert generation_fixture.status == "generation_failed"
+    assert generation_fixture.status == "error"
     assert generation_fixture.error_type == "actual_prompt_provider_error"
 
 
@@ -343,7 +350,7 @@ def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test
         run_generation_pipeline(generation_fixture.id)
 
         test_db.refresh(generation_fixture)
-        assert generation_fixture.status == "evaluating_quality"
+        assert generation_fixture.status == "complete"
         assert llm.generate.call_count == 1
         assert llm.generate.call_args.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
         question_schema = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
@@ -388,7 +395,7 @@ def test_generation_pipeline_preserves_raw_response_when_parsing_fails(generatio
         run_generation_pipeline(generation_fixture.id)
 
         test_db.refresh(generation_fixture)
-        assert generation_fixture.status == "generation_failed"
+        assert generation_fixture.status == "error"
         assert generation_fixture.assessment.raw_response_text == "not-json"
         assert generation_fixture.assessment.parsed_json is None
         assert generation_fixture.assessment.output_hash == sha256_text("not-json")
@@ -412,7 +419,7 @@ def test_invalid_local_actual_prompt_is_rejected_before_persistence(
         from backend.workers.assessment_worker import run_generation_pipeline
         run_generation_pipeline(generation_fixture.id)
         test_db.refresh(generation_fixture)
-        assert generation_fixture.status == "generation_failed"
+        assert generation_fixture.status == "error"
         assert generation_fixture.error_type == "actual_prompt_validation_error"
         assert generation_fixture.prompt is None
         assert MockLLM.return_value.generate.call_count == 0
@@ -435,7 +442,7 @@ def test_openai_generation_provider_failure_is_stage_specific(
             with pytest.raises(RuntimeError, match="retry scheduled"):
                 run_generation_pipeline(generation_fixture.id)
         test_db.refresh(generation_fixture)
-        assert generation_fixture.status == "generation_failed"
+        assert generation_fixture.status == "error"
         assert generation_fixture.error_type == "generation_provider_error"
 
 
@@ -479,10 +486,40 @@ def test_openai_pipeline_records_only_assessment_provider_usage(
     ]
     assert llm.generate.call_count == 1
     assert generation_fixture.total_tokens == 28
-    assert generation_fixture.document_artifact is None
+    assert generation_fixture.document_artifact.content == b"PK-generation-docx"
     mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
     channels = [call.args[0] for call in mock_redis.publish.call_args_list]
     assert f"run:{generation_fixture.id}:progress" in channels
+
+
+def test_completed_generation_redelivery_preserves_primary_completion(
+    generation_fixture, test_db
+):
+    llm = MagicMock()
+    raw_text = __import__("json").dumps(
+        {
+            "questions": [
+                complete_question(
+                    question_type="short_answer",
+                    body="State equilibrium.",
+                    model_answer="Forces and moments balance.",
+                )
+            ]
+        }
+    )
+    llm.generate.return_value = result(raw_text, 20, 8, 28)
+    run_pipeline_synchronously(generation_fixture, test_db, llm)
+    completed_at = generation_fixture.completed_at
+    artifact_id = generation_fixture.document_artifact.id
+
+    redis_client = run_pipeline_synchronously(generation_fixture, test_db, llm)
+    test_db.refresh(generation_fixture)
+
+    assert generation_fixture.status == "complete"
+    assert generation_fixture.completed_at == completed_at
+    assert generation_fixture.document_artifact.id == artifact_id
+    assert llm.generate.call_count == 1
+    redis_client.evaluation_delay.assert_called_once_with(generation_fixture.id)
 
 
 def test_truncated_retry_records_response_usage_once(generation_fixture, test_db):

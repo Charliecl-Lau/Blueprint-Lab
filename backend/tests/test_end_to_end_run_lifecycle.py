@@ -105,6 +105,10 @@ def run_generation_with_mocked_gemini(test_db, run_id, usage=(20, 8, 28)):
         patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
         patch("backend.workers.assessment_worker.LLMClient", return_value=generation_llm),
         patch("backend.workers.assessment_worker.redis_client"),
+        patch(
+            "backend.services.document_artifact.build_assessment_docx",
+            return_value=b"docx",
+        ),
         patch("backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"),
     ):
         test_db.close = MagicMock()
@@ -126,7 +130,6 @@ def run_evaluation_with_mocked_gemini(
         patch("backend.workers.evaluation_worker.SessionLocal", return_value=test_db),
         patch("backend.workers.evaluation_worker.LLMClient", return_value=evaluation_llm),
         patch("backend.workers.evaluation_worker.redis_client"),
-        patch("backend.workers.evaluation_worker.build_assessment_docx", return_value=b"docx"),
     ):
         from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
 
@@ -146,7 +149,8 @@ def test_viewer_ready_boundary_then_evaluation_adds_usage_without_mutation(clien
     initial = client.get(f"/runs/{run.id}").json()
 
     assert run.viewer_ready_at is not None
-    assert run.status == "evaluating_quality"
+    assert run.status == "complete"
+    assert run.document_artifact.content == b"docx"
     assert run.assessment.parsed_json == generated_snapshot
     assert initial["token_usage"]["stages"][-1]["stage"] == "assessment"
     assert initial["token_usage"]["total_tokens"] == 28
@@ -187,14 +191,15 @@ def test_failed_evaluation_retries_only_evaluation_and_preserves_assessment(clie
         response_suffix="evaluation-failed",
     )
     test_db.refresh(run)
-    assert run.status == "evaluation_failed"
+    assert run.status == "complete"
+    assert client.get(f"/runs/{run.id}").json()["evaluation_status"] == "failed"
     assert run.assessment.parsed_json == snapshot
 
     with patch("backend.workers.evaluation_worker.run_llm_evaluation_pipeline.delay") as retry_delay:
         retry = client.post(f"/assessments/{assessment_id}/evaluations/llm/retry")
     assert retry.status_code == 200
     retry_delay.assert_called_once_with(run.id)
-    assert retry.json()["status"] == "evaluating_quality"
+    assert retry.json()["status"] == "complete"
 
     run_evaluation_with_mocked_gemini(
         test_db, run.id, response_suffix="evaluation-retry"

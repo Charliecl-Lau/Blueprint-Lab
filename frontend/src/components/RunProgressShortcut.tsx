@@ -5,11 +5,10 @@ import { useRunStore } from '../store/runStore'
 import type { RecentRun } from '../types'
 
 const ACTIVE = new Set([
-  'preparing_prompt',
-  'generating_assessment',
-  'validating_assessment',
-  'evaluating_quality',
-  'saving_results',
+  'pending',
+  'prompting',
+  'generating',
+  'documenting',
 ])
 
 export function RunProgressShortcut() {

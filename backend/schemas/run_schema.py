@@ -35,14 +35,12 @@ class RunSummary(BaseModel):
     condition_id: int
     run_number: int
     status: Literal[
-        "preparing_prompt",
-        "generating_assessment",
-        "validating_assessment",
-        "evaluating_quality",
-        "saving_results",
+        "pending",
+        "prompting",
+        "generating",
+        "documenting",
         "complete",
-        "generation_failed",
-        "evaluation_failed",
+        "error",
     ]
     model_settings: dict
     model_config = {"from_attributes": True, "protected_namespaces": ()}
@@ -123,7 +121,7 @@ def token_usage_detail(run) -> dict:
     )
     if all(value is None for value in aggregates):
         recording_state: RecordingState = "not_recorded"
-    elif run.status in {"complete", "generation_failed", "evaluation_failed"}:
+    elif run.status in {"complete", "error"}:
         recording_state = "recorded"
     else:
         recording_state = "in_progress"

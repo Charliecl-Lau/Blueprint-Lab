@@ -134,7 +134,7 @@ def generation_fixture(test_db):
         experiment=experiment,
         condition=condition,
         run_number=1,
-        status="evaluating_quality",
+        status="complete",
         provider="google",
         model="gemini-generation",
         version="generation-v1",

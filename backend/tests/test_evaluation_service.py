@@ -5,6 +5,7 @@ import pytest
 from backend.models import (
     Assessment,
     Condition,
+    DocumentArtifact,
     Evaluation,
     EvaluationCriterion,
     Experiment,
@@ -89,6 +90,14 @@ def evaluated_run(test_db, *, question_count=2, llm_scores=None):
         parsed_json=deepcopy(payload),
         output_hash="a" * 64,
         schema_version="1",
+    )
+    run.document_artifact = DocumentArtifact(
+        filename="saved.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=b"docx",
     )
     test_db.add(experiment)
     test_db.commit()

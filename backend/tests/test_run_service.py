@@ -6,7 +6,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from backend.models.experiment import Condition, Experiment
-from backend.models.run import Assessment, Prompt, Run
+from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
 from backend.models.source_document import SourceDocument
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 from backend.services.assessment_evaluation import persist_assessment_questions
@@ -30,7 +30,7 @@ def test_retry_creates_next_run_without_mutating_original(test_db):
     retried = retry_run(test_db, original.id)
     assert retried.id != original.id
     assert retried.run_number == original.run_number + 1
-    assert retried.status == "preparing_prompt"
+    assert retried.status == "pending"
     assert (
         retried.input_tokens,
         retried.output_tokens,
@@ -104,15 +104,23 @@ def test_integrity_retry_preserves_flushed_parent_objects(test_db):
 def test_evaluation_retry_reuses_saved_run_and_enqueues_only_evaluation(test_db):
     item = condition(test_db)
     run = create_run(test_db, item.id, [])
-    run.status = "evaluation_failed"
+    run.status = "complete"
     run.viewer_ready_at = run.created_at
-    run.error_type = "evaluation_error"
-    run.error_message = "temporary failure"
+    run.completed_at = run.created_at
+    run.progress_message = "Complete"
     run.assessment = Assessment(
         raw_response_text='{"questions": [{"body": "Saved"}]}',
         parsed_json={"questions": [{"body": "Saved"}]},
         output_hash="a" * 64,
         schema_version="1",
+    )
+    run.document_artifact = DocumentArtifact(
+        filename="saved.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=b"docx",
     )
     test_db.commit()
     persist_assessment_questions(test_db, run.assessment)
@@ -126,7 +134,9 @@ def test_evaluation_retry_reuses_saved_run_and_enqueues_only_evaluation(test_db)
 
     assert retried.id == run.id
     assert retried.assessment.id == assessment_id
-    assert retried.status == "evaluating_quality"
+    assert retried.status == "complete"
+    assert retried.completed_at == retried.created_at
+    assert retried.progress_message == "Complete"
     assert retried.error_type is None
     assert retried.error_message is None
     evaluation_delay.assert_called_once_with(run.id)

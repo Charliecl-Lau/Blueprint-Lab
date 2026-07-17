@@ -80,6 +80,10 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
         patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
         patch("backend.workers.assessment_worker.LLMClient") as mock_client,
         patch("backend.workers.assessment_worker.redis_client"),
+        patch(
+            "backend.services.document_artifact.build_assessment_docx",
+            return_value=b"docx",
+        ),
         patch("backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"),
     ):
         test_db.close = MagicMock()
@@ -116,10 +120,6 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
             return_value=evaluation_client,
         ),
         patch("backend.workers.evaluation_worker.redis_client"),
-        patch(
-            "backend.workers.evaluation_worker.build_assessment_docx",
-            return_value=b"docx",
-        ),
     ):
         from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
 

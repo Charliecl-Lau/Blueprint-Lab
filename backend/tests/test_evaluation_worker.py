@@ -2,9 +2,11 @@ import json
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
+from backend.config import settings
 from backend.models import (
     Assessment,
     Condition,
+    DocumentArtifact,
     Evaluation,
     Experiment,
     ModelCallUsage,
@@ -96,7 +98,7 @@ def _saved_run(test_db, *, question_count=1):
         experiment=experiment,
         condition=condition,
         run_number=1,
-        status="evaluating_quality",
+        status="complete",
         model="gemini-generation",
         version="generation-v1",
         model_settings={},
@@ -105,7 +107,8 @@ def _saved_run(test_db, *, question_count=1):
         total_tokens=28,
         model_call_count=1,
         viewer_ready_at=utc_now(),
-        progress_message="Preparing generated assessment for evaluation",
+        progress_message="Complete",
+        completed_at=utc_now(),
     )
     run.model_call_usages.append(
         ModelCallUsage(
@@ -142,6 +145,14 @@ def _saved_run(test_db, *, question_count=1):
         output_hash="c" * 64,
         schema_version="1",
     )
+    run.document_artifact = DocumentArtifact(
+        filename="saved-assessment.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=b"PK-generation-docx",
+    )
     test_db.add(experiment)
     test_db.commit()
     persist_assessment_questions(test_db, run.assessment)
@@ -154,10 +165,6 @@ def _run_worker(test_db, llm):
     with (
         patch("backend.workers.evaluation_worker.SessionLocal", return_value=test_db),
         patch("backend.workers.evaluation_worker.LLMClient", return_value=llm),
-        patch(
-            "backend.workers.evaluation_worker.build_assessment_docx",
-            return_value=b"PK-evaluation-docx",
-        ),
         patch("backend.workers.evaluation_worker.redis_client") as redis_client,
     ):
         from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
@@ -166,20 +173,29 @@ def _run_worker(test_db, llm):
         return redis_client
 
 
-def test_evaluation_worker_finalizes_saved_questions_artifact_and_usage(test_db):
+def test_evaluation_worker_finalizes_saved_questions_without_mutating_run(
+    client, test_db
+):
     run = _saved_run(test_db)
     before = deepcopy(run.assessment.parsed_json)
-    llm = MagicMock(model="gemini-evaluator", run_id=run.id)
+    completed_at = run.completed_at
+    llm = MagicMock(
+        model=settings.llm_evaluation_model or settings.llm_model,
+        run_id=run.id,
+    )
     llm.generate.return_value = _result()
+
+    assert client.get(f"/runs/{run.id}").json()["evaluation_status"] == "not_started"
 
     redis_client = _run_worker(test_db, llm)
 
     test_db.refresh(run)
     assert run.status == "complete"
-    assert run.completed_at is not None
+    assert run.completed_at == completed_at
     assert run.viewer_ready_at is not None
+    assert run.progress_message == "Complete"
     assert run.assessment.parsed_json == before
-    assert run.document_artifact.content == b"PK-evaluation-docx"
+    assert run.document_artifact.content == b"PK-generation-docx"
     assert run.total_tokens == 48
     assert [(item.stage, item.total_tokens) for item in run.model_call_usages] == [
         ("assessment", 28),
@@ -187,30 +203,38 @@ def test_evaluation_worker_finalizes_saved_questions_artifact_and_usage(test_db)
     ]
     evaluation = test_db.query(Evaluation).filter_by(run_id=run.id).one()
     assert evaluation.status == "finalized"
-    published = [call.args[1] for call in redis_client.publish.call_args_list]
-    assert any('"stage": "saving_results"' in item for item in published)
-    assert any('"stage": "complete"' in item for item in published)
+    assert client.get(f"/runs/{run.id}").json()["evaluation_status"] == "complete"
+    assert redis_client.publish.called
 
 
-def test_evaluation_failure_preserves_viewer_ready_assessment(test_db):
+def test_evaluation_failure_preserves_viewer_ready_assessment(client, test_db):
     run = _saved_run(test_db)
     before = deepcopy(run.assessment.parsed_json)
     ready_at = run.viewer_ready_at
-    llm = MagicMock(model="gemini-evaluator", run_id=run.id)
+    completed_at = run.completed_at
+    llm = MagicMock(
+        model=settings.llm_evaluation_model or settings.llm_model,
+        run_id=run.id,
+    )
     llm.generate.return_value = _result('{"criteria": []}')
 
     _run_worker(test_db, llm)
 
     test_db.refresh(run)
-    assert run.status == "evaluation_failed"
+    assert run.status == "complete"
     assert run.viewer_ready_at == ready_at
+    assert run.completed_at == completed_at
+    assert run.progress_message == "Complete"
     assert run.assessment.parsed_json == before
-    assert run.document_artifact is None
-    assert run.error_type == "evaluation_error"
+    assert run.document_artifact.content == b"PK-generation-docx"
+    assert run.error_type is None
     assert run.total_tokens == 48
     assert run.model_call_usages[-1].stage == "evaluation"
     assert run.model_call_usages[-1].total_tokens == 20
     assert test_db.query(Evaluation).filter_by(run_id=run.id).one().status == "failed"
+    detail = client.get(f"/runs/{run.id}").json()
+    assert detail["evaluation_status"] == "failed"
+    assert detail["grading_available"] is False
 
 
 def test_evaluation_retry_skips_finalized_question_and_fills_missing_question(test_db):

@@ -54,6 +54,34 @@ def test_evaluation_migration_adds_normalized_records_without_overwriting_legacy
             )
         )
 
+    command.upgrade(config, "20260717_01")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO runs "
+                "(id,experiment_id,condition_id,run_number,status,model_settings,error_type,error_message,created_at,viewer_ready_at) VALUES "
+                "(2,1,1,2,'evaluation_failed','{}','evaluation_error','temporary',now(),now()),"
+                "(3,1,1,3,'evaluating_quality','{}',NULL,NULL,now(),now())"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO assessments "
+                "(id,run_id,raw_response_text,parsed_json,output_hash,schema_version,created_at) VALUES "
+                "(2,2,'saved','{\"questions\": []}','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','1',now()),"
+                "(3,3,'saved','{\"questions\": []}','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','1',now())"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO document_artifacts "
+                "(id,run_id,filename,media_type,content,content_hash,created_at) VALUES "
+                "(2,2,'saved.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',"
+                "decode('504b','hex'),'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',now())"
+            )
+        )
+
     command.upgrade(config, "head")
 
     inspector = inspect(engine)
@@ -71,8 +99,11 @@ def test_evaluation_migration_adds_normalized_records_without_overwriting_legacy
     assert "ix_evaluations_question_type" in {
         item["name"] for item in inspector.get_indexes("evaluations")
     }
-    assert "evaluating_quality" in _constraint_sql(inspector, "runs", "ck_runs_status")
-    assert "evaluation_failed" in _constraint_sql(inspector, "runs", "ck_runs_status")
+    run_status_constraint = _constraint_sql(inspector, "runs", "ck_runs_status")
+    assert "pending" in run_status_constraint
+    assert "documenting" in run_status_constraint
+    assert "evaluating_quality" not in run_status_constraint
+    assert "evaluation_failed" not in run_status_constraint
     assert "evaluation" in _constraint_sql(
         inspector, "model_call_usages", "ck_model_call_usages_stage"
     )
@@ -84,6 +115,12 @@ def test_evaluation_migration_adds_normalized_records_without_overwriting_legacy
                 "FROM rubric_results WHERE id=7"
             )
         ).mappings().one()
+        migrated_runs = connection.execute(
+            text(
+                "SELECT id,status,error_type,progress_message,completed_at "
+                "FROM runs WHERE id IN (2,3) ORDER BY id"
+            )
+        ).mappings().all()
 
     assert dict(legacy) == {
         "id": 7,
@@ -92,3 +129,10 @@ def test_evaluation_migration_adds_normalized_records_without_overwriting_legacy
         "rubric_score": 4.25,
         "comments": "preserve me",
     }
+    assert migrated_runs[0]["status"] == "complete"
+    assert migrated_runs[0]["error_type"] is None
+    assert migrated_runs[0]["progress_message"] == "Complete"
+    assert migrated_runs[0]["completed_at"] is not None
+    assert migrated_runs[1]["status"] == "error"
+    assert migrated_runs[1]["progress_message"] == "Assessment generation failed"
+    assert migrated_runs[1]["completed_at"] is not None

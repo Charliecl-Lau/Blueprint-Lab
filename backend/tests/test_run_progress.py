@@ -67,7 +67,7 @@ async def first_event(stream):
 
 @pytest.mark.asyncio
 async def test_progress_stream_emits_database_snapshot_before_redis(test_db):
-    run = _run(test_db, status="evaluating_quality")
+    run = _run(test_db, status="generating")
     sessions = []
 
     def session_factory():
@@ -91,7 +91,7 @@ async def test_progress_stream_emits_database_snapshot_before_redis(test_db):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "status", ["complete", "generation_failed", "evaluation_failed"]
+    "status", ["complete", "error"]
 )
 async def test_terminal_snapshot_closes_without_waiting_for_redis(test_db, status):
     run = _run(test_db, status=status)
@@ -157,12 +157,11 @@ def test_run_detail_exposes_viewer_evaluation_and_grading_state(test_db):
     assert detail["assessment"]["question_ids"] == [question.id]
 
 
-def test_evaluation_failure_is_terminal_but_remains_viewer_ready(test_db):
-    run = _run(test_db, status="evaluation_failed")
-    run.viewer_ready_at = run.created_at
+def test_generation_failure_is_terminal_without_evaluation_state(test_db):
+    run = _run(test_db, status="error")
     test_db.commit()
 
     detail = run_detail(run)
 
-    assert detail["evaluation_status"] == "failed"
+    assert detail["evaluation_status"] == "not_started"
     assert detail["grading_available"] is False

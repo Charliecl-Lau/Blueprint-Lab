@@ -1,7 +1,36 @@
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from backend.models import Assessment, Condition, Experiment, Prompt, Run
+from backend.schemas.run_schema import RunSummary
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["pending", "prompting", "generating", "documenting", "complete", "error"],
+)
+def test_run_summary_uses_main_workflow_statuses(status):
+    summary = RunSummary(
+        id=1,
+        condition_id=2,
+        run_number=1,
+        status=status,
+        model_settings={},
+    )
+
+    assert summary.status == status
+
+
+def test_run_summary_rejects_evaluation_as_a_generation_status():
+    with pytest.raises(ValidationError):
+        RunSummary(
+            id=1,
+            condition_id=2,
+            run_number=1,
+            status="evaluating_quality",
+            model_settings={},
+        )
 
 
 def test_immutable_research_run_round_trip(test_db):

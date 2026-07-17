@@ -191,13 +191,13 @@ def test_revision_and_first_access_records_are_preserved(test_db, generation_fix
     assert human.llm_access_events[0].opened_before_finalization is True
 
 
-def test_new_pipeline_statuses_and_progress_fields_round_trip(test_db, generation_fixture):
-    generation_fixture.status = "evaluating_quality"
+def test_main_pipeline_status_and_progress_fields_round_trip(test_db, generation_fixture):
+    generation_fixture.status = "documenting"
     generation_fixture.viewer_ready_at = datetime.now(timezone.utc)
-    generation_fixture.progress_message = "Evaluating technical correctness and solvability"
+    generation_fixture.progress_message = "Creating assessment document"
     test_db.commit()
     test_db.refresh(generation_fixture)
 
-    assert generation_fixture.status == "evaluating_quality"
+    assert generation_fixture.status == "documenting"
     assert generation_fixture.viewer_ready_at is not None
-    assert generation_fixture.progress_message == "Evaluating technical correctness and solvability"
+    assert generation_fixture.progress_message == "Creating assessment document"

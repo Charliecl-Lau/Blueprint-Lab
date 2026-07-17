@@ -99,7 +99,7 @@ def recent_runs(test_db):
         experiment=experiment,
         condition=condition,
         run_number=2,
-        status="generating_assessment",
+        status="generating",
         model_settings={},
         input_tokens=3,
         output_tokens=1,
@@ -128,21 +128,29 @@ def test_evaluation_retry_endpoint_reuses_viewer_ready_run(client, test_db):
         experiment=experiment,
         condition=condition,
         run_number=1,
-        status="evaluation_failed",
+        status="complete",
         model_settings={},
         input_tokens=28,
         output_tokens=8,
         total_tokens=36,
         model_call_count=2,
         viewer_ready_at=utc_now(),
-        error_type="evaluation_error",
-        error_message="temporary",
+        completed_at=utc_now(),
+        progress_message="Complete",
     )
     run.assessment = Assessment(
         raw_response_text='{"questions": [{"body": "Saved"}]}',
         parsed_json={"questions": [{"body": "Saved"}]},
         output_hash="a" * 64,
         schema_version="1",
+    )
+    run.document_artifact = DocumentArtifact(
+        filename="saved.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=b"docx",
     )
     test_db.add(run)
     test_db.commit()
@@ -156,7 +164,7 @@ def test_evaluation_retry_endpoint_reuses_viewer_ready_run(client, test_db):
 
     assert response.status_code == 200
     assert response.json()["id"] == run.id
-    assert response.json()["status"] == "evaluating_quality"
+    assert response.json()["status"] == "complete"
     assert run.assessment.parsed_json == {"questions": [{"body": "Saved"}]}
     evaluation_delay.assert_called_once_with(run.id)
 
@@ -267,7 +275,7 @@ def test_legacy_and_active_runs_report_distinct_recording_states(client, test_db
         experiment=experiment,
         condition=condition,
         run_number=2,
-        status="generating_assessment",
+        status="generating",
         model_settings={},
         input_tokens=0,
         output_tokens=0,

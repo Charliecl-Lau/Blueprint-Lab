@@ -289,7 +289,7 @@ test('recent active run reopens run-specific progress', async () => {
           experiment_id: 1,
           condition_id: 3,
           run_number: 1,
-          status: 'generating_assessment',
+          status: 'generating',
           topic: 'Equilibrium',
           condition_label: 'Baseline',
           created_at: '2026-07-14T00:00:00Z',
@@ -373,7 +373,7 @@ test('keeps the progress shortcut after returning home when recent runs cannot l
       experiment_id: 3,
       condition_id: 5,
       run_number: 1,
-      status: 'generating_assessment',
+      status: 'generating',
     }],
   })
   vi.mocked(fetch).mockRejectedValue(new Error('recent runs unavailable'))
@@ -439,7 +439,7 @@ test('does not display token usage on run progress', async () => {
   expect(screen.queryByText('Token usage is loading.')).not.toBeInTheDocument()
 })
 
-test('shows six persisted stages and unlocks the Viewer during evaluation', async () => {
+test('shows the main progress card and unlocks the Viewer at completion', async () => {
   window.history.replaceState({}, '', '/runs/8/progress')
   vi.mocked(fetch).mockImplementation(async (input) => {
     const url = String(input)
@@ -451,9 +451,9 @@ test('shows six persisted stages and unlocks the Viewer during evaluation', asyn
           experiment_id: 1,
           condition_id: 3,
           run_number: 1,
-          status: 'evaluating_quality',
+          status: 'complete',
           viewer_ready_at: '2026-07-17T10:00:00Z',
-          progress_message: 'Evaluating clarity and solution quality',
+          progress_message: 'Complete',
           evaluation_status: 'in_progress',
           assessment: {
             id: 5,
@@ -490,24 +490,17 @@ test('shows six persisted stages and unlocks the Viewer during evaluation', asyn
 
   render(<App />)
 
-  expect(await screen.findByText('Evaluating clarity and solution quality')).toBeVisible()
-  expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-    expect.stringContaining('Preparing Prompt'),
-    expect.stringContaining('Generating Assessment'),
-    expect.stringContaining('Validating Assessment'),
-    expect.stringContaining('Evaluating Assessment Quality'),
-    expect.stringContaining('Saving Results'),
-    expect.stringContaining('Complete'),
-  ])
+  expect(await screen.findByText('Complete')).toBeVisible()
+  expect(screen.queryByRole('list', { name: 'Assessment generation progress' })).not.toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'View Assessment' })).toHaveAttribute(
     'href',
     '/experiments/1/viewer/8',
   )
 })
 
-test('evaluation failure keeps Viewer access and offers only evaluation retry', async () => {
+test('generation failure stays on the main progress page without evaluation controls', async () => {
   window.history.replaceState({}, '', '/runs/8/progress')
-  vi.mocked(fetch).mockImplementation(async (input, init) => {
+  vi.mocked(fetch).mockImplementation(async (input) => {
     const url = String(input)
     if (url.endsWith('/api/runs/8')) {
       return {
@@ -517,17 +510,10 @@ test('evaluation failure keeps Viewer access and offers only evaluation retry', 
           experiment_id: 1,
           condition_id: 3,
           run_number: 1,
-          status: 'evaluation_failed',
-          viewer_ready_at: '2026-07-17T10:00:00Z',
-          progress_message: 'Assessment quality evaluation failed',
-          evaluation_status: 'failed',
-          assessment: {
-            id: 5,
-            question_ids: [11],
-            parsed_json: { questions: [] },
-            output_hash: 'hash',
-            schema_version: '1',
-          },
+          status: 'error',
+          viewer_ready_at: null,
+          progress_message: 'Assessment generation failed',
+          error: { type: 'generation_provider_error', message: 'Provider unavailable' },
         }),
       } as Response
     }
@@ -551,52 +537,20 @@ test('evaluation failure keeps Viewer access and offers only evaluation retry', 
         }),
       } as Response
     }
-    if (url.endsWith('/api/assessments/5/evaluations/llm/retry') && init?.method === 'POST') {
-      return {
-        ok: true,
-        json: async () => ({
-          id: 8,
-          experiment_id: 1,
-          condition_id: 3,
-          run_number: 1,
-          status: 'evaluating_quality',
-        }),
-      } as Response
-    }
     return { ok: true, json: async () => ({}) } as Response
   })
 
   render(<App />)
 
-  expect(await screen.findByRole('link', { name: 'View Assessment' })).toBeVisible()
-  const retry = screen.getByRole('button', { name: 'Retry LLM Evaluation' })
+  expect(await screen.findByText('Provider unavailable')).toBeVisible()
+  expect(screen.queryByRole('link', { name: 'View Assessment' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Retry LLM Evaluation' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Retry run' })).not.toBeInTheDocument()
-  await userEvent.click(retry)
-  expect(vi.mocked(fetch).mock.calls.some(([input, init]) => (
-    String(input).endsWith('/api/assessments/5/evaluations/llm/retry')
-    && init?.method === 'POST'
-  ))).toBe(true)
 })
 
-test('Viewer streams evaluation tokens and enables Grade Assessment on completion', async () => {
-  class MockEventSource {
-    static instance: MockEventSource | null = null
-    url: string
-    onmessage: ((event: MessageEvent<string>) => void) | null = null
-    onerror: (() => void) | null = null
-    close = vi.fn()
-
-    constructor(url: string) {
-      this.url = url
-      MockEventSource.instance = this
-    }
-
-    emit(snapshot: unknown) {
-      this.onmessage?.({ data: JSON.stringify(snapshot) } as MessageEvent<string>)
-    }
-  }
-  vi.stubGlobal('EventSource', MockEventSource)
+test('Viewer polls background evaluation and enables Grade Assessment on completion', async () => {
   window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  let runRequests = 0
   vi.mocked(fetch).mockImplementation(async (input) => {
     const url = String(input)
     if (url.endsWith('/api/experiments/1')) {
@@ -620,13 +574,15 @@ test('Viewer streams evaluation tokens and enables Grade Assessment on completio
             experiment_id: 1,
             condition_id: 3,
             run_number: 1,
-            status: 'evaluating_quality',
+            status: 'complete',
             viewer_ready_at: '2026-07-17T10:00:00Z',
           }],
         }),
       } as Response
     }
     if (url.endsWith('/api/runs/8')) {
+      runRequests += 1
+      const evaluationComplete = runRequests >= 3
       return {
         ok: true,
         json: async () => ({
@@ -634,18 +590,18 @@ test('Viewer streams evaluation tokens and enables Grade Assessment on completio
           experiment_id: 1,
           condition_id: 3,
           run_number: 1,
-          status: 'evaluating_quality',
+          status: 'complete',
           viewer_ready_at: '2026-07-17T10:00:00Z',
-          evaluation_status: 'in_progress',
-          grading_available: false,
+          evaluation_status: evaluationComplete ? 'complete' : 'in_progress',
+          grading_available: evaluationComplete,
           grading_question_id: 11,
-          artifact_available: false,
+          artifact_available: true,
           token_usage: {
-            input_tokens: 30,
-            output_tokens: 12,
-            total_tokens: 42,
-            model_calls: 2,
-            recording_state: 'in_progress',
+            input_tokens: evaluationComplete ? 45 : 30,
+            output_tokens: evaluationComplete ? 22 : 12,
+            total_tokens: evaluationComplete ? 67 : 42,
+            model_calls: evaluationComplete ? 3 : 2,
+            recording_state: 'recorded',
             stages: [],
           },
           assessment: {
@@ -668,30 +624,12 @@ test('Viewer streams evaluation tokens and enables Grade Assessment on completio
   )
   expect(screen.getByRole('button', { name: 'Evaluation in progress' })).toBeDisabled()
   expect(screen.getByText('42')).toBeVisible()
-  await waitFor(() => expect(MockEventSource.instance).not.toBeNull())
 
-  MockEventSource.instance!.emit({
-    id: 8,
-    experiment_id: 1,
-    condition_id: 3,
-    run_number: 1,
-    status: 'complete',
-    viewer_ready_at: '2026-07-17T10:00:00Z',
-    evaluation_status: 'complete',
-    grading_available: true,
-    grading_question_id: 11,
-    artifact_available: true,
-    token_usage: {
-      input_tokens: 45,
-      output_tokens: 22,
-      total_tokens: 67,
-      model_calls: 3,
-      recording_state: 'recorded',
-      stages: [],
-    },
-  })
-
-  expect(await screen.findByRole('link', { name: 'Grade Assessment' })).toHaveAttribute(
+  expect(await screen.findByRole(
+    'link',
+    { name: 'Grade Assessment' },
+    { timeout: 3500 },
+  )).toHaveAttribute(
     'href',
     '/assessments/5/questions/11/grade',
   )
@@ -700,8 +638,23 @@ test('Viewer streams evaluation tokens and enables Grade Assessment on completio
 
 test('Viewer keeps legacy completed assessments visible with evaluation unavailable', async () => {
   window.history.replaceState({}, '', '/experiments/1/viewer/8')
-  vi.mocked(fetch).mockImplementation(async (input) => {
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
     const url = String(input)
+    if (
+      url.endsWith('/api/assessments/5/evaluations/llm/retry')
+      && init?.method === 'POST'
+    ) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          model_settings: {},
+        }),
+      } as Response
+    }
     if (url.endsWith('/api/experiments/1')) {
       return {
         ok: true,
@@ -766,8 +719,13 @@ test('Viewer keeps legacy completed assessments visible with evaluation unavaila
   expect(screen.getByRole('status', { name: 'Evaluation status' })).toHaveTextContent(
     'Evaluation unavailable',
   )
-  expect(screen.getByRole('button', { name: 'Evaluation unavailable' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Retry LLM Evaluation' })).toBeEnabled()
   expect(screen.queryByRole('link', { name: 'Grade Assessment' })).not.toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Retry LLM Evaluation' }))
+  expect(await screen.findByRole('status', { name: 'Evaluation status' })).toHaveTextContent(
+    'Evaluation in progress',
+  )
 })
 
 test('keeps usage in the viewer and renders readable conditions and MathML questions', async () => {
@@ -901,7 +859,7 @@ test('asks for confirmation before retrying a run', async () => {
     if (url.endsWith('/api/runs/8/retry') && init?.method === 'POST') {
       return {
         ok: true,
-        json: async () => ({ id: 9, experiment_id: 1, condition_id: 3, run_number: 2, status: 'preparing_prompt' }),
+        json: async () => ({ id: 9, experiment_id: 1, condition_id: 3, run_number: 2, status: 'pending' }),
       } as Response
     }
     if (url.endsWith('/api/runs/8')) {

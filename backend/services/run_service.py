@@ -13,6 +13,7 @@ from backend.models.evaluation import Evaluation
 from backend.models.experiment import Condition
 from backend.models.run import Assessment, Run
 from backend.models.source_document import RunSourceDocument, SourceDocument
+from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 
 
@@ -52,7 +53,7 @@ def _create_run(db: Session, condition_id: int, source_bindings, model_settings:
                     experiment_id=condition.experiment_id,
                     condition_id=condition.id,
                     run_number=number,
-                    status="preparing_prompt",
+                    status="pending",
                     model_settings=values,
                     input_tokens=0,
                     output_tokens=0,
@@ -94,42 +95,45 @@ def retry_llm_evaluation(db: Session, assessment_id: int) -> Run:
     if assessment is None:
         raise HTTPException(status_code=404, detail="Assessment not found")
     run = assessment.run
-    legacy_completed = (
-        run.status == "complete" and assessment.parsed_json is not None
-    )
-    if run.viewer_ready_at is None and not legacy_completed:
-        raise HTTPException(
-            status_code=409,
-            detail="Assessment generation has not completed validation",
-        )
-    evaluation_model = settings.llm_evaluation_model or settings.llm_model
-    has_current_evaluation = db.scalar(
-        select(Evaluation.id).where(
-            Evaluation.assessment_id == assessment.id,
-            Evaluation.evaluation_type == "llm",
-            Evaluation.evaluator_identity == evaluation_model,
-            Evaluation.status == "finalized",
-        )
-    ) is not None
-    if run.status != "evaluation_failed" and not (
-        legacy_completed and not has_current_evaluation
+    if (
+        run.status != "complete"
+        or assessment.parsed_json is None
+        or run.document_artifact is None
     ):
         raise HTTPException(
             status_code=409,
-            detail="LLM evaluation is not in a failed state",
+            detail="Assessment generation has not completed",
         )
-
     from backend.services.assessment_evaluation import persist_assessment_questions
 
-    persist_assessment_questions(db, assessment)
-    run.viewer_ready_at = (
-        run.viewer_ready_at or run.completed_at or run.created_at
-    )
-    run.status = "evaluating_quality"
-    run.progress_message = "Preparing generated assessment for evaluation"
-    run.error_type = None
-    run.error_message = None
-    run.completed_at = None
+    questions = persist_assessment_questions(db, assessment)
+    evaluation_model = settings.llm_evaluation_model or settings.llm_model
+    current_evaluations = db.scalars(
+        select(Evaluation).where(
+            Evaluation.assessment_id == assessment.id,
+            Evaluation.evaluation_type == "llm",
+            Evaluation.evaluator_identity == evaluation_model,
+            Evaluation.rubric_version == RUBRIC_VERSION,
+        )
+    ).all()
+    finalized_question_ids = {
+        item.question_id
+        for item in current_evaluations
+        if item.status == "finalized"
+    }
+    if questions and all(
+        question.id in finalized_question_ids for question in questions
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="LLM evaluation is already complete",
+        )
+    if any(item.status in {"draft", "reopened"} for item in current_evaluations):
+        raise HTTPException(
+            status_code=409,
+            detail="LLM evaluation is already in progress",
+        )
+
     db.commit()
     db.refresh(run)
 
