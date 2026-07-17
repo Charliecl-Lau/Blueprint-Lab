@@ -6,6 +6,7 @@ import backend.services.actual_prompt as actual_prompt
 from backend.schemas.experiment_schema import PromptFactors
 from backend.services.actual_prompt import (
     ActualPromptValidationError,
+    build_assessment_repair_system_prompt,
     build_generation_system_prompt,
     build_condition_label,
     build_structure_input,
@@ -64,6 +65,31 @@ def test_generation_and_structure_prompts_require_flat_word_equation_entries():
         assert "[[EQ:label]]" in system_prompt
         assert "structured math AST" not in system_prompt
         assert "body_segments" not in system_prompt
+
+
+def test_generation_and_repair_prompts_require_location_specific_labels():
+    generation_prompt = build_generation_system_prompt(OPENAI_ACTUAL_PROMPT)
+    repair_prompt = build_assessment_repair_system_prompt(OPENAI_ACTUAL_PROMPT)
+
+    for prompt in (generation_prompt, repair_prompt):
+        assert (
+            "A label is prohibited from appearing in both question and solution content"
+            in prompt
+        )
+        assert "create two equation entries with distinct labels" in prompt
+    assert "Audit every equation label in every question" in repair_prompt
+
+
+def test_openai_template_and_versions_require_location_specific_labels():
+    prompt = render_openai()
+
+    assert (
+        "A label is prohibited from appearing in both question and solution content"
+        in prompt
+    )
+    assert "two equation entries with distinct labels" in prompt
+    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "9"
+    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "2"
 
 
 def test_structure_input_contains_details_and_enabled_factor_values_only():

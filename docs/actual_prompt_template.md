@@ -81,6 +81,8 @@ Use Robert DeHoff notation consistently. Use G, H, S, and V for molar or intensi
 
 For every mathematical expression, add one entry to the equations array and replace the expression at its exact position in the question, answer option, or model answer with the matching [[EQ:label]] reference. [[EQ:label]] references are required equation references, not unresolved template placeholders. Do not embed standalone equations only within the question or model answer.
 
+Set location to question when the label appears in the question body or an answer option, and set location to solution when it appears in the model answer. A label is prohibited from appearing in both question and solution content. If the same mathematical expression is needed in both, create two equation entries with distinct labels and matching locations, then use the corresponding label in each place.
+
 Output Format
 
 Return exactly one valid JSON object with the following structure.
