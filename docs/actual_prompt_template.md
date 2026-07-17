@@ -79,7 +79,7 @@ The instructor solution must state the governing thermodynamic principles, defin
 
 Use Robert DeHoff notation consistently. Use G, H, S, and V for molar or intensive properties, G′, H′, S′, and V′ for total extensive properties, T for temperature, P for pressure, Φ for the number of phases, C for the number of components, and F for degrees of freedom. Define every symbol before it is used.
 
-If equations are required, return every important equation in the equations array. Do not embed standalone equations only within the question or model answer.
+For every mathematical expression, add one entry to the equations array and replace the expression at its exact position in the question, answer option, or model answer with the matching [[EQ:label]] reference. [[EQ:label]] references are required equation references, not unresolved template placeholders. Do not embed standalone equations only within the question or model answer.
 
 Output Format
 
@@ -89,13 +89,18 @@ Return exactly one valid JSON object with the following structure.
  "questions": [
    {
      "type": "{question_type}",
-     "body": "...",
-     "model_answer": "...",
+     "body": "Use [[EQ:question_equation]].",
+     "model_answer": "Apply [[EQ:solution_equation]].",
      "equations": [
        {
-         "label": "...",
-         "expression": "...",
-         "location": "..."
+         "label": "question_equation",
+         "expression": "G_mix = H_mix - T S_mix",
+         "location": "question"
+       },
+       {
+         "label": "solution_equation",
+         "expression": "G_mix/(R T) = x_A ln(x_A) + x_B ln(x_B)",
+         "location": "solution"
        }
      ],
      "metadata": {
@@ -103,7 +108,7 @@ Return exactly one valid JSON object with the following structure.
        "actual_prompt_id": "Not Assigned",
        "output_id": "Not Assigned",
        "final_question_id": "Not Assigned",
-       "question_title": "...",
+       "question_title": "Generated thermodynamics question",
        "question_type": "{question_type}",
        "difficulty_level": "{difficulty}",
        "intended_assessment_setting": "Not Assigned",
@@ -123,4 +128,4 @@ Return only the JSON object. Do not include Markdown, code fences, explanations,
 
 Stop Rules
 
-Before returning the final response, verify that the output is valid JSON, contains exactly the requested number of questions, includes all required metadata fields, satisfies the supplied learning objective and prompt parameters, defines all variables before use, and contains no placeholder text, duplicated sections, or explanatory text outside the JSON object.
+Before returning the final response, verify that the output is valid JSON, contains exactly the requested number of questions, includes all required metadata fields, satisfies the supplied learning objective and prompt parameters, defines all variables before use, and contains no unresolved template variables, explanatory placeholder values, duplicated sections, or explanatory text outside the JSON object. [[EQ:label]] references are required equation references and must remain in the returned JSON.

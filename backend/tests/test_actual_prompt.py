@@ -149,6 +149,19 @@ def test_openai_template_rendering_is_stable_and_preserves_json():
     assert '"type": "short_answer"' in first
 
 
+def test_openai_template_demonstrates_required_equation_references():
+    prompt = render_openai()
+
+    assert '"body": "Use [[EQ:question_equation]]."' in prompt
+    assert '"model_answer": "Apply [[EQ:solution_equation]]."' in prompt
+    assert '"label": "question_equation"' in prompt
+    assert '"location": "question"' in prompt
+    assert '"label": "solution_equation"' in prompt
+    assert '"location": "solution"' in prompt
+    assert "contains no placeholder text" not in prompt
+    assert "[[EQ:label]] references are required equation references" in prompt
+
+
 def test_openai_template_changes_only_substituted_values():
     baseline = render_openai(topic="Gibbs Phase Rule")
     changed = render_openai(topic="Chemical Potential")

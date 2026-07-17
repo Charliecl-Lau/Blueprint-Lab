@@ -403,6 +403,38 @@ def test_generation_pipeline_preserves_raw_response_when_parsing_fails(generatio
         assert generation_fixture.prompt.prompt_hash
 
 
+def test_generation_pipeline_rejects_plain_formula_text_before_docx_creation(
+    generation_fixture,
+    test_db,
+):
+    question = complete_question(
+        question_type="short_answer",
+        body=(
+            "The enthalpy of mixing is DeltaH_mix = 0. "
+            "Use [[EQ:entropy_relation]]."
+        ),
+        model_answer="Therefore DeltaG_mix = -T DeltaS_mix.",
+    )
+    question["equations"] = [{
+        "label": "entropy_relation",
+        "expression": "DeltaS_mix = -R(x_A ln(x_A) + x_B ln(x_B))",
+        "location": "question",
+    }]
+    llm = MagicMock()
+    raw_text = __import__("json").dumps({"questions": [question]})
+    llm.generate.return_value = result(raw_text, 20, 8, 28)
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.status == "error"
+    assert generation_fixture.error_type == "assessment_parse_error"
+    assert generation_fixture.assessment.raw_response_text == raw_text
+    assert generation_fixture.assessment.parsed_json is None
+    assert generation_fixture.document_artifact is None
+    mock_redis.evaluation_delay.assert_not_called()
+
+
 def test_invalid_local_actual_prompt_is_rejected_before_persistence(
     generation_fixture, test_db
 ):

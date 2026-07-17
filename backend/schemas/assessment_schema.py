@@ -1,6 +1,25 @@
+import re
 from typing import Annotated, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
+
+
+_EQUATION_REFERENCE_PATTERN = re.compile(r"\[\[EQ:([A-Za-z0-9_-]+)\]\]")
+_PLAIN_EQUATION_PATTERNS = (
+    re.compile(r"\S\s*=\s*\S"),
+    re.compile(r"(?<=[^\W_])[_^](?=[+\-−]?[^\W_])"),
+    re.compile(r"\bsqrt\s*\(", re.IGNORECASE),
+    re.compile(r"\$\$|\\\(|\\\[|\$[^$\r\n]+\$"),
+)
+
+
+def _equation_references(text: Optional[str]) -> List[str]:
+    return _EQUATION_REFERENCE_PATTERN.findall(text or "")
+
+
+def _contains_plain_equation(text: Optional[str]) -> bool:
+    without_references = _EQUATION_REFERENCE_PATTERN.sub("", text or "")
+    return any(pattern.search(without_references) for pattern in _PLAIN_EQUATION_PATTERNS)
 
 
 class TextMathNode(BaseModel):
@@ -173,6 +192,68 @@ class QuestionResponse(BaseModel):
     equations: List[EquationSchema] = Field(default_factory=list)
     revision_options: List[str] = Field(min_length=2, max_length=3)
 
+    @model_validator(mode="after")
+    def validate_flat_equation_references(self):
+        has_structured_content = (
+            self.body_segments is not None
+            or self.model_answer_segments is not None
+            or any(option.segments is not None for option in self.options)
+        )
+        if has_structured_content:
+            return self
+
+        labels = [equation.label for equation in self.equations]
+        if len(labels) != len(set(labels)):
+            raise ValueError("equation labels must be unique")
+
+        equation_by_label = {
+            equation.label: equation for equation in self.equations
+        }
+        question_content = [("body", self.body)] + [
+            (f"options[{index}].body", option.body)
+            for index, option in enumerate(self.options)
+        ]
+        solution_content = [("model_answer", self.model_answer)]
+        question_references = [
+            label
+            for _, text in question_content
+            for label in _equation_references(text)
+        ]
+        solution_references = [
+            label
+            for _, text in solution_content
+            for label in _equation_references(text)
+        ]
+        all_references = question_references + solution_references
+
+        for label in all_references:
+            if label not in equation_by_label:
+                raise ValueError(f"unknown equation label: {label}")
+
+        for label in question_references:
+            if equation_by_label[label].location != "question":
+                raise ValueError(
+                    f"solution equation referenced from question: {label}"
+                )
+        for label in solution_references:
+            if equation_by_label[label].location != "solution":
+                raise ValueError(
+                    f"question equation referenced from solution: {label}"
+                )
+
+        referenced_labels = set(all_references)
+        for label in labels:
+            if label not in referenced_labels:
+                raise ValueError(f"equation is not referenced: {label}")
+
+        for field_name, text in question_content + solution_content:
+            if _contains_plain_equation(text):
+                raise ValueError(
+                    f"{field_name}: mathematical expression must use an equation reference"
+                )
+
+        return self
+
 
 class AssessmentGenerationResponse(BaseModel):
     questions: List[QuestionResponse]
@@ -263,6 +344,7 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                     "type",
                     "body",
                     "metadata",
+                    "equations",
                     "revision_options",
                 ],
             },

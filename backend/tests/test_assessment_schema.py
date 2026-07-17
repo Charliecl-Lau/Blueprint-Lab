@@ -89,7 +89,7 @@ def test_revision_options_require_two_or_three_items(complete_payload, count):
 def test_provider_schema_requires_complete_assessment_contract():
     question = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
     assert set(question["required"]) >= {
-        "type", "body", "metadata", "revision_options"
+        "type", "body", "metadata", "equations", "revision_options"
     }
     assert "quality_check" not in question["required"]
     assert "quality_check" not in question["properties"]
@@ -108,6 +108,115 @@ def test_provider_schema_requires_complete_assessment_contract():
     assert metadata["properties"]["mse302_concepts"]["minItems"] == 1
     assert question["properties"]["revision_options"]["minItems"] == 2
     assert question["properties"]["revision_options"]["maxItems"] == 3
+
+
+def test_flat_equation_references_accept_question_and_solution_locations(
+    complete_payload,
+):
+    question = complete_payload["questions"][0]
+    question["body"] = "Evaluate [[EQ:question_relation]]."
+    question["model_answer"] = "Apply [[EQ:solution_relation]]."
+    question["equations"] = [
+        {
+            "label": "question_relation",
+            "expression": "G_mix = H_mix - T S_mix",
+            "location": "question",
+        },
+        {
+            "label": "solution_relation",
+            "expression": "G_mix/(R T) = x_A ln(x_A) + x_B ln(x_B)",
+            "location": "solution",
+        },
+    ]
+
+    parsed = AssessmentGenerationResponse.model_validate(complete_payload)
+
+    assert [item.label for item in parsed.questions[0].equations] == [
+        "question_relation",
+        "solution_relation",
+    ]
+
+
+def test_flat_equation_references_reject_duplicate_labels(complete_payload):
+    question = complete_payload["questions"][0]
+    question["body"] = "Evaluate [[EQ:relation]]."
+    question["equations"] = [
+        {"label": "relation", "expression": "G = H - T S", "location": "question"},
+        {"label": "relation", "expression": "A = B", "location": "question"},
+    ]
+
+    with pytest.raises(ValidationError, match="equation labels must be unique"):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_flat_equation_references_reject_unknown_labels(complete_payload):
+    complete_payload["questions"][0]["body"] = "Evaluate [[EQ:missing]]."
+
+    with pytest.raises(ValidationError, match="unknown equation label: missing"):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_flat_equation_references_reject_unreferenced_entries(complete_payload):
+    complete_payload["questions"][0]["equations"] = [{
+        "label": "unused",
+        "expression": "G = H - T S",
+        "location": "question",
+    }]
+
+    with pytest.raises(ValidationError, match="equation is not referenced: unused"):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_flat_equation_references_reject_location_mismatches(complete_payload):
+    question = complete_payload["questions"][0]
+    question["model_answer"] = "Apply [[EQ:question_relation]]."
+    question["equations"] = [{
+        "label": "question_relation",
+        "expression": "G = H - T S",
+        "location": "question",
+    }]
+
+    with pytest.raises(
+        ValidationError,
+        match="question equation referenced from solution: question_relation",
+    ):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_flat_equation_references_reject_formula_text_outside_placeholders(
+    complete_payload,
+):
+    question = complete_payload["questions"][0]
+    question["body"] = (
+        "The molar enthalpy of mixing is zero, DeltaH_mix = 0. "
+        "Use [[EQ:entropy_relation]]."
+    )
+    question["model_answer"] = "Therefore DeltaG_mix = -T DeltaS_mix."
+    question["equations"] = [{
+        "label": "entropy_relation",
+        "expression": "DeltaS_mix = -R(x_A ln(x_A) + x_B ln(x_B))",
+        "location": "question",
+    }]
+
+    with pytest.raises(
+        ValidationError,
+        match="mathematical expression must use an equation reference",
+    ):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_flat_equation_references_reject_signed_superscript_text(
+    complete_payload,
+):
+    complete_payload["questions"][0]["body"] = (
+        "Report the result using K^-1 as the temperature exponent."
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="mathematical expression must use an equation reference",
+    ):
+        AssessmentGenerationResponse.model_validate(complete_payload)
 
 
 def thermodynamic_equation_ast():
