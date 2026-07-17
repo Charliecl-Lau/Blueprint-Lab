@@ -6,7 +6,7 @@ from backend.schemas.run_schema import SourceBinding
 from backend.services.llm_client import LLMResult, TokenUsage
 from backend.services.run_service import create_run, retry_run
 from backend.services.source_documents import create_source_document
-from backend.tests.test_worker import ACTUAL_PROMPT, complete_question
+from backend.tests.test_worker import complete_question
 
 
 def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_db):
@@ -62,10 +62,7 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
 
     def provider_result(*_args, **_kwargs):
         call_number = provider_result.call_number
-        if provider_result.call_number % 2 == 0:
-            raw_text = ACTUAL_PROMPT
-        else:
-            raw_text = assessment_responses.pop(0)
+        raw_text = assessment_responses.pop(0)
         provider_result.call_number += 1
         total_tokens = (call_number + 1) * 10
         return LLMResult(
@@ -103,12 +100,11 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
     assert run_1.source_documents[0].source_document.content == uploaded_bytes
     assert run_1.document_artifact.content
     assert run_2.document_artifact.content
-    assert run_1.total_tokens == 30
-    assert run_2.total_tokens == 70
-    assert run_1.model_call_count == 2
-    assert run_2.model_call_count == 2
-    assert mock_client.return_value.generate.call_count == 4
+    assert run_1.total_tokens == 10
+    assert run_2.total_tokens == 20
+    assert run_1.model_call_count == 1
+    assert run_2.model_call_count == 1
+    assert mock_client.return_value.generate.call_count == 2
     source_text = uploaded_bytes.decode()
     calls = mock_client.return_value.generate.call_args_list
-    assert all(source_text not in calls[index].kwargs["user_message"] for index in (0, 2))
-    assert all(source_text in calls[index].kwargs["user_message"] for index in (1, 3))
+    assert all(source_text in call.kwargs["user_message"] for call in calls)

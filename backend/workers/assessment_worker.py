@@ -18,9 +18,12 @@ from backend.schemas.assessment_schema import (
 )
 from backend.services.actual_prompt import (
     ACTUAL_PROMPT_GENERATOR_VERSION,
+    OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION,
+    OPENAI_TEMPLATE_PROVENANCE,
     ActualPromptValidationError,
     build_structure_input,
     build_generation_system_prompt,
+    render_openai_actual_prompt,
     validate_actual_prompt,
 )
 from backend.services.docx_exporter import build_assessment_docx
@@ -165,9 +168,7 @@ def run_generation_pipeline(self, run_id: int) -> None:
         if prompt is None:
             _set_status(db, run, "prompting")
             _publish_progress(experiment.id, run.id, condition.id, "prompting")
-            structure_system_prompt, structure_prompt_version = (
-                get_structure_system_prompt(condition.prompt_structure)
-            )
+            factors = _factors_from_condition(condition)
             structure_input = build_structure_input(
                 course=experiment.course,
                 topic=experiment.topic,
@@ -175,27 +176,66 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 assessment_type=experiment.assessment_type,
                 difficulty=experiment.difficulty,
                 number_of_questions=experiment.number_of_questions,
+                estimated_time_minutes=experiment.estimated_time_minutes,
                 cognitive_demand=experiment.cognitive_demand,
                 additional_instruction=experiment.additional_instruction,
-                factors=_factors_from_condition(condition),
+                factors=factors,
                 factor_inputs=_structure_factor_inputs(condition, ordered_sources),
             )
             structure_started = time.perf_counter()
-            try:
-                structure_result = _call_gemini(
-                    self,
-                    db,
-                    run,
-                    llm,
-                    stage="actual_prompt",
-                    system_prompt=structure_system_prompt,
-                    user_message=structure_input,
-                    model_settings=run.model_settings,
+            if condition.prompt_structure == "openai":
+                try:
+                    actual_prompt = render_openai_actual_prompt(
+                        course=experiment.course,
+                        topic=experiment.topic,
+                        learning_objectives=experiment.learning_objectives,
+                        assessment_type=experiment.assessment_type,
+                        difficulty=experiment.difficulty,
+                        number_of_questions=experiment.number_of_questions,
+                        estimated_time_minutes=experiment.estimated_time_minutes,
+                        cognitive_demand=experiment.cognitive_demand,
+                        additional_instruction=experiment.additional_instruction,
+                        factors=factors,
+                        factor_inputs=condition.factor_inputs,
+                    )
+                except ActualPromptValidationError as exc:
+                    _record_error(
+                        db, run, "actual_prompt_validation_error", exc
+                    )
+                    _publish_progress(
+                        experiment.id, run.id, condition.id, "error"
+                    )
+                    return
+                structure_system_prompt = OPENAI_TEMPLATE_PROVENANCE
+                structure_prompt_version = OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION
+                structure_request_id = None
+                structure_model = "local-template-renderer"
+                structure_model_version = OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION
+                structure_finish_reason = "LOCAL"
+            else:
+                structure_system_prompt, structure_prompt_version = (
+                    get_structure_system_prompt(condition.prompt_structure)
                 )
-            except Exception as exc:
-                _retry_provider_failure(
-                    self, db, run, "actual_prompt_provider_error", exc
-                )
+                try:
+                    structure_result = _call_gemini(
+                        self,
+                        db,
+                        run,
+                        llm,
+                        stage="actual_prompt",
+                        system_prompt=structure_system_prompt,
+                        user_message=structure_input,
+                        model_settings=run.model_settings,
+                    )
+                except Exception as exc:
+                    _retry_provider_failure(
+                        self, db, run, "actual_prompt_provider_error", exc
+                    )
+                actual_prompt = structure_result.raw_text
+                structure_request_id = structure_result.provider_request_id
+                structure_model = structure_result.model_name
+                structure_model_version = structure_result.model_version
+                structure_finish_reason = structure_result.finish_reason
 
             structure_duration_ms = int(
                 (time.perf_counter() - structure_started) * 1000
@@ -207,11 +247,11 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 prompt_structure=condition.prompt_structure,
                 structure_system_prompt=structure_system_prompt,
                 structure_input=structure_input,
-                actual_prompt=structure_result.raw_text,
+                actual_prompt=actual_prompt,
                 actual_prompt_hash=build_actual_prompt_hash(
                     structure_system_prompt=structure_system_prompt,
                     structure_input=structure_input,
-                    actual_prompt=structure_result.raw_text,
+                    actual_prompt=actual_prompt,
                     prompt_structure=condition.prompt_structure,
                     structure_prompt_version=structure_prompt_version,
                     actual_prompt_generator_version=ACTUAL_PROMPT_GENERATOR_VERSION,
@@ -219,14 +259,14 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 ),
                 structure_prompt_version=structure_prompt_version,
                 actual_prompt_generator_version=ACTUAL_PROMPT_GENERATOR_VERSION,
-                structure_request_id=structure_result.provider_request_id,
-                structure_model=structure_result.model_name,
-                structure_model_version=structure_result.model_version,
-                structure_finish_reason=structure_result.finish_reason,
+                structure_request_id=structure_request_id,
+                structure_model=structure_model,
+                structure_model_version=structure_model_version,
+                structure_finish_reason=structure_finish_reason,
                 structure_duration_ms=structure_duration_ms,
                 generation_context=generation_context,
                 generation_envelope_hash=build_generation_envelope_hash(
-                    actual_prompt=structure_result.raw_text,
+                    actual_prompt=actual_prompt,
                     generation_context=generation_context,
                     model_settings=run.model_settings,
                     source_hashes=source_hashes,

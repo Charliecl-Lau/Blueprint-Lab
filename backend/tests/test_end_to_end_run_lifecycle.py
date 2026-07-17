@@ -6,22 +6,6 @@ from backend.models import Experiment, Run
 from backend.services.llm_client import LLMResult, TokenUsage
 
 
-ACTUAL_PROMPT = """# Role
-Assessment author
-# Personality
-Precise
-# Goal
-Generate questions
-# Measure of Success
-Correct questions
-# Constraints
-Use supplied facts
-# Output
-Return a JSON object with a top-level \"questions\" array
-# Stop Rules
-Stop after output"""
-
-
 def valid_payload():
     return {
         "course": "ENGR 101",
@@ -109,10 +93,9 @@ def test_two_runs_finish_independently_and_reopen_with_isolated_tokens(client, t
 
     def run_worker_with_mocked_gemini(run_id, usage):
         llm = MagicMock()
-        llm.generate.side_effect = [
-            llm_result(ACTUAL_PROMPT, f"{run_id}-actual", usage[0]),
-            llm_result(assessment_response(), f"{run_id}-assessment", usage[1]),
-        ]
+        llm.generate.return_value = llm_result(
+            assessment_response(), f"{run_id}-assessment", usage
+        )
         with (
             patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
             patch("backend.workers.assessment_worker.LLMClient", return_value=llm),
@@ -123,13 +106,13 @@ def test_two_runs_finish_independently_and_reopen_with_isolated_tokens(client, t
             from backend.workers.assessment_worker import run_generation_pipeline
             run_generation_pipeline.run(run_id)
 
-    run_worker_with_mocked_gemini(first.run_id, usage=[(10, 4, 14), (20, 8, 28)])
-    run_worker_with_mocked_gemini(second.run_id, usage=[(100, 40, 140), (200, 80, 280)])
+    run_worker_with_mocked_gemini(first.run_id, usage=(20, 8, 28))
+    run_worker_with_mocked_gemini(second.run_id, usage=(200, 80, 280))
 
     reopened = client.get(f"/runs/{first.run_id}").json()
     assert reopened["status"] == "complete", reopened
-    assert reopened["token_usage"]["total_tokens"] == 42
-    assert client.get(f"/runs/{second.run_id}").json()["token_usage"]["total_tokens"] == 420
+    assert reopened["token_usage"]["total_tokens"] == 28
+    assert client.get(f"/runs/{second.run_id}").json()["token_usage"]["total_tokens"] == 280
 
 
 def test_incomplete_submission_creates_no_research_rows_or_task(client, test_db):

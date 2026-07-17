@@ -8,6 +8,7 @@ from backend.services.actual_prompt import (
     build_generation_system_prompt,
     build_condition_label,
     build_structure_input,
+    render_openai_actual_prompt,
     validate_actual_prompt,
 )
 from backend.services.structure_system_prompts import get_structure_system_prompt
@@ -71,6 +72,7 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
+        estimated_time_minutes=45,
         cognitive_demand="evaluate_create",
         additional_instruction="Use one laboratory scenario.",
         factors=PromptFactors(concept_bridge=True),
@@ -85,6 +87,7 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
     assert "FewShot=OFF" in text
     assert "Criterion for equilibrium" in text
     assert "Cognitive Demand: Evaluate/Create" in text
+    assert "Estimated Time: 45 minutes" in text
     assert "Additional Instruction: Use one laboratory scenario." in text
     assert "must not appear" not in text
 
@@ -97,6 +100,7 @@ def test_structure_input_omits_blank_additional_instruction():
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
+        estimated_time_minutes=45,
         cognitive_demand="remember_understand",
         additional_instruction="   ",
         factors=PromptFactors(),
@@ -114,19 +118,134 @@ def test_condition_label_records_all_factor_states():
     )
 
 
-OPENAI_ACTUAL_PROMPT = """# Role
+def render_openai(**overrides):
+    values = {
+        "course": "MSE202",
+        "topic": "Gibbs Phase Rule",
+        "learning_objectives": "Apply the phase rule to alloy systems.",
+        "assessment_type": "short_answer",
+        "difficulty": "medium",
+        "number_of_questions": 2,
+        "estimated_time_minutes": 30,
+        "cognitive_demand": "apply_analyze",
+        "additional_instruction": None,
+        "factors": PromptFactors(),
+        "factor_inputs": {},
+    }
+    values.update(overrides)
+    return render_openai_actual_prompt(**values)
+
+
+def test_openai_template_rendering_is_stable_and_preserves_json():
+    first = render_openai()
+    second = render_openai()
+    assert first == second
+    assert first.startswith("Role\n")
+    assert '"questions": [' in first
+    assert "{learning_objective}" not in first
+    assert "Course:\nMSE202" in first
+    assert "Cognitive Demand:\nApply/Analyze" in first
+    assert "Estimated Time:\n30 minutes" in first
+    assert '"type": "short_answer"' in first
+
+
+def test_openai_template_changes_only_substituted_values():
+    baseline = render_openai(topic="Gibbs Phase Rule")
+    changed = render_openai(topic="Chemical Potential")
+    assert baseline != changed
+    assert baseline.replace("Gibbs Phase Rule", "Chemical Potential") == changed
+
+
+@pytest.mark.parametrize(
+    ("course", "mse202", "mse302"),
+    [
+        (" mse202 ", "Gibbs Phase Rule", "Not Provided"),
+        ("MSE302", "Not Provided", "Gibbs Phase Rule"),
+        ("ENGR 101", "Not Provided", "Not Provided"),
+    ],
+)
+def test_openai_template_maps_topic_to_course_concept(course, mse202, mse302):
+    prompt = render_openai(course=course)
+    assert f"MSE202 Concept(s):\n{mse202}" in prompt
+    assert f"MSE302 Concept(s):\n{mse302}" in prompt
+
+
+def test_openai_template_formats_enabled_factors_in_stable_order():
+    prompt = render_openai(
+        factors=PromptFactors(
+            concept_bridge=True,
+            few_shot=True,
+            reference_content=True,
+            reasoning_guidance=True,
+        ),
+        factor_inputs={
+            "concept_bridge": "Connect chemical potential to phase stability.",
+            "few_shot": "Example question and answer.",
+            "reference_content": "Supplied phase-diagram excerpt.",
+            "reasoning_guidance": "Check phase-count assumptions.",
+        },
+    )
+    blocks = [
+        "Concept Bridge:\nConnect chemical potential to phase stability.",
+        "Few-shot Examples:\nExample question and answer.",
+        "Reference Content:\nSupplied phase-diagram excerpt.",
+        "Reasoning Guidance:\nCheck phase-count assumptions.",
+    ]
+    positions = [prompt.index(block) for block in blocks]
+    assert positions == sorted(positions)
+    assert (
+        "Concept Map Bridge:\nConnect chemical potential to phase stability."
+        in prompt
+    )
+
+
+def test_openai_template_handles_disabled_factors_and_optional_instruction():
+    prompt = render_openai(factor_inputs={"few_shot": "must not appear"})
+    instructed = render_openai(
+        additional_instruction="  Use one laboratory scenario.  "
+    )
+    assert "Selected Prompt Design Factors:\nNone Selected" in prompt
+    assert "Concept Map Bridge:\nNot Provided" in prompt
+    assert "must not appear" not in prompt
+    assert "Additional Instruction:" not in prompt
+    assert (
+        "Additional Instruction:\nUse one laboratory scenario." in instructed
+    )
+
+
+def test_openai_template_delegates_materials_context_derivation():
+    assert (
+        "Materials Science Context:\n"
+        "Derive from the supplied course, topic, and learning objective."
+    ) in render_openai()
+
+
+def test_openai_template_load_failure_is_classified(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "backend.services.actual_prompt._OPENAI_TEMPLATE_PATH",
+        tmp_path / "missing-template.md",
+    )
+    with pytest.raises(ActualPromptValidationError, match="cannot be loaded"):
+        render_openai()
+
+
+OPENAI_ACTUAL_PROMPT = """Role
 Assessment author
-# Personality
+Personality
 Precise
-# Goal
+Goal (Dynamic)
 Generate questions
-# Measure of Success
-Correct questions
-# Constraints
+Prompt Parameters (Dynamic)
+Use supplied parameters
+Concept Mapping
+Use supplied concepts
+Prompt Design Factors
+Use supplied factors
+Constraints
 Use supplied facts
-# Output
+Output Format
 Return a JSON object with a top-level "questions" array
-# Stop Rules
+Stop Rules
 Stop after output"""
 
 ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
@@ -146,10 +265,17 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
         (
             "openai",
             OPENAI_ACTUAL_PROMPT.replace(
-                '# Output\nReturn a JSON object with a top-level "questions" array\n',
+                'Output Format\nReturn a JSON object with a top-level "questions" array\n',
                 "",
             ),
         ),
+        (
+            "openai",
+            OPENAI_ACTUAL_PROMPT.replace(
+                "Concept Mapping\n", "Concept Mapping\nConcept Mapping\n"
+            ),
+        ),
+        ("openai", OPENAI_ACTUAL_PROMPT + "\n{topic}"),
         ("anthropic", ANTHROPIC_ACTUAL_PROMPT.replace("<verification>", "<context>")),
         ("anthropic", ANTHROPIC_ACTUAL_PROMPT + "\n<context>duplicate</context>"),
         ("anthropic", ANTHROPIC_ACTUAL_PROMPT.replace("</task>", "")),
