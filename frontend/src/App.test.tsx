@@ -119,6 +119,50 @@ test('submits exact enabled factor content and estimated time', async () => {
   expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy()
 })
 
+test('submits and navigates when randomUUID is unavailable', async () => {
+  vi.stubGlobal('crypto', {
+    getRandomValues: (bytes: Uint8Array) => {
+      bytes.fill(7)
+      return bytes
+    },
+  })
+  vi.mocked(fetch).mockImplementation(async (_input, init) => {
+    if (init?.method === 'POST') {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 42,
+          conditions: [],
+          runs: [{ id: 8, condition_id: 3, run_number: 1, status: 'pending' }],
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => [] } as Response
+  })
+
+  render(<App />)
+  fireEvent.change(screen.getByLabelText('Course name'), { target: { value: 'Statics' } })
+  fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Equilibrium' } })
+  fireEvent.change(screen.getByLabelText('Learning objectives'), { target: { value: 'Resolve forces' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Run Experiment' }))
+
+  await waitFor(() => expect(window.location.pathname).toBe('/runs/8/progress'))
+  const [, init] = vi.mocked(fetch).mock.calls.find(([, value]) => value?.method === 'POST')!
+  expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy()
+})
+
+test('keeps submission errors beside the fixed run action', async () => {
+  vi.mocked(fetch).mockRejectedValue(new Error('Unable to reach the server.'))
+  render(<App />)
+  fireEvent.change(screen.getByLabelText('Course name'), { target: { value: 'Statics' } })
+  fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'Equilibrium' } })
+  fireEvent.change(screen.getByLabelText('Learning objectives'), { target: { value: 'Resolve forces' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Run Experiment' }))
+
+  const action = screen.getByTestId('fixed-run-action')
+  expect(await within(action).findByRole('alert')).toHaveTextContent('Unable to reach the server.')
+})
+
 test('navigates the three form sections from the side panel and section buttons', () => {
   render(<App />)
   expect(screen.getByRole('navigation', { name: 'Experiment sections' })).toBeInTheDocument()

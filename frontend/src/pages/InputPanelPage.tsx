@@ -34,6 +34,21 @@ const cognitiveDemandLabels: Record<CognitiveDemand, string> = {
   evaluate_create: 'Evaluate/Create',
 }
 
+function createIdempotencyKey() {
+  const cryptoSource = globalThis.crypto
+  if (typeof cryptoSource?.randomUUID === 'function') return cryptoSource.randomUUID()
+
+  if (typeof cryptoSource?.getRandomValues === 'function') {
+    const bytes = cryptoSource.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+
+  return `experiment-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 function StepIcon({ section }: { section: Section }) {
   if (section === 'details') return <svg aria-hidden="true" viewBox="0 0 18 18"><path d="M4 4h10M4 9h10M4 14h7" /></svg>
   if (section === 'factors') return <svg aria-hidden="true" viewBox="0 0 18 18"><path d="M3 5h12M3 9h9M3 13h11" /></svg>
@@ -106,7 +121,7 @@ export function InputPanelPage() {
     setSubmitError(null)
     setLoading(true)
     try {
-      submissionKey.current ??= crypto.randomUUID()
+      submissionKey.current ??= createIdempotencyKey()
       const experiment = await experimentsApi.create({
         course: course.trim(), topic: topic.trim(), learning_objectives: objectives.trim(), assessment_type: assessmentType, difficulty,
         number_of_questions: Number(questionCount), estimated_time_minutes: Number(estimatedTime), prompt_structure: promptStructure,
@@ -174,8 +189,10 @@ export function InputPanelPage() {
       </div>
     </div>
     <RecentRuns />
-    {submitError && <p className="submit-error" role="alert">{submitError}</p>}
-    <div className="fixed-run-action" data-testid="fixed-run-action"><button className="primary run-button" disabled={loading} onClick={submit}>{loading ? 'Starting…' : 'Run Experiment'}</button></div>
+    <div className="fixed-run-action" data-testid="fixed-run-action">
+      {submitError && <p className="submit-error" role="alert">{submitError}</p>}
+      <button className="primary run-button" disabled={loading} onClick={submit}>{loading ? 'Starting…' : 'Run Experiment'}</button>
+    </div>
     {dialogOpen && <div className="modal-backdrop"><div role="dialog" aria-modal="true" aria-labelledby="validation-title" className="incomplete-modal validation-dialog">
       <h2 id="validation-title">Complete the required fields before running the experiment.</h2>
       <p>Select an item to return to its field.</p>
