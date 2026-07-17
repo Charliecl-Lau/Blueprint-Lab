@@ -244,7 +244,7 @@ test('recent active run reopens run-specific progress', async () => {
           experiment_id: 1,
           condition_id: 3,
           run_number: 1,
-          status: 'generating',
+          status: 'generating_assessment',
           topic: 'Equilibrium',
           condition_label: 'Baseline',
           created_at: '2026-07-14T00:00:00Z',
@@ -328,7 +328,7 @@ test('keeps the progress shortcut after returning home when recent runs cannot l
       experiment_id: 3,
       condition_id: 5,
       run_number: 1,
-      status: 'generating',
+      status: 'generating_assessment',
     }],
   })
   vi.mocked(fetch).mockRejectedValue(new Error('recent runs unavailable'))
@@ -525,7 +525,7 @@ test('asks for confirmation before retrying a run', async () => {
     if (url.endsWith('/api/runs/8/retry') && init?.method === 'POST') {
       return {
         ok: true,
-        json: async () => ({ id: 9, experiment_id: 1, condition_id: 3, run_number: 2, status: 'pending' }),
+        json: async () => ({ id: 9, experiment_id: 1, condition_id: 3, run_number: 2, status: 'preparing_prompt' }),
       } as Response
     }
     if (url.endsWith('/api/runs/8')) {

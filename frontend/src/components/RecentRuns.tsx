@@ -3,7 +3,13 @@ import { Link } from 'react-router-dom'
 import { runsApi } from '../api/runs'
 import type { RecentRun } from '../types'
 
-const ACTIVE = new Set(['pending', 'prompting', 'generating', 'documenting'])
+const ACTIVE = new Set([
+  'preparing_prompt',
+  'generating_assessment',
+  'validating_assessment',
+  'evaluating_quality',
+  'saving_results',
+])
 
 export function RecentRuns() {
   const [runs, setRuns] = useState<RecentRun[]>([])

@@ -8,12 +8,14 @@ import { useRunStore } from '../store/runStore'
 import type { Stage } from '../types'
 
 const labels: Record<Stage, string> = {
-  pending: 'Queued',
-  prompting: 'Generating prompt',
-  generating: 'Generating questions',
-  documenting: 'Building Word document',
+  preparing_prompt: 'Preparing Prompt',
+  generating_assessment: 'Generating Assessment',
+  validating_assessment: 'Validating Assessment',
+  evaluating_quality: 'Evaluating Assessment Quality',
+  saving_results: 'Saving Results',
   complete: 'Complete',
-  error: 'Failed',
+  generation_failed: 'Generation Failed',
+  evaluation_failed: 'Evaluation Failed',
 }
 
 export function ProgressPage() {

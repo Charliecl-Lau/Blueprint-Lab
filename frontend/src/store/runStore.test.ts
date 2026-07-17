@@ -28,13 +28,13 @@ describe('run store', () => {
 
   test('normalizes deprecated generation ids in progress events', () => {
     useRunStore.getState().setExperiment(experiment)
-    useRunStore.getState().applySSEEvent({ generation_id: 8, condition_id: 3, stage: 'documenting' })
-    expect(useRunStore.getState().runs[8]?.status).toBe('documenting')
+    useRunStore.getState().applySSEEvent({ generation_id: 8, condition_id: 3, stage: 'saving_results' })
+    expect(useRunStore.getState().runs[8]?.status).toBe('saving_results')
   })
 
   test('keeps the original run and selects the newly retried run', () => {
     useRunStore.getState().setExperiment(experiment)
-    useRunStore.getState().addRetriedRun({ id: 9, condition_id: 3, run_number: 2, status: 'pending' })
+    useRunStore.getState().addRetriedRun({ id: 9, condition_id: 3, run_number: 2, status: 'preparing_prompt' })
 
     expect(Object.keys(useRunStore.getState().runs).map(Number)).toEqual([8, 9])
     expect(useRunStore.getState().runs[8]?.status).toBe('complete')
@@ -46,7 +46,7 @@ describe('run store', () => {
       ...experiment,
       id: 2,
       topic: 'Dynamics',
-      runs: [{ id: 9, condition_id: 4, run_number: 1, status: 'pending' }],
+      runs: [{ id: 9, condition_id: 4, run_number: 1, status: 'preparing_prompt' }],
     }
 
     useRunStore.getState().mergeExperiment(experiment)
@@ -60,13 +60,13 @@ describe('run store', () => {
 
   test('a run snapshot updates only its matching id', () => {
     const runA = experiment.runs[0]
-    const runB = { id: 9, condition_id: 4, run_number: 1, status: 'pending' as const }
+    const runB = { id: 9, condition_id: 4, run_number: 1, status: 'preparing_prompt' as const }
     useRunStore.getState().mergeRun(runA)
     useRunStore.getState().mergeRun(runB)
 
-    useRunStore.getState().applyRunSnapshot({ ...runA, status: 'generating' })
+    useRunStore.getState().applyRunSnapshot({ ...runA, status: 'generating_assessment' })
 
-    expect(useRunStore.getState().runs[runA.id].status).toBe('generating')
+    expect(useRunStore.getState().runs[runA.id].status).toBe('generating_assessment')
     expect(useRunStore.getState().runs[runB.id].status).toBe(runB.status)
   })
 })
