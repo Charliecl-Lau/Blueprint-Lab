@@ -139,6 +139,27 @@ def test_structure_input_omits_blank_additional_instruction():
     assert "Additional Instruction" not in text
 
 
+def test_structure_input_describes_pdfs_without_embedding_content():
+    text = build_structure_input(
+        course="MSE202",
+        topic="Gibbs Phase Rule",
+        learning_objectives="Apply the phase rule.",
+        assessment_type="short_answer",
+        difficulty="medium",
+        number_of_questions=1,
+        estimated_time_minutes=45,
+        cognitive_demand="apply_analyze",
+        additional_instruction=None,
+        factors=PromptFactors(reference_content=True),
+        factor_inputs={},
+        reference_pdf_filenames=["one.pdf", "two.pdf"],
+    )
+
+    assert "one.pdf, two.pdf" in text
+    assert "supplied during final assessment generation" in text
+    assert "PDF text" not in text
+
+
 def test_condition_label_records_all_factor_states():
     assert build_condition_label(PromptFactors(concept_bridge=True)) == (
         "ConceptBridge=ON; FewShot=OFF; ReferenceContent=OFF; "
@@ -227,14 +248,17 @@ def test_openai_template_formats_enabled_factors_in_stable_order():
         factor_inputs={
             "concept_bridge": "Connect chemical potential to phase stability.",
             "few_shot": "Example question and answer.",
-            "reference_content": "Supplied phase-diagram excerpt.",
             "reasoning_guidance": "Check phase-count assumptions.",
         },
+        reference_pdf_filenames=["one.pdf", "two.pdf"],
     )
     blocks = [
         "Concept Bridge:\nConnect chemical potential to phase stability.",
         "Few-shot Examples:\nExample question and answer.",
-        "Reference Content:\nSupplied phase-diagram excerpt.",
+        (
+            "Reference Content:\nUse the attached PDF files in order as "
+            "reference content: one.pdf, two.pdf."
+        ),
         "Reasoning Guidance:\nCheck phase-count assumptions.",
     ]
     positions = [prompt.index(block) for block in blocks]

@@ -1,8 +1,10 @@
 import json
 import time
 import uuid
+from typing import Optional
 
 import redis
+from celery.exceptions import Retry
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -36,6 +38,7 @@ from backend.services.generation_context import build_generation_context
 from backend.services.generator import generate_questions
 from backend.services.document_artifact import save_assessment_artifact
 from backend.services.llm_client import LLMClient, TruncatedResponseError
+from backend.services.reference_pdfs import ProviderFileAttachment
 from backend.services.reproducibility import (
     build_actual_prompt_hash,
     build_generation_envelope_hash,
@@ -118,6 +121,7 @@ def _call_gemini(
     user_message: str,
     model_settings: dict,
     response_schema=None,
+    attachments=None,
 ):
     call_id = str(uuid.uuid4())
     attempt = sum(1 for item in run.model_call_usages if item.stage == stage) + 1
@@ -128,6 +132,8 @@ def _call_gemini(
     }
     if response_schema is not None:
         request["response_schema"] = response_schema
+    if attachments:
+        request["attachments"] = attachments
     try:
         result = llm.generate(**request)
     except TruncatedResponseError as exc:
@@ -161,9 +167,46 @@ def _call_gemini(
     return result
 
 
+def _cleanup_provider_files(
+    llm: Optional[LLMClient],
+    attachments: list[ProviderFileAttachment],
+) -> None:
+    if not attachments:
+        return
+    if llm is None:
+        try:
+            llm = LLMClient()
+        except Exception:
+            return
+    for attachment in attachments:
+        try:
+            llm.delete_file(attachment.name)
+        except Exception:
+            continue
+
+
+def _is_reference_pdf_unavailable(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    mentions_file = "file" in message or "attachment" in message
+    unavailable = any(
+        phrase in message for phrase in ("not found", "unavailable", "expired")
+    )
+    return mentions_file and unavailable
+
+
 @celery_app.task(bind=True, max_retries=3)
-def run_generation_pipeline(self, run_id: int) -> None:
+def run_generation_pipeline(
+    self,
+    run_id: int,
+    attachment_metadata: Optional[list[dict[str, str]]] = None,
+) -> None:
+    attachments = [
+        ProviderFileAttachment.from_dict(item)
+        for item in (attachment_metadata or [])
+    ]
     db = SessionLocal()
+    llm = None
+    preserve_provider_files = False
     try:
         run = db.get(Run, run_id)
         if run is None:
@@ -206,6 +249,7 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 additional_instruction=experiment.additional_instruction,
                 factors=factors,
                 factor_inputs=_structure_factor_inputs(condition, ordered_sources),
+                reference_pdf_filenames=run.reference_pdf_filenames,
             )
             structure_started = time.perf_counter()
             if condition.prompt_structure == "openai":
@@ -222,6 +266,7 @@ def run_generation_pipeline(self, run_id: int) -> None:
                         additional_instruction=experiment.additional_instruction,
                         factors=factors,
                         factor_inputs=condition.factor_inputs,
+                        reference_pdf_filenames=run.reference_pdf_filenames,
                     )
                 except ActualPromptValidationError as exc:
                     _record_error(
@@ -355,8 +400,18 @@ def run_generation_pipeline(self, run_id: int) -> None:
                 user_message=prompt.generation_context,
                 model_settings=run.model_settings,
                 response_schema=ASSESSMENT_PROVIDER_SCHEMA,
+                attachments=attachments,
             )
         except Exception as exc:
+            if attachments and _is_reference_pdf_unavailable(exc):
+                sanitized = RuntimeError(
+                    "An attached reference PDF is unavailable. Upload fresh PDFs and retry."
+                )
+                _record_error(db, run, "reference_pdf_unavailable", sanitized)
+                _publish_progress(
+                    experiment.id, run.id, condition.id, "error"
+                )
+                return
             _retry_provider_failure(self, db, run, "generation_provider_error", exc)
 
         assessment = Assessment(
@@ -405,12 +460,20 @@ def run_generation_pipeline(self, run_id: int) -> None:
                         ),
                         model_settings=run.model_settings,
                         response_schema=ASSESSMENT_PROVIDER_SCHEMA,
+                        attachments=attachments,
                     )
                 except Exception as exc:
+                    if attachments and _is_reference_pdf_unavailable(exc):
+                        exc = RuntimeError(
+                            "An attached reference PDF is unavailable. Upload fresh PDFs and retry."
+                        )
+                        error_type = "reference_pdf_unavailable"
+                    else:
+                        error_type = "assessment_repair_provider_error"
                     _record_error(
                         db,
                         run,
-                        "assessment_repair_provider_error",
+                        error_type,
                         exc,
                     )
                     _publish_progress(
@@ -463,5 +526,10 @@ def run_generation_pipeline(self, run_id: int) -> None:
             experiment.id, run.id, condition.id, "complete"
         )
         run_llm_evaluation_pipeline.delay(run.id)
+    except Retry:
+        preserve_provider_files = True
+        raise
     finally:
         db.close()
+        if not preserve_provider_files:
+            _cleanup_provider_files(llm, attachments)

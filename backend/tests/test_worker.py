@@ -1,9 +1,9 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
-from celery.exceptions import Retry
+from celery.exceptions import MaxRetriesExceededError, Retry
 
-from backend.models import ModelCallUsage
+from backend.models import ModelCallUsage, RunReferencePdf
 from backend.models.experiment import Condition, Experiment, Generation
 from backend.schemas.experiment_schema import PromptFactors
 from backend.schemas.assessment_schema import (
@@ -11,6 +11,7 @@ from backend.schemas.assessment_schema import (
     AssessmentGenerationResponse,
 )
 from backend.services.llm_client import LLMResult, TokenUsage, TruncatedResponseError
+from backend.services.reference_pdfs import ProviderFileAttachment
 from backend.services.reproducibility import sha256_text
 from backend.services.actual_prompt import (
     ActualPromptValidationError,
@@ -52,7 +53,7 @@ def result(raw_text, input_tokens, output_tokens, total_tokens, finish="STOP"):
     )
 
 
-def run_pipeline_synchronously(run, test_db, llm):
+def run_pipeline_synchronously(run, test_db, llm, attachments=None):
     with (
         patch("backend.workers.assessment_worker.LLMClient", return_value=llm),
         patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
@@ -68,7 +69,10 @@ def run_pipeline_synchronously(run, test_db, llm):
         test_db.close = MagicMock()
         from backend.workers.assessment_worker import run_generation_pipeline
 
-        run_generation_pipeline.run(run.id)
+        run_generation_pipeline.run(
+            run.id,
+            [attachment.to_dict() for attachment in (attachments or [])],
+        )
         mock_redis.evaluation_delay = evaluation_delay
         return mock_redis
 
@@ -117,7 +121,7 @@ def generation_fixture(test_db):
         few_shot_enabled=False,
         reference_content_enabled=True,
         reasoning_guidance_enabled=False,
-        factor_inputs={"concept_bridge": "Vectors", "reference_content": "SI units"},
+        factor_inputs={"concept_bridge": "Vectors"},
         condition_label="ConceptBridge=ON; FewShot=OFF; ReferenceContent=ON; ReasoningGuidance=OFF",
     )
     test_db.add(condition)
@@ -131,6 +135,10 @@ def generation_fixture(test_db):
         total_tokens=0,
         model_call_count=0,
     )
+    generation.reference_pdfs = [
+        RunReferencePdf(ordinal=0, original_filename="one.pdf"),
+        RunReferencePdf(ordinal=1, original_filename="two.pdf"),
+    ]
     test_db.add(generation)
     test_db.commit()
     return generation
@@ -198,6 +206,7 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
                 reasoning_guidance=factors.reasoning_guidance_enabled,
             ),
             factor_inputs=factors.factor_inputs,
+            reference_pdf_filenames=generation_fixture.reference_pdf_filenames,
         )
         expected_prompt = render_openai_actual_prompt(
             course=generation_fixture.experiment.course,
@@ -220,6 +229,7 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
                 reasoning_guidance=factors.reasoning_guidance_enabled,
             ),
             factor_inputs=factors.factor_inputs,
+            reference_pdf_filenames=generation_fixture.reference_pdf_filenames,
         )
         expected_context = build_generation_context([])
         assert [call.kwargs for call in llm.generate.call_args_list] == [
@@ -449,7 +459,10 @@ def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
         result(repaired_raw, 12, 6, 18),
     ]
 
-    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+    attachments = provider_attachments()
+    mock_redis = run_pipeline_synchronously(
+        generation_fixture, test_db, llm, attachments=attachments
+    )
 
     test_db.refresh(generation_fixture)
     assert generation_fixture.status == "complete", generation_fixture.error_message
@@ -466,6 +479,8 @@ def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
         "  Value error, body: mathematical expression must use an equation reference"
     )
     repair_call = llm.generate.call_args_list[1]
+    assert llm.generate.call_args_list[0].kwargs["attachments"] == attachments
+    assert repair_call.kwargs["attachments"] == attachments
     assert repair_call.kwargs["system_prompt"] == (
         build_assessment_repair_system_prompt(
             generation_fixture.prompt.actual_prompt
@@ -681,6 +696,26 @@ def test_generation_pipeline_ignores_missing_generation(test_db):
         assert run_generation_pipeline(999_999) is None
 
 
+def test_missing_generation_deletes_passed_provider_files(test_db):
+    attachments = provider_attachments()
+    with (
+        patch("backend.workers.assessment_worker.SessionLocal", return_value=test_db),
+        patch("backend.workers.assessment_worker.LLMClient") as llm_client,
+    ):
+        test_db.close = MagicMock()
+        from backend.workers.assessment_worker import run_generation_pipeline
+
+        run_generation_pipeline.run(
+            999_999,
+            [attachment.to_dict() for attachment in attachments],
+        )
+
+    assert llm_client.return_value.delete_file.call_args_list == [
+        call("files/one"),
+        call("files/two"),
+    ]
+
+
 def test_openai_pipeline_records_only_assessment_provider_usage(
     generation_fixture, test_db
 ):
@@ -794,3 +829,160 @@ def test_failed_provider_call_is_recorded_without_tokens(generation_fixture, tes
     assert call.stage == "assessment"
     assert call.status == "failed"
     assert call.total_tokens is None
+
+
+def provider_attachments():
+    return [
+        ProviderFileAttachment(
+            "files/one", "https://files/one", "application/pdf"
+        ),
+        ProviderFileAttachment(
+            "files/two", "https://files/two", "application/pdf"
+        ),
+    ]
+
+
+def test_generation_attaches_ordered_pdfs_and_deletes_them_on_success(
+    generation_fixture, test_db
+):
+    llm = MagicMock()
+    llm.generate.return_value = result(
+        __import__("json").dumps(
+            {
+                "questions": [
+                    complete_question(
+                        question_type="short_answer",
+                        body="State equilibrium.",
+                        model_answer="Forces and moments balance.",
+                    )
+                ]
+            }
+        ),
+        20,
+        8,
+        28,
+    )
+    attachments = provider_attachments()
+
+    run_pipeline_synchronously(
+        generation_fixture, test_db, llm, attachments=attachments
+    )
+
+    assert llm.generate.call_args.kwargs["attachments"] == attachments
+    assert llm.delete_file.call_args_list == [
+        call("files/one"),
+        call("files/two"),
+    ]
+
+
+def test_anthropic_structure_omits_pdfs_but_assessment_attaches_them(
+    generation_fixture, test_db
+):
+    generation_fixture.condition.prompt_structure = "anthropic"
+    test_db.commit()
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(ANTHROPIC_ACTUAL_PROMPT, 10, 5, 15),
+        result(
+            __import__("json").dumps(
+                {
+                    "questions": [
+                        complete_question(
+                            question_type="short_answer",
+                            body="State equilibrium.",
+                            model_answer="Forces and moments balance.",
+                        )
+                    ]
+                }
+            ),
+            20,
+            8,
+            28,
+        ),
+    ]
+    attachments = provider_attachments()
+
+    run_pipeline_synchronously(
+        generation_fixture, test_db, llm, attachments=attachments
+    )
+
+    assert llm.generate.call_args_list[0].kwargs.get("attachments") is None
+    assert llm.generate.call_args_list[1].kwargs["attachments"] == attachments
+
+
+def test_automatic_retry_preserves_provider_files(generation_fixture, test_db):
+    llm = MagicMock()
+    llm.generate.side_effect = RuntimeError("temporary provider failure")
+    attachments = provider_attachments()
+
+    from backend.workers.assessment_worker import run_generation_pipeline
+
+    with patch.object(
+        run_generation_pipeline,
+        "retry",
+        side_effect=Retry("retry scheduled"),
+    ):
+        with pytest.raises(Retry):
+            run_pipeline_synchronously(
+                generation_fixture, test_db, llm, attachments=attachments
+            )
+
+    llm.delete_file.assert_not_called()
+
+
+def test_exhausted_retry_deletes_every_provider_file(
+    generation_fixture, test_db
+):
+    llm = MagicMock()
+    llm.generate.side_effect = RuntimeError("temporary provider failure")
+    llm.delete_file.side_effect = [RuntimeError("delete failed"), None]
+    attachments = provider_attachments()
+
+    from backend.workers.assessment_worker import run_generation_pipeline
+
+    with patch.object(
+        run_generation_pipeline,
+        "retry",
+        side_effect=MaxRetriesExceededError(),
+    ):
+        with pytest.raises(MaxRetriesExceededError):
+            run_pipeline_synchronously(
+                generation_fixture, test_db, llm, attachments=attachments
+            )
+
+    assert llm.delete_file.call_args_list == [
+        call("files/one"),
+        call("files/two"),
+    ]
+
+
+def test_unavailable_reference_pdf_is_terminal_and_sanitized(
+    generation_fixture, test_db
+):
+    llm = MagicMock()
+    llm.generate.side_effect = RuntimeError(
+        "provider internal detail: attached file is unavailable"
+    )
+    attachments = provider_attachments()
+
+    from backend.workers.assessment_worker import run_generation_pipeline
+
+    with patch.object(
+        run_generation_pipeline,
+        "retry",
+        side_effect=AssertionError("unavailable files must not be retried"),
+    ):
+        run_pipeline_synchronously(
+            generation_fixture, test_db, llm, attachments=attachments
+        )
+
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.error_type == "reference_pdf_unavailable"
+    assert generation_fixture.error_message == (
+        "An attached reference PDF is unavailable. Upload fresh PDFs and retry."
+    )
+    assert "provider internal detail" not in generation_fixture.error_message
+    assert llm.delete_file.call_args_list == [
+        call("files/one"),
+        call("files/two"),
+    ]

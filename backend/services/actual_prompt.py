@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
@@ -131,13 +131,27 @@ def build_condition_label(factors: PromptFactors) -> str:
     )
 
 
+def _reference_pdf_instruction(filenames: Sequence[str]) -> str:
+    joined = ", ".join(filenames)
+    return (
+        "Use the attached PDF files in order as reference content: "
+        f"{joined}."
+    )
+
+
 def _format_prompt_design_factors(
-    factors: PromptFactors, factor_inputs: dict[str, str]
+    factors: PromptFactors,
+    factor_inputs: dict[str, str],
+    reference_pdf_filenames: Sequence[str],
 ) -> str:
     blocks = []
     for name, label in _FACTOR_DEFINITIONS:
         if getattr(factors, name):
-            blocks.append(f"{label}:\n{factor_inputs[name].strip()}")
+            if name == "reference_content":
+                value = _reference_pdf_instruction(reference_pdf_filenames)
+            else:
+                value = factor_inputs[name].strip()
+            blocks.append(f"{label}:\n{value}")
     return "\n\n".join(blocks) if blocks else "None Selected"
 
 
@@ -154,6 +168,7 @@ def render_openai_actual_prompt(
     additional_instruction: Optional[str],
     factors: PromptFactors,
     factor_inputs: dict[str, str],
+    reference_pdf_filenames: Sequence[str] = (),
 ) -> str:
     try:
         rendered = _OPENAI_TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -190,7 +205,7 @@ def render_openai_actual_prompt(
             "Derive from the supplied course, topic, and learning objective."
         ),
         "prompt_design_factors": _format_prompt_design_factors(
-            factors, factor_inputs
+            factors, factor_inputs, reference_pdf_filenames
         ),
         "additional_instruction_block": (
             "Additional Instruction:\n" + additional_instruction.strip()
@@ -230,6 +245,7 @@ def build_structure_input(
     additional_instruction: Optional[str],
     factors: PromptFactors,
     factor_inputs: dict[str, str],
+    reference_pdf_filenames: Sequence[str] = (),
 ) -> str:
     sections = [
         "# Assessment Details",
@@ -251,7 +267,14 @@ def build_structure_input(
     ))
     for name, label in _FACTOR_DEFINITIONS:
         if getattr(factors, name):
-            sections.extend(("", f"## {label}", factor_inputs.get(name, "")))
+            if name == "reference_content":
+                value = (
+                    _reference_pdf_instruction(reference_pdf_filenames)
+                    + " These files will be supplied during final assessment generation."
+                )
+            else:
+                value = factor_inputs.get(name, "")
+            sections.extend(("", f"## {label}", value))
     return "\n".join(sections)
 
 
