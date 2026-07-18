@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import {
+  MAX_REFERENCE_PDF_BYTES,
   validateExperimentForm,
   type ExperimentFormValues,
 } from './experimentValidation'
@@ -27,6 +28,7 @@ const validForm: ExperimentFormValues = {
     referenceContent: '',
     reasoningGuidance: '',
   },
+  referencePdfs: [],
 }
 
 const emptyForm: ExperimentFormValues = {
@@ -45,16 +47,44 @@ test('returns every missing field grouped by user-facing section', () => {
   ])
 })
 
-test('requires only enabled factor content', () => {
+test('requires PDFs when reference content is enabled', () => {
   const errors = validateExperimentForm({
     ...validForm,
     enabled: { ...validForm.enabled, referenceContent: true },
-    content: { ...validForm.content, referenceContent: '   ' },
+    referencePdfs: [],
   })
   expect(errors).toContainEqual(expect.objectContaining({
     section: 'Prompt Design Factors',
-    label: 'Reference Content: add reference content',
+    field: 'factor-referenceContent-pdfs',
   }))
+})
+
+
+test('validates reference PDF count, type, extension, and per-file size', () => {
+  const pdf = (size: number, name = 'reference.pdf', type = 'application/pdf') =>
+    new File([new Uint8Array(size)], name, { type })
+  const enabled = { ...validForm.enabled, referenceContent: true }
+
+  expect(validateExperimentForm({
+    ...validForm,
+    enabled,
+    referencePdfs: [pdf(1), pdf(1), pdf(1), pdf(1)],
+  })).toContainEqual(expect.objectContaining({ message: expect.stringContaining('3') }))
+  expect(validateExperimentForm({
+    ...validForm,
+    enabled,
+    referencePdfs: [pdf(MAX_REFERENCE_PDF_BYTES + 1)],
+  })).toContainEqual(expect.objectContaining({ message: expect.stringContaining('20 MB') }))
+  expect(validateExperimentForm({
+    ...validForm,
+    enabled,
+    referencePdfs: [pdf(1, 'reference.txt')],
+  })).toContainEqual(expect.objectContaining({ message: expect.stringContaining('.pdf') }))
+  expect(validateExperimentForm({
+    ...validForm,
+    enabled,
+    referencePdfs: [pdf(1, 'reference.pdf', 'text/plain')],
+  })).toContainEqual(expect.objectContaining({ message: expect.stringContaining('PDF') }))
 })
 
 test('matches backend integer bounds and visual field order', () => {

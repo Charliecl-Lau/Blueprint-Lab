@@ -1,9 +1,13 @@
 const BASE = '/api'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData
+  const headers = isFormData
+    ? init?.headers
+    : { 'Content-Type': 'application/json', ...init?.headers }
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers,
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
@@ -19,7 +23,7 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown, headers?: HeadersInit) => request<T>(path, {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: body instanceof FormData ? body : JSON.stringify(body),
     headers,
   }),
   patch: <T>(path: string, body: unknown) => request<T>(path, {

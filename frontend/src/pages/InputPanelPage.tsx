@@ -9,6 +9,7 @@ import type { AssessmentType, CognitiveDemand, PromptStructure } from '../types'
 import {
   PROMPT_FACTORS,
   factorContentId,
+  REFERENCE_PDF_INPUT_ID,
   validateExperimentForm,
   type ExperimentFormValues,
   type FactorKey,
@@ -75,6 +76,8 @@ export function InputPanelPage() {
   const [promptStructure, setPromptStructure] = useState<PromptStructure>('openai')
   const [enabled, setEnabled] = useState(initialEnabled)
   const [content, setContent] = useState(initialContent)
+  const [referencePdfs, setReferencePdfs] = useState<File[]>([])
+  const [referencePdfInputKey, setReferencePdfInputKey] = useState(0)
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [dialogOpen, setDialogOpen] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -93,6 +96,7 @@ export function InputPanelPage() {
     promptStructure,
     enabled,
     content,
+    referencePdfs,
     ...overrides,
   })
   const errors = Object.fromEntries(validationErrors.map((error) => [error.field, error.message]))
@@ -126,8 +130,8 @@ export function InputPanelPage() {
         number_of_questions: Number(questionCount), estimated_time_minutes: Number(estimatedTime), prompt_structure: promptStructure,
         cognitive_demand: cognitiveDemand, additional_instruction: additionalInstruction.trim() || null,
         factors: { concept_bridge: enabled.conceptBridge, few_shot: enabled.fewShot, reference_content: enabled.referenceContent, reasoning_guidance: enabled.reasoningGuidance },
-        factor_inputs: { ...(enabled.conceptBridge && { concept_bridge: content.conceptBridge.trim() }), ...(enabled.fewShot && { few_shot: content.fewShot.trim() }), ...(enabled.referenceContent && { reference_content: content.referenceContent.trim() }), ...(enabled.reasoningGuidance && { reasoning_guidance: content.reasoningGuidance.trim() }) },
-      }, submissionKey.current)
+        factor_inputs: { ...(enabled.conceptBridge && { concept_bridge: content.conceptBridge.trim() }), ...(enabled.fewShot && { few_shot: content.fewShot.trim() }), ...(enabled.reasoningGuidance && { reasoning_guidance: content.reasoningGuidance.trim() }) },
+      }, referencePdfs, submissionKey.current)
       mergeExperiment(experiment)
       const run = experiment.runs[0]
       if (!run) throw new Error('The experiment response did not include an initial run.')
@@ -143,12 +147,31 @@ export function InputPanelPage() {
   const updateFactorEnabled = (key: FactorKey) => {
     const nextEnabled = { ...enabled, [key]: !enabled[key] }
     setEnabled(nextEnabled)
-    clearFieldWhenValid(factorContentId(key), values({ enabled: nextEnabled }))
+    if (key === 'referenceContent' && !nextEnabled.referenceContent) {
+      setReferencePdfs([])
+      setReferencePdfInputKey((currentKey) => currentKey + 1)
+      clearFieldWhenValid(
+        REFERENCE_PDF_INPUT_ID,
+        values({ enabled: nextEnabled, referencePdfs: [] }),
+      )
+      return
+    }
+    clearFieldWhenValid(
+      key === 'referenceContent' ? REFERENCE_PDF_INPUT_ID : factorContentId(key),
+      values({ enabled: nextEnabled }),
+    )
   }
   const updateFactorContent = (key: FactorKey, nextValue: string) => {
     const nextContent = { ...content, [key]: nextValue }
     setContent(nextContent)
     clearFieldWhenValid(factorContentId(key), values({ content: nextContent }))
+  }
+  const updateReferencePdfs = (files: File[]) => {
+    setReferencePdfs(files)
+    clearFieldWhenValid(
+      REFERENCE_PDF_INPUT_ID,
+      values({ referencePdfs: files }),
+    )
   }
   const index = sections.findIndex((item) => item.id === section)
   const current = sections[index]
@@ -156,7 +179,10 @@ export function InputPanelPage() {
     if (id === 'details') return course.trim() !== '' && topic.trim() !== '' && objectives.trim() !== ''
     if (id === 'factors') {
       const keys = Object.keys(enabled) as FactorKey[]
-      return keys.some((key) => enabled[key]) && keys.every((key) => !enabled[key] || content[key].trim() !== '')
+      return keys.some((key) => enabled[key]) && keys.every((key) => (
+        !enabled[key]
+        || (key === 'referenceContent' ? referencePdfs.length > 0 : content[key].trim() !== '')
+      ))
     }
     return false
   }
@@ -182,8 +208,8 @@ export function InputPanelPage() {
           <div className="field-stack"><label htmlFor="cognitive-demand">Cognitive demand</label><select id="cognitive-demand" required value={cognitiveDemand} aria-invalid={errors['cognitive-demand'] ? 'true' : undefined} aria-describedby={errors['cognitive-demand'] ? 'cognitive-demand-error' : undefined} onChange={(event) => { const next = event.target.value as CognitiveDemand; setCognitiveDemand(next); clearFieldWhenValid('cognitive-demand', values({ cognitiveDemand: next })) }}><option value="remember_understand">Remember/Understand</option><option value="apply_analyze">Apply/Analyze</option><option value="evaluate_create">Evaluate/Create</option></select>{errors['cognitive-demand'] && <em id="cognitive-demand-error">{errors['cognitive-demand']}</em>}</div>
           <div className="wide field-stack"><label htmlFor="additional-instruction">Additional instruction (optional)</label><textarea id="additional-instruction" rows={3} maxLength={20000} value={additionalInstruction} onChange={(event) => setAdditionalInstruction(event.target.value)} /></div>
         </div></section>}
-        {section === 'factors' && <section className="section-card"><PromptFactorFields enabled={enabled} content={content} errors={errors} onToggle={updateFactorEnabled} onContent={updateFactorContent} /></section>}
-        {section === 'review' && <section className="section-card"><dl className="summary"><div><dt>Course</dt><dd>{course || 'Not set'}</dd></div><div><dt>Topic</dt><dd>{topic || 'Not set'}</dd></div><div><dt>Format</dt><dd>{assessmentType}</dd></div><div><dt>Difficulty</dt><dd>{difficulty}</dd></div><div><dt>Estimated student time</dt><dd>{estimatedTime} minutes</dd></div><div><dt>Cognitive demand</dt><dd>{cognitiveDemandLabels[cognitiveDemand]}</dd></div><div><dt>Additional instruction</dt><dd>{additionalInstruction.trim() || 'None'}</dd></div><div><dt>Factors</dt><dd>{(Object.keys(enabled) as FactorKey[]).filter((key) => enabled[key]).map((key) => factorLabels[key]).join(', ') || 'None'}</dd></div></dl></section>}
+        {section === 'factors' && <section className="section-card"><PromptFactorFields enabled={enabled} content={content} errors={errors} onToggle={updateFactorEnabled} onContent={updateFactorContent} referencePdfs={referencePdfs} referencePdfInputKey={referencePdfInputKey} onReferencePdfs={updateReferencePdfs} /></section>}
+        {section === 'review' && <section className="section-card"><dl className="summary"><div><dt>Course</dt><dd>{course || 'Not set'}</dd></div><div><dt>Topic</dt><dd>{topic || 'Not set'}</dd></div><div><dt>Format</dt><dd>{assessmentType}</dd></div><div><dt>Difficulty</dt><dd>{difficulty}</dd></div><div><dt>Estimated student time</dt><dd>{estimatedTime} minutes</dd></div><div><dt>Cognitive demand</dt><dd>{cognitiveDemandLabels[cognitiveDemand]}</dd></div><div><dt>Additional instruction</dt><dd>{additionalInstruction.trim() || 'None'}</dd></div><div><dt>Factors</dt><dd>{(Object.keys(enabled) as FactorKey[]).filter((key) => enabled[key]).map((key) => factorLabels[key]).join(', ') || 'None'}</dd></div>{enabled.referenceContent && <div><dt>Reference PDFs</dt><dd>{referencePdfs.map((pdf) => pdf.name).join(', ') || 'None'}</dd></div>}</dl></section>}
         <div className="section-navigation">{index > 0 && <button aria-label="Previous" onClick={() => setSection(sections[index - 1].id)}><Chevron direction="left" />Previous</button>}{index < sections.length - 1 && <button aria-label={`Next: ${sections[index + 1].label}`} className="next" onClick={() => setSection(sections[index + 1].id)}>Next: {sections[index + 1].label}<Chevron direction="right" /></button>}</div>
       </div>
     </div>

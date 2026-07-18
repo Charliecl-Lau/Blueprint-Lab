@@ -8,6 +8,11 @@ import { useRunStore } from './store/runStore'
 
 expect.extend(toHaveNoViolations)
 
+function submittedExperimentPayload(init: RequestInit | undefined) {
+  expect(init?.body).toBeInstanceOf(FormData)
+  return JSON.parse(String((init?.body as FormData).get('payload')))
+}
+
 test('normalizes deprecated generation collections at the API boundary', () => {
   const legacyRun = { id: 7, condition_id: 2, run_number: 1, status: 'complete' as const }
   const response = normalizeExperiment({
@@ -82,7 +87,7 @@ test('submits cognitive demand and optional additional instruction', async () =>
     vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST'),
   ).toBe(true))
   const [, init] = vi.mocked(fetch).mock.calls.find(([, value]) => value?.method === 'POST')!
-  expect(JSON.parse(String(init?.body))).toMatchObject({
+  expect(submittedExperimentPayload(init)).toMatchObject({
     cognitive_demand: 'evaluate_create',
     additional_instruction: 'Use one laboratory scenario.',
   })
@@ -111,7 +116,7 @@ test('submits exact enabled factor content and estimated time', async () => {
     vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST'),
   ).toBe(true))
   const [, init] = vi.mocked(fetch).mock.calls.find(([, value]) => value?.method === 'POST')!
-  expect(JSON.parse(String(init?.body))).toMatchObject({
+  expect(submittedExperimentPayload(init)).toMatchObject({
     estimated_time_minutes: 30,
     factors: { concept_bridge: true, reasoning_guidance: false },
     factor_inputs: { concept_bridge: 'Connect vectors to force balance.' },
@@ -183,6 +188,64 @@ test('shows selected factor inputs beneath the selection grid', () => {
   expect(grid).toHaveClass('factor-grid')
   fireEvent.click(screen.getByRole('checkbox', { name: /Concept Bridge/ }))
   expect(screen.getByRole('region', { name: 'Manual Input' })).toContainElement(screen.getByLabelText('Concept Bridge content'))
+})
+
+
+test('uses an ordered multi-PDF input for reference content and clears it on disable', async () => {
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: 'Prompt Design Factors' }))
+  await user.click(screen.getByRole('checkbox', { name: 'Reference Content' }))
+
+  const input = screen.getByLabelText('Reference Content PDFs')
+  expect(input).toHaveAttribute('type', 'file')
+  expect(input).toHaveAttribute('accept', 'application/pdf,.pdf')
+  expect(input).toHaveAttribute('multiple')
+  expect(screen.getByText('Maximum 3 PDFs; 20 MB per PDF.')).toBeVisible()
+  expect(screen.getByText('Please do not upload PDFs longer than 100 pages.')).toBeVisible()
+  expect(screen.queryByLabelText('Reference Content content')).not.toBeInTheDocument()
+
+  await user.upload(input, [
+    new File(['one'], 'one.pdf', { type: 'application/pdf' }),
+    new File(['two'], 'two.pdf', { type: 'application/pdf' }),
+  ])
+  const filenames = screen.getByRole('list', { name: 'Selected reference PDFs' })
+  expect(within(filenames).getAllByRole('listitem').map((item) => item.textContent))
+    .toEqual(['one.pdf', 'two.pdf'])
+
+  await user.click(screen.getByRole('checkbox', { name: 'Reference Content' }))
+  await user.click(screen.getByRole('checkbox', { name: 'Reference Content' }))
+  expect(screen.queryByText('one.pdf')).not.toBeInTheDocument()
+})
+
+
+test('reviews and submits ordered reference PDFs as multipart form data', async () => {
+  const user = userEvent.setup()
+  render(<App />)
+  await user.type(screen.getByLabelText('Course name'), 'Statics')
+  await user.type(screen.getByLabelText('Topic'), 'Equilibrium')
+  await user.type(screen.getByLabelText('Learning objectives'), 'Resolve forces')
+  await user.click(screen.getByRole('button', { name: 'Prompt Design Factors' }))
+  await user.click(screen.getByRole('checkbox', { name: 'Reference Content' }))
+  await user.upload(screen.getByLabelText('Reference Content PDFs'), [
+    new File(['one'], 'one.pdf', { type: 'application/pdf' }),
+    new File(['two'], 'two.pdf', { type: 'application/pdf' }),
+  ])
+  await user.click(screen.getByRole('button', { name: 'Review' }))
+
+  expect(screen.getByText('one.pdf, two.pdf')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Run Experiment' }))
+
+  await waitFor(() => expect(
+    vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST'),
+  ).toBe(true))
+  const [, init] = vi.mocked(fetch).mock.calls.find(([, value]) => value?.method === 'POST')!
+  const form = init?.body as FormData
+  const payload = JSON.parse(String(form.get('payload')))
+  expect(payload.factor_inputs.reference_content).toBeUndefined()
+  expect(form.getAll('reference_pdfs').map((item) => (item as File).name))
+    .toEqual(['one.pdf', 'two.pdf'])
+  expect(new Headers(init?.headers).has('Content-Type')).toBe(false)
 })
 
 test('opens an incomplete experiment modal and links to missing sections', () => {

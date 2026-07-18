@@ -134,6 +134,7 @@ export interface Run {
   artifact_available?: boolean
   token_usage?: TokenUsage
   error?: { type?: string | null; message?: string | null } | null
+  reference_pdf_filenames?: string[]
 }
 
 /** @deprecated Use Run. */
@@ -167,6 +168,7 @@ export interface RecentRun {
   created_at: string
   completed_at: string | null
   token_usage: TokenUsage
+  reference_pdf_filenames?: string[]
 }
 
 export interface MCQOption {

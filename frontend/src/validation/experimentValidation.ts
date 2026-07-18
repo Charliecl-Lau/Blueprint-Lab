@@ -14,8 +14,8 @@ export const PROMPT_FACTORS = [
   {
     key: 'referenceContent',
     label: 'Reference Content',
-    help: 'Provide notes, excerpts, facts, or source material.',
-    missingLabel: 'Reference Content: add reference content',
+    help: 'Attach PDF reference material for assessment generation.',
+    missingLabel: 'Reference Content: upload PDF files',
   },
   {
     key: 'reasoningGuidance',
@@ -41,6 +41,7 @@ export interface ExperimentFormValues {
   promptStructure: string
   enabled: Record<FactorKey, boolean>
   content: Record<FactorKey, string>
+  referencePdfs: File[]
 }
 
 export interface ValidationError {
@@ -59,6 +60,10 @@ const requiredTextFields = [
 export function factorContentId(key: FactorKey) {
   return `factor-${key}-content`
 }
+
+export const REFERENCE_PDF_INPUT_ID = 'factor-referenceContent-pdfs'
+export const MAX_REFERENCE_PDF_BYTES = 20 * 1024 * 1024
+export const MAX_REFERENCE_PDFS = 3
 
 export function validateExperimentForm(values: ExperimentFormValues): ValidationError[] {
   const errors: ValidationError[] = []
@@ -104,6 +109,7 @@ export function validateExperimentForm(values: ExperimentFormValues): Validation
   }
 
   for (const factor of PROMPT_FACTORS) {
+    if (factor.key === 'referenceContent') continue
     if (values.enabled[factor.key] && !values.content[factor.key].trim()) {
       const displayLabel = factor.label.replace(' (chain-of-thought condition)', '')
       errors.push({
@@ -112,6 +118,42 @@ export function validateExperimentForm(values: ExperimentFormValues): Validation
         label: factor.missingLabel,
         message: `Add content for ${displayLabel}.`,
       })
+    }
+  }
+
+  if (values.enabled.referenceContent) {
+    if (values.referencePdfs.length === 0) {
+      errors.push({
+        section: 'Prompt Design Factors',
+        field: REFERENCE_PDF_INPUT_ID,
+        label: 'Reference Content: upload PDF files',
+        message: 'Upload at least one PDF for Reference Content.',
+      })
+    } else if (values.referencePdfs.length > MAX_REFERENCE_PDFS) {
+      errors.push({
+        section: 'Prompt Design Factors',
+        field: REFERENCE_PDF_INPUT_ID,
+        label: 'Reference Content: upload PDF files',
+        message: 'Upload no more than 3 PDFs.',
+      })
+    }
+    for (const pdf of values.referencePdfs) {
+      let message: string | null = null
+      if (!pdf.name.toLowerCase().endsWith('.pdf')) {
+        message = `${pdf.name} must use the .pdf extension.`
+      } else if (pdf.type !== 'application/pdf') {
+        message = `${pdf.name} must be a PDF file.`
+      } else if (pdf.size > MAX_REFERENCE_PDF_BYTES) {
+        message = `${pdf.name} exceeds the 20 MB per-file limit.`
+      }
+      if (message) {
+        errors.push({
+          section: 'Prompt Design Factors',
+          field: REFERENCE_PDF_INPUT_ID,
+          label: 'Reference Content: upload PDF files',
+          message,
+        })
+      }
     }
   }
 

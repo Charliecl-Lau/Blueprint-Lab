@@ -8,6 +8,11 @@ export function normalizeExperiment(response: ExperimentResponse): Experiment {
 }
 
 export const experimentsApi = {
-  create: async (payload: CreateExperimentPayload, idempotencyKey: string): Promise<Experiment> => normalizeExperiment(await api.post('/experiments', payload, { 'Idempotency-Key': idempotencyKey })),
+  create: async (payload: CreateExperimentPayload, referencePdfs: File[], idempotencyKey: string): Promise<Experiment> => {
+    const form = new FormData()
+    form.append('payload', JSON.stringify(payload))
+    referencePdfs.forEach((pdf) => form.append('reference_pdfs', pdf))
+    return normalizeExperiment(await api.post('/experiments', form, { 'Idempotency-Key': idempotencyKey }))
+  },
   get: async (id: number): Promise<Experiment> => normalizeExperiment(await api.get(`/experiments/${id}`)),
 }
