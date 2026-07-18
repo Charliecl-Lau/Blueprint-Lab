@@ -279,9 +279,9 @@ test.each(['/', '/runs/8/progress', '/experiments/1/viewer/8'])(
 )
 
 
-test('recent active run reopens run-specific progress', async () => {
+test('does not render the Recent Runs section on the controlled-assessment page', async () => {
   vi.mocked(fetch).mockImplementation(async (input) => {
-    if (String(input).endsWith('/api/runs/recent?limit=10')) {
+    if (String(input).includes('/api/runs/recent?limit=')) {
       return {
         ok: true,
         json: async () => ([{
@@ -309,10 +309,10 @@ test('recent active run reopens run-specific progress', async () => {
   })
 
   render(<App />)
-  await userEvent.click(
-    await screen.findByRole('link', { name: /Reopen.*Equilibrium/ }),
-  )
-  expect(window.location.pathname).toBe('/runs/8/progress')
+
+  await screen.findByRole('link', { name: 'Return to run progress: Equilibrium' })
+  expect(screen.queryByRole('heading', { name: 'Recent runs' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /Reopen run/ })).not.toBeInTheDocument()
 })
 
 test('shows a top-right shortcut back to the latest run progress', async () => {

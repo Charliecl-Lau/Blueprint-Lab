@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { experimentsApi } from '../api/experiments'
 import { AppHeader } from '../components/AppHeader'
 import { PromptFactorFields } from '../components/PromptFactorFields'
-import { RecentRuns } from '../components/RecentRuns'
 import { RunProgressShortcut } from '../components/RunProgressShortcut'
 import { useRunStore } from '../store/runStore'
 import type { AssessmentType, CognitiveDemand, PromptStructure } from '../types'
@@ -188,7 +187,6 @@ export function InputPanelPage() {
         <div className="section-navigation">{index > 0 && <button aria-label="Previous" onClick={() => setSection(sections[index - 1].id)}><Chevron direction="left" />Previous</button>}{index < sections.length - 1 && <button aria-label={`Next: ${sections[index + 1].label}`} className="next" onClick={() => setSection(sections[index + 1].id)}>Next: {sections[index + 1].label}<Chevron direction="right" /></button>}</div>
       </div>
     </div>
-    <RecentRuns />
     <div className="fixed-run-action" data-testid="fixed-run-action">
       {submitError && <p className="submit-error" role="alert">{submitError}</p>}
       <button className="primary run-button" disabled={loading} onClick={submit}>{loading ? 'Starting…' : 'Run Experiment'}</button>
