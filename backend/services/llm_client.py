@@ -2,12 +2,17 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
-from typing import Optional
+from io import BytesIO
+from typing import Optional, Sequence
 
 from google import genai
 from google.genai import types
 
 from backend.config import settings
+from backend.services.reference_pdfs import (
+    ProviderFileAttachment,
+    ValidatedReferencePdf,
+)
 
 
 def _without_defaults(value):
@@ -107,6 +112,7 @@ class LLMClient:
         user_message: str,
         model_settings: Optional[dict] = None,
         response_schema: Optional[type] = None,
+        attachments: Sequence[ProviderFileAttachment] = (),
     ) -> LLMResult:
         overrides = model_settings or {}
         config_kwargs = {
@@ -130,10 +136,22 @@ class LLMClient:
                 config_kwargs["response_json_schema"] = schema
             else:
                 config_kwargs["response_schema"] = schema
+        contents = user_message
+        if attachments:
+            contents = [
+                types.Part.from_text(text=user_message),
+                *[
+                    types.Part.from_uri(
+                        file_uri=attachment.uri,
+                        mime_type=attachment.mime_type,
+                    )
+                    for attachment in attachments
+                ],
+            ]
         response = self._client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(**config_kwargs),
-            contents=user_message,
+            contents=contents,
         )
         finish_reason = None
         candidates = getattr(response, "candidates", None)
@@ -151,6 +169,23 @@ class LLMClient:
         if finish_reason in ("MAX_TOKENS", 2):
             raise TruncatedResponseError(result)
         return result
+
+    def upload_pdf(self, pdf: ValidatedReferencePdf) -> ProviderFileAttachment:
+        uploaded = self._client.files.upload(
+            file=BytesIO(pdf.content),
+            config=types.UploadFileConfig(
+                display_name=pdf.filename,
+                mime_type="application/pdf",
+            ),
+        )
+        return ProviderFileAttachment(
+            name=uploaded.name,
+            uri=uploaded.uri,
+            mime_type=uploaded.mime_type or "application/pdf",
+        )
+
+    def delete_file(self, name: str) -> None:
+        self._client.files.delete(name=name)
 
     def generate_json(self, system_prompt: str, user_message: str) -> dict:
         result = self.generate(system_prompt, user_message)

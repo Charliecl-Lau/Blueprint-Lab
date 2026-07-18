@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import contextmanager
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
@@ -13,6 +14,10 @@ from backend.services.llm_client import (
     TruncatedResponseError,
 )
 from backend.schemas.assessment_schema import AssessmentGenerationResponse
+from backend.services.reference_pdfs import (
+    ProviderFileAttachment,
+    ValidatedReferencePdf,
+)
 
 
 @contextmanager
@@ -235,3 +240,71 @@ def test_truncated_response_error_preserves_usage():
             client.generate("system", "user")
 
     assert raised.value.result.usage.total_tokens == 155
+
+
+def test_llm_client_uploads_pdf_with_safe_provider_metadata():
+    pdf = ValidatedReferencePdf("reference.pdf", b"%PDF-1.7\nvalid")
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        mock_client.return_value.files.upload.return_value = SimpleNamespace(
+            name="files/reference-1",
+            uri="https://files/reference-1",
+            mime_type="application/pdf",
+        )
+
+        attachment = LLMClient().upload_pdf(pdf)
+
+    call_kwargs = mock_client.return_value.files.upload.call_args.kwargs
+    assert isinstance(call_kwargs["file"], BytesIO)
+    assert call_kwargs["file"].getvalue() == b"%PDF-1.7\nvalid"
+    assert call_kwargs["config"].display_name == "reference.pdf"
+    assert call_kwargs["config"].mime_type == "application/pdf"
+    assert attachment == ProviderFileAttachment(
+        name="files/reference-1",
+        uri="https://files/reference-1",
+        mime_type="application/pdf",
+    )
+
+
+def test_llm_client_attaches_ordered_provider_files():
+    attachments = [
+        ProviderFileAttachment(
+            "files/one", "https://files/one", "application/pdf"
+        ),
+        ProviderFileAttachment(
+            "files/two", "https://files/two", "application/pdf"
+        ),
+    ]
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        mock_client.return_value.models.generate_content.return_value = gemini_response()
+
+        LLMClient().generate("system", "user", attachments=attachments)
+
+    contents = (
+        mock_client.return_value.models.generate_content.call_args.kwargs["contents"]
+    )
+    assert contents[0].text == "user"
+    assert [part.file_data.file_uri for part in contents[1:]] == [
+        "https://files/one",
+        "https://files/two",
+    ]
+
+
+def test_llm_client_keeps_text_only_contents_unchanged():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        mock_client.return_value.models.generate_content.return_value = gemini_response()
+
+        LLMClient().generate("system", "user", attachments=[])
+
+    assert (
+        mock_client.return_value.models.generate_content.call_args.kwargs["contents"]
+        == "user"
+    )
+
+
+def test_llm_client_deletes_provider_file_by_name():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        LLMClient().delete_file("files/reference-1")
+
+    mock_client.return_value.files.delete.assert_called_once_with(
+        name="files/reference-1"
+    )
