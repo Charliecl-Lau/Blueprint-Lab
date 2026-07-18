@@ -57,6 +57,7 @@ redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 logger = logging.getLogger(__name__)
 _ASSESSMENT_SCHEMA_VERSION = "1"
 _MAX_ERROR_MESSAGE_LENGTH = 1000
+_MAX_ASSESSMENT_REPAIR_ATTEMPTS = 2
 
 
 def _publish_progress(experiment_id: int, run_id: int, condition_id: int, stage: str) -> None:
@@ -441,9 +442,16 @@ def run_generation_pipeline(
             _publish_progress(
                 experiment.id, run.id, condition.id, "generating"
             )
-            try:
-                generated = generate_questions(result.raw_text)
-            except ValidationError as validation_error:
+            generated = None
+            for repair_attempt in range(_MAX_ASSESSMENT_REPAIR_ATTEMPTS + 1):
+                try:
+                    generated = generate_questions(result.raw_text)
+                    break
+                except ValidationError as exc:
+                    if repair_attempt == _MAX_ASSESSMENT_REPAIR_ATTEMPTS:
+                        raise
+                    validation_error = str(exc)
+
                 run.progress_message = "Repairing Assessment"
                 db.commit()
                 _publish_progress(
@@ -461,7 +469,7 @@ def run_generation_pipeline(
                         ),
                         user_message=build_assessment_repair_user_message(
                             result.raw_text,
-                            str(validation_error),
+                            validation_error,
                         ),
                         model_settings=run.model_settings,
                         response_schema=ASSESSMENT_PROVIDER_SCHEMA,
@@ -496,7 +504,7 @@ def run_generation_pipeline(
                     (time.perf_counter() - generation_started) * 1000
                 )
                 db.commit()
-                generated = generate_questions(result.raw_text)
+            assert generated is not None
             assessment.parsed_json = generated.model_dump()
             run.generated_json = assessment.parsed_json
             persist_assessment_questions(db, assessment)

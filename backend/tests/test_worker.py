@@ -603,7 +603,75 @@ def test_generation_pipeline_repairs_cross_location_equation_labels(
     mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
 
 
-def test_generation_pipeline_stops_after_one_invalid_repair(
+def test_generation_pipeline_repairs_a_second_validation_failure(
+    generation_fixture,
+    test_db,
+):
+    initial_question = complete_question(
+        question_type="short_answer",
+        body="The gas constant is R = 8.314 J/(mol K).",
+        model_answer="Use the supplied value.",
+    )
+    initial_question["equations"] = []
+    first_repair_question = complete_question(
+        question_type="short_answer",
+        body=(
+            "Use alpha = (1/V)(partial V/partial T)_P to explain the result."
+        ),
+        model_answer="Use the supplied relation.",
+    )
+    first_repair_question["equations"] = []
+    valid_question = complete_question(
+        question_type="short_answer",
+        body="Use [[EQ:thermal_expansion]] to explain the result.",
+        model_answer="Use the supplied relation.",
+    )
+    valid_question["equations"] = [{
+        "label": "thermal_expansion",
+        "expression": "alpha = (1/V)(partial V/partial T)_P",
+        "location": "question",
+    }]
+    initial_raw = __import__("json").dumps({"questions": [initial_question]})
+    first_repair_raw = __import__("json").dumps(
+        {"questions": [first_repair_question]}
+    )
+    valid_raw = __import__("json").dumps({"questions": [valid_question]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(initial_raw, 20, 8, 28),
+        result(first_repair_raw, 12, 6, 18),
+        result(valid_raw, 10, 6, 16),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.status == "complete", generation_fixture.error_message
+    assert generation_fixture.assessment.raw_response_text == valid_raw
+    assert generation_fixture.assessment.parsed_json["questions"][0]["body"] == (
+        valid_question["body"]
+    )
+    assert llm.generate.call_count == 3
+    second_repair_call = llm.generate.call_args_list[2]
+    assert first_repair_raw in second_repair_call.kwargs["user_message"]
+    assert (
+        "body: mathematical expression must use an equation reference"
+        in second_repair_call.kwargs["user_message"]
+    )
+    usage_stages = [
+        usage.stage
+        for usage in test_db.query(ModelCallUsage)
+        .filter_by(run_id=generation_fixture.id)
+        .order_by(ModelCallUsage.id)
+        .all()
+    ]
+    assert usage_stages == ["assessment", "repair", "repair"]
+    assert generation_fixture.model_call_count == 3
+    assert generation_fixture.total_tokens == 62
+    mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+
+
+def test_generation_pipeline_stops_after_two_invalid_repairs(
     generation_fixture,
     test_db,
 ):
@@ -618,6 +686,7 @@ def test_generation_pipeline_stops_after_one_invalid_repair(
     llm.generate.side_effect = [
         result(rejected_raw, 20, 8, 28),
         result(rejected_raw, 12, 6, 18),
+        result(rejected_raw, 13, 6, 19),
     ]
 
     mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
@@ -629,7 +698,7 @@ def test_generation_pipeline_stops_after_one_invalid_repair(
     )
     assert generation_fixture.assessment.parsed_json is None
     assert generation_fixture.document_artifact is None
-    assert llm.generate.call_count == 2
+    assert llm.generate.call_count == 3
     usage_stages = [
         usage.stage
         for usage in test_db.query(ModelCallUsage)
@@ -637,9 +706,9 @@ def test_generation_pipeline_stops_after_one_invalid_repair(
         .order_by(ModelCallUsage.id)
         .all()
     ]
-    assert usage_stages == ["assessment", "repair"]
-    assert generation_fixture.model_call_count == 2
-    assert generation_fixture.total_tokens == 46
+    assert usage_stages == ["assessment", "repair", "repair"]
+    assert generation_fixture.model_call_count == 3
+    assert generation_fixture.total_tokens == 65
     mock_redis.evaluation_delay.assert_not_called()
 
 
