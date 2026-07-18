@@ -242,6 +242,31 @@ def test_flat_equation_references_reject_formula_text_outside_placeholders(
         AssessmentGenerationResponse.model_validate(complete_payload)
 
 
+def test_flat_equation_validation_reports_all_offending_fields_and_text(
+    complete_payload,
+):
+    question = complete_payload["questions"][0]
+    question["body"] = (
+        "Using dH = TdS + VdP, derive the Joule-Thomson coefficient."
+    )
+    question["model_answer"] = (
+        "For an ideal gas, PV = RT and C_p = (partial H/partial T)_P."
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+    message = str(caught.value)
+    assert "body: mathematical expression must use an equation reference" in message
+    assert "dH = TdS + VdP" in message
+    assert (
+        "model_answer: mathematical expression must use an equation reference"
+        in message
+    )
+    assert "PV = RT" in message
+    assert "C_p = (partial H/partial T)_P" in message
+
+
 def test_flat_equation_references_reject_signed_superscript_text(
     complete_payload,
 ):

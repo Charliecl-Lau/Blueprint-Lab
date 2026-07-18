@@ -17,9 +17,19 @@ def _equation_references(text: Optional[str]) -> List[str]:
     return _EQUATION_REFERENCE_PATTERN.findall(text or "")
 
 
-def _contains_plain_equation(text: Optional[str]) -> bool:
-    without_references = _EQUATION_REFERENCE_PATTERN.sub("", text or "")
-    return any(pattern.search(without_references) for pattern in _PLAIN_EQUATION_PATTERNS)
+def _plain_equation_excerpts(text: Optional[str]) -> List[str]:
+    without_references = _EQUATION_REFERENCE_PATTERN.sub(
+        lambda match: " " * len(match.group(0)),
+        text or "",
+    )
+    excerpts = []
+    for segment in re.split(r"(?<=[.!?])\s+|[\r\n]+", without_references):
+        normalized = " ".join(segment.split())
+        if not normalized:
+            continue
+        if any(pattern.search(normalized) for pattern in _PLAIN_EQUATION_PATTERNS):
+            excerpts.append(normalized)
+    return excerpts
 
 
 class TextMathNode(BaseModel):
@@ -255,11 +265,20 @@ class QuestionResponse(BaseModel):
             if label not in referenced_labels:
                 raise ValueError(f"equation is not referenced: {label}")
 
+        plain_equation_errors = []
         for field_name, text in question_content + solution_content:
-            if _contains_plain_equation(text):
-                raise ValueError(
-                    f"{field_name}: mathematical expression must use an equation reference"
-                )
+            excerpts = _plain_equation_excerpts(text)
+            if not excerpts:
+                continue
+            offending_text = "; ".join(
+                f'"{excerpt}"' for excerpt in excerpts
+            )
+            plain_equation_errors.append(
+                f"{field_name}: mathematical expression must use an equation "
+                f"reference; offending text: {offending_text}"
+            )
+        if plain_equation_errors:
+            raise ValueError(" | ".join(plain_equation_errors))
 
         return self
 
