@@ -956,3 +956,102 @@ test('asks for confirmation before retrying a run', async () => {
   ).toHaveLength(1))
   expect(window.location.pathname).toBe('/runs/9/progress')
 })
+
+
+test('requires fresh ordered PDFs when retrying a PDF-backed run', async () => {
+  const user = userEvent.setup()
+  window.history.replaceState({}, '', '/experiments/1/viewer/8')
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'Statics',
+          topic: 'Equilibrium',
+          learning_objectives: 'Resolve forces',
+          assessment_type: 'mixed',
+          difficulty: 'medium',
+          number_of_questions: 4,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'remember_understand',
+          additional_instruction: null,
+          conditions: [{
+            id: 3,
+            prompt_structure: 'openai',
+            concept_bridge_enabled: false,
+            few_shot_enabled: false,
+            reference_content_enabled: true,
+            reasoning_guidance_enabled: false,
+            factor_inputs: {},
+            condition_label: 'Reference PDFs',
+          }],
+          runs: [{
+            id: 8,
+            experiment_id: 1,
+            condition_id: 3,
+            run_number: 1,
+            status: 'complete',
+            reference_pdf_filenames: ['old.pdf'],
+          }],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8/retry') && init?.method === 'POST') {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 9,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 2,
+          status: 'pending',
+          reference_pdf_filenames: ['new-one.pdf', 'new-two.pdf'],
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/runs/8')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: 'complete',
+          reference_pdf_filenames: ['old.pdf'],
+          assessment: { parsed_json: { questions: [] }, output_hash: 'hash', schema_version: '1' },
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+  await user.click(await screen.findByRole('button', { name: 'Retry run' }))
+
+  const dialog = screen.getByRole('dialog', { name: 'Retry this run?' })
+  expect(within(dialog).getByText(/old\.pdf/)).toBeVisible()
+  expect(within(dialog).getByText('Maximum 3 PDFs; 20 MB per PDF.')).toBeVisible()
+  expect(within(dialog).getByText('Please do not upload PDFs longer than 100 pages.')).toBeVisible()
+  const confirm = within(dialog).getByRole('button', { name: 'Confirm retry' })
+  expect(confirm).toBeDisabled()
+
+  await user.upload(within(dialog).getByLabelText('Fresh Reference PDFs'), [
+    new File(['one'], 'new-one.pdf', { type: 'application/pdf' }),
+    new File(['two'], 'new-two.pdf', { type: 'application/pdf' }),
+  ])
+  expect(confirm).toBeEnabled()
+  await user.click(confirm)
+
+  await waitFor(() => expect(window.location.pathname).toBe('/runs/9/progress'))
+  const [, init] = vi.mocked(fetch).mock.calls.find(([input, value]) => (
+    String(input).endsWith('/api/runs/8/retry') && value?.method === 'POST'
+  ))!
+  expect(init?.body).toBeInstanceOf(FormData)
+  const form = init?.body as FormData
+  expect(form.getAll('reference_pdfs').map((item) => (item as File).name))
+    .toEqual(['new-one.pdf', 'new-two.pdf'])
+  expect(new Headers(init?.headers).has('Content-Type')).toBe(false)
+})

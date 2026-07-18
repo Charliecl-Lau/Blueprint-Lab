@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Request } from '@playwright/test'
 
 type MockRun = {
   id: number
@@ -7,6 +7,21 @@ type MockRun = {
   run_number: number
   topic: string
   total: number
+  referencePdfFilenames: string[]
+}
+
+function multipartExperimentRequest(request: Request) {
+  const raw = request.postData() ?? ''
+  const payloadMatch = raw.match(/name="payload"\r?\n\r?\n([\s\S]*?)\r?\n--/)
+  if (!payloadMatch) throw new Error('Multipart experiment payload was not found')
+  const referencePdfFilenames = Array.from(
+    raw.matchAll(/name="reference_pdfs"; filename="([^"]+)"/g),
+    (match) => match[1],
+  )
+  return {
+    payload: JSON.parse(payloadMatch[1]) as Record<string, unknown>,
+    referencePdfFilenames,
+  }
 }
 
 function tokenUsage(total: number) {
@@ -24,6 +39,7 @@ async function mockResearchApi(page: Page) {
   const runs: MockRun[] = []
   const experiments = new Map<number, Record<string, unknown>>()
   let experimentPosts = 0
+  let latestReferencePdfFilenames: string[] = []
 
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -32,15 +48,17 @@ async function mockResearchApi(page: Page) {
 
     if (request.method() === 'POST' && path === '/api/experiments') {
       experimentPosts += 1
-      const payload = request.postDataJSON()
+      const { payload, referencePdfFilenames } = multipartExperimentRequest(request)
+      latestReferencePdfFilenames = referencePdfFilenames
       const id = experimentPosts
       const run: MockRun = {
         id: 100 + id,
         experiment_id: id,
         condition_id: 200 + id,
         run_number: id,
-        topic: payload.topic,
+        topic: String(payload.topic),
         total: id === 1 ? 42 : 420,
+        referencePdfFilenames,
       }
       const condition = {
         id: run.condition_id,
@@ -48,7 +66,7 @@ async function mockResearchApi(page: Page) {
         prompt_structure: payload.prompt_structure,
         concept_bridge_enabled: false,
         few_shot_enabled: false,
-        reference_content_enabled: false,
+        reference_content_enabled: referencePdfFilenames.length > 0,
         reasoning_guidance_enabled: false,
         factor_inputs: {},
         condition_label: 'Baseline',
@@ -64,6 +82,7 @@ async function mockResearchApi(page: Page) {
           condition_id: run.condition_id,
           run_number: run.run_number,
           status: 'pending',
+          reference_pdf_filenames: referencePdfFilenames,
         }],
       }
       runs.unshift(run)
@@ -115,7 +134,10 @@ async function mockResearchApi(page: Page) {
     await route.fulfill({ status: 404, json: { detail: 'Not mocked' } })
   })
 
-  return { experimentPostCount: () => experimentPosts }
+  return {
+    experimentPostCount: () => experimentPosts,
+    latestReferencePdfFilenames: () => latestReferencePdfFilenames,
+  }
 }
 
 function runDetail(run: MockRun) {
@@ -129,6 +151,7 @@ function runDetail(run: MockRun) {
     artifact_available: true,
     token_usage: tokenUsage(run.total),
     assessment: { parsed_json: { questions: [] }, output_hash: 'hash', schema_version: '1' },
+    reference_pdf_filenames: run.referencePdfFilenames,
   }
 }
 
@@ -177,4 +200,30 @@ test('invalid form shows every missing field and sends no experiment request', a
   await expect(dialog.getByRole('button', { name: 'Topic' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Learning objectives' })).toBeVisible()
   expect(api.experimentPostCount()).toBe(0)
+})
+
+test('submits ordered reference PDFs through multipart experiment creation', async ({ page }) => {
+  const api = await mockResearchApi(page)
+  await page.goto('/')
+  await fillRequiredFields(page, 'Statics with references')
+  await page.getByRole('button', { name: 'Prompt Design Factors' }).click()
+  await page.getByRole('checkbox', { name: 'Reference Content' }).check()
+  await page.getByLabel('Reference Content PDFs').setInputFiles([
+    {
+      name: 'one.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.7\none'),
+    },
+    {
+      name: 'two.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.7\ntwo'),
+    },
+  ])
+  await page.getByRole('button', { name: 'Review' }).click()
+  await expect(page.getByText('one.pdf, two.pdf')).toBeVisible()
+  await page.getByRole('button', { name: 'Run Experiment' }).click()
+
+  await expect(page).toHaveURL(/\/runs\/101\/progress$/)
+  expect(api.latestReferencePdfFilenames()).toEqual(['one.pdf', 'two.pdf'])
 })

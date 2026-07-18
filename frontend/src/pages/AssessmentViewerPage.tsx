@@ -10,6 +10,7 @@ import { useSSE } from '../hooks/useSSE'
 import { referencedEquationLabels } from '../math/equationReferences'
 import { useRunStore } from '../store/runStore'
 import type { CognitiveDemand } from '../types'
+import { referencePdfValidationMessages } from '../validation/experimentValidation'
 
 const cognitiveDemandLabels: Record<CognitiveDemand, string> = {
   remember_understand: 'Remember/Understand',
@@ -33,6 +34,7 @@ export function AssessmentViewerPage() {
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [retryingEvaluation, setRetryingEvaluation] = useState(false)
+  const [retryPdfs, setRetryPdfs] = useState<File[]>([])
 
   useEffect(() => {
     if (id) experimentsApi.get(id).then(mergeExperiment)
@@ -79,15 +81,26 @@ export function AssessmentViewerPage() {
 
   const retry = async () => {
     if (!selectedId) return
+    const pdfBacked = Boolean(selected?.reference_pdf_filenames?.length)
+    if (pdfBacked && referencePdfValidationMessages(retryPdfs).length > 0) return
     setRetrying(true)
     try {
-      const retried = await runsApi.retry(selectedId)
+      const retried = await runsApi.retry(
+        selectedId,
+        pdfBacked ? retryPdfs : undefined,
+      )
       addRetriedRun({ ...retried, experiment_id: retried.experiment_id ?? id })
       setRetryDialogOpen(false)
+      setRetryPdfs([])
       navigate(`/runs/${retried.id}/progress`)
     } finally {
       setRetrying(false)
     }
+  }
+
+  const closeRetryDialog = () => {
+    setRetryDialogOpen(false)
+    setRetryPdfs([])
   }
 
   const retryEvaluation = async () => {
@@ -165,7 +178,7 @@ export function AssessmentViewerPage() {
                 >
                   {selected?.artifact_available ? 'Export Word document' : 'Preparing document'}
                 </button>
-                <button className="retry-run-button" onClick={() => setRetryDialogOpen(true)}>Retry run</button>
+                <button className="retry-run-button" onClick={() => { setRetryPdfs([]); setRetryDialogOpen(true) }}>Retry run</button>
               </div>
             )}
           </div>
@@ -212,9 +225,27 @@ export function AssessmentViewerPage() {
         <div className="incomplete-modal retry-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="retry-dialog-title">
           <h2 id="retry-dialog-title">Retry this run?</h2>
           <p>This creates a new run while preserving the current run and its results.</p>
+          {Boolean(selected?.reference_pdf_filenames?.length) && <div className="retry-pdf-input">
+            <p><strong>Previously attached:</strong> {selected?.reference_pdf_filenames?.join(', ')}</p>
+            <label htmlFor="retry-reference-pdfs">Fresh Reference PDFs</label>
+            <input
+              id="retry-reference-pdfs"
+              type="file"
+              accept="application/pdf,.pdf"
+              multiple
+              aria-invalid={referencePdfValidationMessages(retryPdfs).length > 0 ? 'true' : undefined}
+              onChange={(event) => setRetryPdfs(Array.from(event.currentTarget.files ?? []))}
+            />
+            <small>Maximum 3 PDFs; 20 MB per PDF.</small>
+            <small>Please do not upload PDFs longer than 100 pages.</small>
+            {retryPdfs.length > 0 && <ol aria-label="Fresh reference PDF selection">
+              {retryPdfs.map((pdf, index) => <li key={`${pdf.name}-${pdf.size}-${index}`}>{pdf.name}</li>)}
+            </ol>}
+            {retryPdfs.length > 0 && referencePdfValidationMessages(retryPdfs)[0] && <span className="error">{referencePdfValidationMessages(retryPdfs)[0]}</span>}
+          </div>}
           <div className="retry-dialog-actions">
-            <button disabled={retrying} onClick={() => setRetryDialogOpen(false)}>Cancel</button>
-            <button className="primary" disabled={retrying} onClick={retry}>{retrying ? 'Starting retry…' : 'Confirm retry'}</button>
+            <button disabled={retrying} onClick={closeRetryDialog}>Cancel</button>
+            <button className="primary" disabled={retrying || (Boolean(selected?.reference_pdf_filenames?.length) && referencePdfValidationMessages(retryPdfs).length > 0)} onClick={retry}>{retrying ? 'Starting retry…' : 'Confirm retry'}</button>
           </div>
         </div>
       </div>}

@@ -65,6 +65,25 @@ export const REFERENCE_PDF_INPUT_ID = 'factor-referenceContent-pdfs'
 export const MAX_REFERENCE_PDF_BYTES = 20 * 1024 * 1024
 export const MAX_REFERENCE_PDFS = 3
 
+export function referencePdfValidationMessages(files: File[]): string[] {
+  const messages: string[] = []
+  if (files.length === 0) {
+    messages.push('Upload at least one PDF for Reference Content.')
+  } else if (files.length > MAX_REFERENCE_PDFS) {
+    messages.push('Upload no more than 3 PDFs.')
+  }
+  for (const pdf of files) {
+    if (!pdf.name.toLowerCase().endsWith('.pdf')) {
+      messages.push(`${pdf.name} must use the .pdf extension.`)
+    } else if (pdf.type !== 'application/pdf') {
+      messages.push(`${pdf.name} must be a PDF file.`)
+    } else if (pdf.size > MAX_REFERENCE_PDF_BYTES) {
+      messages.push(`${pdf.name} exceeds the 20 MB per-file limit.`)
+    }
+  }
+  return messages
+}
+
 export function validateExperimentForm(values: ExperimentFormValues): ValidationError[] {
   const errors: ValidationError[] = []
 
@@ -122,38 +141,13 @@ export function validateExperimentForm(values: ExperimentFormValues): Validation
   }
 
   if (values.enabled.referenceContent) {
-    if (values.referencePdfs.length === 0) {
+    for (const message of referencePdfValidationMessages(values.referencePdfs)) {
       errors.push({
         section: 'Prompt Design Factors',
         field: REFERENCE_PDF_INPUT_ID,
         label: 'Reference Content: upload PDF files',
-        message: 'Upload at least one PDF for Reference Content.',
+        message,
       })
-    } else if (values.referencePdfs.length > MAX_REFERENCE_PDFS) {
-      errors.push({
-        section: 'Prompt Design Factors',
-        field: REFERENCE_PDF_INPUT_ID,
-        label: 'Reference Content: upload PDF files',
-        message: 'Upload no more than 3 PDFs.',
-      })
-    }
-    for (const pdf of values.referencePdfs) {
-      let message: string | null = null
-      if (!pdf.name.toLowerCase().endsWith('.pdf')) {
-        message = `${pdf.name} must use the .pdf extension.`
-      } else if (pdf.type !== 'application/pdf') {
-        message = `${pdf.name} must be a PDF file.`
-      } else if (pdf.size > MAX_REFERENCE_PDF_BYTES) {
-        message = `${pdf.name} exceeds the 20 MB per-file limit.`
-      }
-      if (message) {
-        errors.push({
-          section: 'Prompt Design Factors',
-          field: REFERENCE_PDF_INPUT_ID,
-          label: 'Reference Content: upload PDF files',
-          message,
-        })
-      }
     }
   }
 

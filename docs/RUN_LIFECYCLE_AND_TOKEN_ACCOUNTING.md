@@ -28,7 +28,7 @@ Evaluation calls use the `evaluation` usage stage. The Progress and Viewer pages
 
 ## Run lifecycle and isolation
 
-The initial valid experiment submission creates an experiment, condition, and pending run transactionally, then enqueues that run. Retrying creates a new immutable run number and never overwrites the original run's evidence.
+The initial valid experiment submission creates an experiment, condition, and pending run transactionally, then enqueues that run. Retrying creates a new immutable run number and never overwrites the original run's evidence. A PDF-backed retry requires a fresh set of one to three reference PDFs and records the fresh ordered filenames on the new run.
 
 The run ID isolates all mutable workflow state:
 
@@ -76,10 +76,12 @@ GET  /assessment-questions/{question_id}/evaluation-comparison
 
 Experiment creation requires an `Idempotency-Key`. Repeating a successful request with the same key returns the original experiment graph and does not enqueue a second task.
 
-Course name, topic, and learning objectives must contain non-whitespace text. Question count must be an integer from 1 through 50, and estimated student completion time must be an integer from 1 through 480 minutes. Content is required only for prompt factors that are enabled; enabled Reference Content is satisfied by nonblank text in its field.
+Course name, topic, and learning objectives must contain non-whitespace text. Question count must be an integer from 1 through 50, and estimated student completion time must be an integer from 1 through 480 minutes. Text content is required for enabled Concept Bridge, Few-shot Examples, and Reasoning Guidance factors. Enabled Reference Content instead requires one to three PDF files, with a 20 MB limit applied independently to each file. The UI advises users not to upload PDFs longer than 100 pages; page count is not enforced.
 
 The frontend checks the same contract before making the API request and reports all missing fields in visual order. The backend remains authoritative and validates transactionally. An invalid submission creates no experiment, condition, run, or Celery task.
 
-## Scope
+Experiment creation uses multipart form data with JSON in `payload` and ordered files in repeated `reference_pdfs` fields. The application uploads validated PDFs temporarily to Gemini Files and passes provider attachment metadata through Celery without storing it in PostgreSQL. Only ordered original filenames are persisted with the run. PDF bytes, extracted text, base64 data, provider file names, and provider URIs are not stored in the application database. Attachments are supplied only to final assessment generation and schema repair, not prompt structuring or evaluation. Automatic task retries reuse the temporary files; terminal success or failure performs best-effort deletion, with Gemini's automatic file expiration as a fallback.
 
-Attachment upload, new PDF or DOCX source behavior, Gemini Files integration, object storage, and other Feature 4 behavior are not part of this change. Existing source-document functionality is unchanged.
+## Attachment and source-document boundary
+
+Reference Content prompt PDFs are temporary generation attachments. They do not use or change the persistent source-document subsystem, and no object storage is introduced by this workflow. Existing source-document behavior remains unchanged.

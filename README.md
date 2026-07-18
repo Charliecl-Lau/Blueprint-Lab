@@ -122,13 +122,15 @@ Leaving a progress page closes only that browser's live progress connection; it 
 
 The grading page places the collapsed, read-only LLM evaluation before the expanded human rubric form so automated feedback is available without being prominent. Human drafts save on completed-field blur and periodically while dirty. Finalization requires all five scores, locks the review, and enables a neutral human/LLM comparison. `LOCAL_REVIEWER_ID` identifies the reviewer in the current single-user deployment; changing it creates a separate reviewer record instead of overwriting an existing review.
 
-The form validates all required assessment fields and content for each enabled prompt factor before sending a request. Incomplete submissions show a grouped dialog and inline accessible errors, and create no experiment, run, or Celery task. Repeated valid submissions use an idempotency key so a retried request does not enqueue duplicate work.
+The form validates all required assessment fields and content for each enabled prompt factor before sending a request. Reference Content accepts one to three PDF files, each no larger than 20 MB, and advises keeping each PDF to 100 pages or fewer. Incomplete submissions show a grouped dialog and inline accessible errors, and create no experiment, run, or Celery task. Repeated valid submissions use an idempotency key so a retried request does not enqueue duplicate work.
+
+Reference PDFs are submitted with the experiment as multipart form data: `payload` contains the experiment JSON and each ordered file uses the repeated `reference_pdfs` field. The PDFs are uploaded temporarily to Gemini and attached only to assessment generation and schema repair. PostgreSQL stores only the ordered original filenames linked to the run—never PDF bytes, extracted PDF text, base64 data, Gemini file names, or Gemini URIs. Temporary Gemini files are retained across automatic Celery retries and deleted after a terminal outcome. Retrying a PDF-backed run requires a fresh one-to-three-file upload; non-PDF retries remain one-click.
 
 See [Run Lifecycle and Token Accounting](docs/RUN_LIFECYCLE_AND_TOKEN_ACCOUNTING.md) for the accounting definitions, retry behavior, legacy display, and isolation contract. `LLM_EVALUATION_MODEL` optionally separates evaluation from generation; when blank, evaluation uses `LLM_MODEL`.
 
 ## Sources and canonical run APIs
 
-Source uploads accept UTF-8 text, Markdown, JSON, DOCX, and unencrypted PDF files up to 20 MiB. Exact bytes are retained independently from extracted prompt text.
+The source-document APIs below are a separate persistent research-evidence subsystem. Source uploads accept UTF-8 text, Markdown, JSON, DOCX, and unencrypted PDF files up to 20 MiB, and retain exact bytes independently from extracted prompt text. Reference Content prompt PDFs do not use these APIs and are not persisted there.
 
 ```text
 POST /source-documents
@@ -150,6 +152,8 @@ POST /evaluations/{evaluation_id}/reopen
 POST /evaluations/{evaluation_id}/llm-access
 GET  /assessment-questions/{question_id}/evaluation-comparison
 ```
+
+`POST /experiments` uses multipart fields `payload` and repeated `reference_pdfs`. `POST /runs/{run_id}/retry` accepts repeated `reference_pdfs` only when the original run is PDF-backed; omitting them for such a run returns `409` with code `reference_pdfs_required`.
 
 `GET /runs/{run_id}` returns both stages' hashes, versions, request IDs, model metadata, finish reasons, and durations, while excluding raw instructions, source context, and provider output by default. In the current single-user research deployment, pass `include_raw_response=true` to retrieve the exact Structure System Prompt, first-call input, raw Actual Prompt, Generation context, and assessment response.
 
