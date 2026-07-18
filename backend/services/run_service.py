@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import settings
 from backend.models.evaluation import Evaluation
-from backend.models.experiment import Condition
+from backend.models.experiment import Condition, utc_now
 from backend.models.run import Assessment, Run, RunReferencePdf
 from backend.models.source_document import RunSourceDocument, SourceDocument
 from backend.services.assessment_rubric import RUBRIC_VERSION
@@ -54,6 +54,24 @@ def _create_run(
                 condition = db.execute(statement).scalar_one_or_none()
                 if condition is None:
                     raise HTTPException(status_code=404, detail="Condition not found")
+                legacy_reference_content = condition.factor_inputs.get(
+                    "reference_content"
+                )
+                if (
+                    condition.reference_content_enabled
+                    and not legacy_reference_content
+                    and not reference_pdf_filenames
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "reference_pdfs_required",
+                            "message": (
+                                "Use the PDF-aware experiment or retry endpoint and "
+                                "upload fresh reference PDFs."
+                            ),
+                        },
+                    )
                 number = (db.scalar(select(func.max(Run.run_number)).where(Run.condition_id == condition_id)) or 0) + 1
                 values = settings.model_dump(exclude_none=True)
                 run = Run(
@@ -94,6 +112,15 @@ def _create_run(
             db.rollback()
             raise
     raise RuntimeError("unreachable")
+
+
+def mark_generation_dispatch_failed(db: Session, run: Run) -> None:
+    run.status = "error"
+    run.progress_message = "Assessment generation could not be queued"
+    run.error_type = "generation_dispatch_error"
+    run.error_message = "Assessment generation could not be queued. Retry the run."
+    run.completed_at = utc_now()
+    db.commit()
 
 
 def retry_run(

@@ -257,6 +257,20 @@ def test_canonical_create_detail_retry_raw_and_export(client, test_db):
     retry_delay.assert_called_once_with(retried.json()["id"])
 
 
+def test_direct_run_creation_rejects_pdf_enabled_condition(client, test_db):
+    _, condition = _experiment_and_condition(test_db)
+    condition.reference_content_enabled = True
+    test_db.commit()
+
+    with patch("backend.api.runs.run_generation_pipeline.delay") as delay:
+        response = client.post(f"/conditions/{condition.id}/runs", json={})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "reference_pdfs_required"
+    assert test_db.query(Run).filter_by(condition_id=condition.id).count() == 0
+    delay.assert_not_called()
+
+
 def test_pdf_backed_retry_without_fresh_files_returns_stable_409(client, test_db):
     run = _pdf_backed_run(test_db)
 
@@ -325,6 +339,43 @@ def test_pdf_retry_partial_upload_failure_cleans_provider_state(client, test_db)
     assert response.status_code == 502
     llm.delete_file.assert_has_calls([call("files/one")])
     assert test_db.query(Run).filter_by(condition_id=run.condition_id).count() == 1
+
+
+def test_pdf_retry_dispatch_failure_terminalizes_new_run_and_cleans_files(
+    client, test_db
+):
+    original = _pdf_backed_run(test_db)
+    uploaded = _attachment("dispatch")
+    with (
+        patch("backend.api.runs.LLMClient") as llm_client,
+        patch(
+            "backend.api.runs.run_generation_pipeline.delay",
+            side_effect=RuntimeError("broker host internal-secret"),
+        ),
+    ):
+        llm_client.return_value.upload_pdf.return_value = uploaded
+        response = client.post(
+            f"/runs/{original.id}/retry",
+            files=[
+                (
+                    "reference_pdfs",
+                    ("fresh.pdf", b"%PDF-1.7\nfresh", "application/pdf"),
+                )
+            ],
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "generation_dispatch_failed"
+    runs = test_db.query(Run).filter_by(condition_id=original.condition_id).all()
+    assert len(runs) == 2
+    retried = next(run for run in runs if run.id != original.id)
+    test_db.refresh(retried)
+    assert retried.status == "error"
+    assert retried.error_type == "generation_dispatch_error"
+    assert retried.completed_at is not None
+    assert "internal-secret" not in (retried.error_message or "")
+    assert original.status == "error"
+    llm_client.return_value.delete_file.assert_called_once_with("files/dispatch")
 
 
 def test_run_detail_reports_reference_pdf_filenames(client, test_db):

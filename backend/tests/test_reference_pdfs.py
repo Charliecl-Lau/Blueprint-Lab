@@ -1,4 +1,6 @@
+import logging
 from io import BytesIO
+from unittest.mock import MagicMock
 
 import pytest
 from starlette.datastructures import Headers, UploadFile
@@ -7,6 +9,7 @@ from backend.services.reference_pdfs import (
     MAX_REFERENCE_PDF_BYTES,
     ProviderFileAttachment,
     ReferencePdfValidationError,
+    delete_provider_attachments,
     read_reference_pdfs,
 )
 
@@ -108,3 +111,38 @@ def test_provider_attachment_round_trips_through_task_metadata():
     )
 
     assert ProviderFileAttachment.from_dict(attachment.to_dict()) == attachment
+
+
+def test_cleanup_logs_deletion_failures_without_provider_details(caplog):
+    llm = MagicMock()
+    llm.delete_file.side_effect = RuntimeError("provider URI secret-value")
+    attachment = ProviderFileAttachment(
+        name="files/private-provider-id",
+        uri="https://provider/private-uri",
+        mime_type="application/pdf",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        delete_provider_attachments(llm, [attachment])
+
+    assert "Reference PDF provider cleanup failed" in caplog.text
+    assert "secret-value" not in caplog.text
+    assert "private-provider-id" not in caplog.text
+
+
+def test_cleanup_treats_provider_not_found_as_success(caplog):
+    llm = MagicMock()
+    error = RuntimeError("provider detail")
+    error.status_code = 404
+    llm.delete_file.side_effect = error
+
+    with caplog.at_level(logging.WARNING):
+        delete_provider_attachments(llm, [
+            ProviderFileAttachment(
+                name="files/already-deleted",
+                uri="https://provider/already-deleted",
+                mime_type="application/pdf",
+            )
+        ])
+
+    assert "Reference PDF provider cleanup failed" not in caplog.text

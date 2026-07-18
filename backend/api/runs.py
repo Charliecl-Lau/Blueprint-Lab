@@ -18,7 +18,11 @@ from backend.schemas.run_schema import (
     RunSummary,
     token_usage_detail,
 )
-from backend.services.run_service import create_run, retry_run
+from backend.services.run_service import (
+    create_run,
+    mark_generation_dispatch_failed,
+    retry_run,
+)
 from backend.services.llm_client import LLMClient
 from backend.services.reference_pdfs import (
     ProviderFileAttachment,
@@ -240,7 +244,17 @@ async def _stream_run_progress(run_id: int, session_factory, redis_factory):
 @router.post("/conditions/{condition_id}/runs", response_model=RunSummary)
 def post_run(condition_id: int, payload: RunCreate, db: Session = Depends(get_db)):
     run = create_run(db, condition_id, payload.source_bindings, payload.model_settings)
-    run_generation_pipeline.delay(run.id)
+    try:
+        run_generation_pipeline.delay(run.id)
+    except Exception as exc:
+        mark_generation_dispatch_failed(db, run)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "generation_dispatch_failed",
+                "message": "Assessment generation could not be queued. Retry the run.",
+            },
+        ) from exc
     return run
 
 
@@ -305,7 +319,17 @@ async def post_retry(
             run_id,
             [upload.filename or "" for upload in uploads] if uploads else None,
         )
-        run_generation_pipeline.delay(run.id)
+        try:
+            run_generation_pipeline.delay(run.id)
+        except Exception as exc:
+            mark_generation_dispatch_failed(db, run)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "generation_dispatch_failed",
+                    "message": "Assessment generation could not be queued. Retry the run.",
+                },
+            ) from exc
         return run
     if not uploads:
         retry_run(db, run_id)
@@ -338,13 +362,24 @@ async def post_retry(
             run_id,
             [pdf.filename for pdf in validated_pdfs],
         )
+    except Exception:
+        delete_provider_attachments(llm, attachments)
+        raise
+    try:
         run_generation_pipeline.delay(
             run.id,
             [attachment.to_dict() for attachment in attachments],
         )
-    except Exception:
+    except Exception as exc:
         delete_provider_attachments(llm, attachments)
-        raise
+        mark_generation_dispatch_failed(db, run)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "generation_dispatch_failed",
+                "message": "Assessment generation could not be queued. Retry the run.",
+            },
+        ) from exc
     return run
 
 

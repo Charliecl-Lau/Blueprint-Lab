@@ -1,3 +1,4 @@
+import logging
 import json
 import time
 import uuid
@@ -38,7 +39,10 @@ from backend.services.generation_context import build_generation_context
 from backend.services.generator import generate_questions
 from backend.services.document_artifact import save_assessment_artifact
 from backend.services.llm_client import LLMClient, TruncatedResponseError
-from backend.services.reference_pdfs import ProviderFileAttachment
+from backend.services.reference_pdfs import (
+    ProviderFileAttachment,
+    delete_provider_attachments,
+)
 from backend.services.reproducibility import (
     build_actual_prompt_hash,
     build_generation_envelope_hash,
@@ -50,6 +54,7 @@ from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
 
 
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+logger = logging.getLogger(__name__)
 _ASSESSMENT_SCHEMA_VERSION = "1"
 _MAX_ERROR_MESSAGE_LENGTH = 1000
 
@@ -176,13 +181,13 @@ def _cleanup_provider_files(
     if llm is None:
         try:
             llm = LLMClient()
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Reference PDF provider cleanup client initialization failed",
+                extra={"error_type": type(exc).__name__},
+            )
             return
-    for attachment in attachments:
-        try:
-            llm.delete_file(attachment.name)
-        except Exception:
-            continue
+    delete_provider_attachments(llm, list(reversed(attachments)))
 
 
 def _is_reference_pdf_unavailable(exc: Exception) -> bool:

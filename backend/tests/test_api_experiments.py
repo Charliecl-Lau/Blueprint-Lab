@@ -1,8 +1,13 @@
 import json
 from unittest.mock import call, patch
 
+import pytest
+
 from backend.models import Experiment, Run, SourceDocument
-from backend.services.reference_pdfs import ProviderFileAttachment
+from backend.services.reference_pdfs import (
+    MAX_REFERENCE_PDF_BYTES,
+    ProviderFileAttachment,
+)
 
 
 def valid_payload():
@@ -176,6 +181,9 @@ def test_reference_content_requires_pdf_files(client):
 
     assert response.status_code == 422
     assert response.json()["detail"]["errors"][0]["field"] == "reference_pdfs"
+    assert response.json()["detail"]["errors"][0]["code"] == (
+        "reference_pdfs_required"
+    )
     llm_client.assert_not_called()
 
 
@@ -186,6 +194,9 @@ def test_rejects_pdf_files_when_reference_content_is_disabled(client):
         response = post_experiment(client, "disabled-pdfs", payload)
 
     assert response.status_code == 422
+    assert response.json()["detail"]["errors"][0]["code"] == (
+        "reference_pdfs_not_allowed"
+    )
     llm_client.assert_not_called()
 
 
@@ -204,7 +215,70 @@ def test_rejects_too_many_or_invalid_pdf_files_before_upload(client):
 
     assert too_many.status_code == 422
     assert invalid.status_code == 422
+    assert too_many.json()["detail"]["errors"][0]["code"] == (
+        "too_many_reference_pdfs"
+    )
+    assert invalid.json()["detail"]["errors"][0]["code"] == (
+        "invalid_reference_pdf_signature"
+    )
     llm_client.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("pdf", "expected_code"),
+    [
+        (pdf_file(name="reference.txt"), "invalid_reference_pdf_extension"),
+        (
+            ("reference.pdf", b"%PDF-1.7\nvalid", "text/plain"),
+            "invalid_reference_pdf_mime_type",
+        ),
+        (pdf_file(content=b""), "empty_reference_pdf"),
+        (
+            pdf_file(
+                content=b"%PDF-1.7\n" + b"x" * MAX_REFERENCE_PDF_BYTES
+            ),
+            "reference_pdf_too_large",
+        ),
+    ],
+)
+def test_initial_upload_validation_preserves_stable_codes(
+    client, pdf, expected_code
+):
+    with patch("backend.api.experiments.LLMClient") as llm_client:
+        response = post_experiment(
+            client,
+            f"invalid-{expected_code}",
+            pdfs=[pdf],
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["errors"][0]["code"] == expected_code
+    llm_client.assert_not_called()
+
+
+def test_dispatch_failure_terminalizes_run_and_deletes_provider_files(
+    client, test_db
+):
+    uploaded = attachment("dispatch")
+    with (
+        patch("backend.api.experiments.LLMClient") as llm_client,
+        patch(
+            "backend.api.experiments.run_generation_pipeline.delay",
+            side_effect=RuntimeError("redis password=broker-secret"),
+        ),
+    ):
+        llm_client.return_value.upload_pdf.return_value = uploaded
+        response = post_experiment(client, "dispatch-failure")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "generation_dispatch_failed"
+    run = test_db.query(Run).one()
+    test_db.refresh(run)
+    assert run.status == "error"
+    assert run.error_type == "generation_dispatch_error"
+    assert run.completed_at is not None
+    assert "broker-secret" not in (run.error_message or "")
+    llm_client.return_value.delete_file.assert_called_once_with("files/dispatch")
 
 
 def test_partial_provider_upload_failure_deletes_uploaded_files(client, test_db):

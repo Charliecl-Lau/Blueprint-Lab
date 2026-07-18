@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from fastapi import UploadFile
 MAX_REFERENCE_PDFS = 3
 MAX_REFERENCE_PDF_BYTES = 20 * 1024 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 class ReferencePdfValidationError(ValueError):
@@ -44,10 +46,23 @@ class ProviderFileAttachment:
 
 
 def delete_provider_attachments(llm, attachments) -> None:
-    for attachment in reversed(attachments):
+    for index, attachment in enumerate(reversed(attachments)):
         try:
             llm.delete_file(attachment.name)
-        except Exception:
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            code = getattr(exc, "code", None)
+            if callable(code):
+                code = code()
+            if status == 404 or code in {404, "404", "NOT_FOUND", "not_found"}:
+                continue
+            logger.warning(
+                "Reference PDF provider cleanup failed",
+                extra={
+                    "attachment_index": index,
+                    "error_type": type(exc).__name__,
+                },
+            )
             continue
 
 

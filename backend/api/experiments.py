@@ -20,6 +20,7 @@ from backend.services.experiment_service import (
     validate_reference_pdf_filenames,
 )
 from backend.services.llm_client import LLMClient
+from backend.services.run_service import mark_generation_dispatch_failed
 from backend.services.reference_pdfs import (
     ProviderFileAttachment,
     ReferencePdfValidationError,
@@ -58,7 +59,7 @@ async def _stream_experiment_progress(experiment_id: int, total_generations: int
         await async_redis.aclose()
 
 
-def _reference_pdf_issue(message: str) -> ExperimentValidationError:
+def _reference_pdf_issue(message: str, code: str) -> ExperimentValidationError:
     return ExperimentValidationError(
         [
             ValidationIssue(
@@ -66,6 +67,7 @@ def _reference_pdf_issue(message: str) -> ExperimentValidationError:
                 field="reference_pdfs",
                 label="Reference Content PDFs",
                 message=message,
+                code=code,
             )
         ]
     )
@@ -105,7 +107,7 @@ async def create_experiment(
     try:
         validated_pdfs = await read_reference_pdfs(uploads) if uploads else []
     except ReferencePdfValidationError as exc:
-        raise _reference_pdf_issue(str(exc)) from exc
+        raise _reference_pdf_issue(str(exc), exc.code) from exc
 
     llm = LLMClient() if validated_pdfs else None
     attachments: list[ProviderFileAttachment] = []
@@ -128,17 +130,29 @@ async def create_experiment(
             idempotency_key,
             [pdf.filename for pdf in validated_pdfs],
         )
-        if not created:
-            if llm is not None:
-                delete_provider_attachments(llm, attachments)
-            return experiment
-        run_generation_pipeline.delay(
-            run.id, [attachment.to_dict() for attachment in attachments]
-        )
     except Exception:
         if llm is not None:
             delete_provider_attachments(llm, attachments)
         raise
+    if not created:
+        if llm is not None:
+            delete_provider_attachments(llm, attachments)
+        return experiment
+    try:
+        run_generation_pipeline.delay(
+            run.id, [attachment.to_dict() for attachment in attachments]
+        )
+    except Exception as exc:
+        if llm is not None:
+            delete_provider_attachments(llm, attachments)
+        mark_generation_dispatch_failed(db, run)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "generation_dispatch_failed",
+                "message": "Assessment generation could not be queued. Retry the run.",
+            },
+        ) from exc
     return experiment
 
 

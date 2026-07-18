@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 from sqlalchemy import select
@@ -17,9 +19,18 @@ class ValidationIssue:
     field: str
     label: str
     message: str
+    code: str | None = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        value = {
+            "section": self.section,
+            "field": self.field,
+            "label": self.label,
+            "message": self.message,
+        }
+        if self.code is not None:
+            value["code"] = self.code
+        return value
 
 
 class ExperimentValidationError(ValueError):
@@ -165,10 +176,13 @@ def validate_reference_pdf_filenames(
     enabled = payload.factors.reference_content
     if enabled and count == 0:
         message = "Upload at least one PDF when Reference Content is enabled."
+        code = "reference_pdfs_required"
     elif enabled and count > 3:
         message = "Upload no more than three PDFs for Reference Content."
+        code = "too_many_reference_pdfs"
     elif not enabled and count:
         message = "Enable Reference Content before uploading reference PDFs."
+        code = "reference_pdfs_not_allowed"
     else:
         return
     raise ExperimentValidationError(
@@ -178,6 +192,7 @@ def validate_reference_pdf_filenames(
                 field="reference_pdfs",
                 label="Reference Content PDFs",
                 message=message,
+                code=code,
             )
         ]
     )

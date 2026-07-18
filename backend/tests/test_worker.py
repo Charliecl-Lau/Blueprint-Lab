@@ -931,7 +931,7 @@ def test_automatic_retry_preserves_provider_files(generation_fixture, test_db):
 
 
 def test_exhausted_retry_deletes_every_provider_file(
-    generation_fixture, test_db
+    generation_fixture, test_db, caplog
 ):
     llm = MagicMock()
     llm.generate.side_effect = RuntimeError("temporary provider failure")
@@ -954,6 +954,8 @@ def test_exhausted_retry_deletes_every_provider_file(
         call("files/one"),
         call("files/two"),
     ]
+    assert "Reference PDF provider cleanup failed" in caplog.text
+    assert "delete failed" not in caplog.text
 
 
 def test_unavailable_reference_pdf_is_terminal_and_sanitized(
