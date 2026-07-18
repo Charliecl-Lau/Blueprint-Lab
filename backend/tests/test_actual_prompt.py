@@ -317,6 +317,8 @@ def test_assessment_repair_prompt_preserves_content_and_reports_validation_error
     assert "contain zero raw mathematical syntax" in system_prompt
     assert "equals signs (=), underscores (_), carets (^)" in system_prompt
     assert "Scan body, every option body, and model_answer" in system_prompt
+    assert "Variable-definition prose is not exempt" in system_prompt
+    assert '"[[EQ:cp_symbol]] is the isobaric heat capacity"' in system_prompt
     assert "body: mathematical expression must use an equation reference" in user_message
     assert '"body":"R = 8.314 J/(mol K)"' in user_message
 

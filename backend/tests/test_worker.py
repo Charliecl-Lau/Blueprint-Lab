@@ -671,7 +671,92 @@ def test_generation_pipeline_repairs_a_second_validation_failure(
     mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
 
 
-def test_generation_pipeline_stops_after_two_invalid_repairs(
+def test_generation_pipeline_repairs_a_third_validation_failure(
+    generation_fixture,
+    test_db,
+):
+    invalid_question = complete_question(
+        question_type="short_answer",
+        body="The gas constant is R = 8.314 J/(mol K).",
+        model_answer="Use the supplied value.",
+    )
+    invalid_question["equations"] = []
+    variable_definition_question = complete_question(
+        question_type="short_answer",
+        body="Use [[EQ:thermal_expansion]] to explain the result.",
+        model_answer=(
+            "Variables: C_p is heat capacity and alpha = "
+            "(1/V)(partial V/partial T)_P."
+        ),
+    )
+    variable_definition_question["equations"] = [{
+        "label": "thermal_expansion",
+        "expression": "alpha = (1/V)(partial V/partial T)_P",
+        "location": "question",
+    }]
+    valid_question = complete_question(
+        question_type="short_answer",
+        body="Use [[EQ:thermal_expansion]] to explain the result.",
+        model_answer=(
+            "Variables: [[EQ:cp_symbol]] is heat capacity and "
+            "[[EQ:alpha_definition]] is thermal expansivity."
+        ),
+    )
+    valid_question["equations"] = [
+        {
+            "label": "thermal_expansion",
+            "expression": "alpha = (1/V)(partial V/partial T)_P",
+            "location": "question",
+        },
+        {
+            "label": "cp_symbol",
+            "expression": "C_p",
+            "location": "solution",
+        },
+        {
+            "label": "alpha_definition",
+            "expression": "alpha = (1/V)(partial V/partial T)_P",
+            "location": "solution",
+        },
+    ]
+    invalid_raw = __import__("json").dumps({"questions": [invalid_question]})
+    variable_definition_raw = __import__("json").dumps(
+        {"questions": [variable_definition_question]}
+    )
+    valid_raw = __import__("json").dumps({"questions": [valid_question]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(invalid_raw, 20, 8, 28),
+        result(invalid_raw, 12, 6, 18),
+        result(variable_definition_raw, 13, 6, 19),
+        result(valid_raw, 11, 6, 17),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.status == "complete", generation_fixture.error_message
+    assert generation_fixture.assessment.raw_response_text == valid_raw
+    assert llm.generate.call_count == 4
+    third_repair_call = llm.generate.call_args_list[3]
+    assert variable_definition_raw in third_repair_call.kwargs["user_message"]
+    assert "model_answer: mathematical expression" in (
+        third_repair_call.kwargs["user_message"]
+    )
+    usage_stages = [
+        usage.stage
+        for usage in test_db.query(ModelCallUsage)
+        .filter_by(run_id=generation_fixture.id)
+        .order_by(ModelCallUsage.id)
+        .all()
+    ]
+    assert usage_stages == ["assessment", "repair", "repair", "repair"]
+    assert generation_fixture.model_call_count == 4
+    assert generation_fixture.total_tokens == 82
+    mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+
+
+def test_generation_pipeline_stops_after_three_invalid_repairs(
     generation_fixture,
     test_db,
 ):
@@ -687,6 +772,7 @@ def test_generation_pipeline_stops_after_two_invalid_repairs(
         result(rejected_raw, 20, 8, 28),
         result(rejected_raw, 12, 6, 18),
         result(rejected_raw, 13, 6, 19),
+        result(rejected_raw, 14, 6, 20),
     ]
 
     mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
@@ -698,7 +784,7 @@ def test_generation_pipeline_stops_after_two_invalid_repairs(
     )
     assert generation_fixture.assessment.parsed_json is None
     assert generation_fixture.document_artifact is None
-    assert llm.generate.call_count == 3
+    assert llm.generate.call_count == 4
     usage_stages = [
         usage.stage
         for usage in test_db.query(ModelCallUsage)
@@ -706,9 +792,9 @@ def test_generation_pipeline_stops_after_two_invalid_repairs(
         .order_by(ModelCallUsage.id)
         .all()
     ]
-    assert usage_stages == ["assessment", "repair", "repair"]
-    assert generation_fixture.model_call_count == 3
-    assert generation_fixture.total_tokens == 65
+    assert usage_stages == ["assessment", "repair", "repair", "repair"]
+    assert generation_fixture.model_call_count == 4
+    assert generation_fixture.total_tokens == 85
     mock_redis.evaluation_delay.assert_not_called()
 
 

@@ -57,7 +57,7 @@ redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 logger = logging.getLogger(__name__)
 _ASSESSMENT_SCHEMA_VERSION = "1"
 _MAX_ERROR_MESSAGE_LENGTH = 1000
-_MAX_ASSESSMENT_REPAIR_ATTEMPTS = 2
+_MAX_ASSESSMENT_REPAIR_ATTEMPTS = 3
 
 
 def _publish_progress(experiment_id: int, run_id: int, condition_id: int, stage: str) -> None:
