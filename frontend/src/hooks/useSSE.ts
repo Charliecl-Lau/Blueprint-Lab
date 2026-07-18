@@ -15,7 +15,9 @@ export function useSSE(
       if (snapshot.status === 'complete' || snapshot.status === 'error') es.close()
     }
 
-    es.onerror = () => es.close()
+    es.onerror = () => {
+      // EventSource reconnects automatically after transient disconnects.
+    }
 
     return () => es.close()
   }, [runId, onSnapshot])

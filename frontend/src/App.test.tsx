@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { axe, toHaveNoViolations } from 'jest-axe'
@@ -955,6 +955,66 @@ test('asks for confirmation before retrying a run', async () => {
     vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST'),
   ).toHaveLength(1))
   expect(window.location.pathname).toBe('/runs/9/progress')
+})
+
+test('refreshes an active run to completion without leaving the progress page', async () => {
+  window.history.replaceState({}, '', '/runs/8/progress')
+  let runRequests = 0
+  let poll: (() => void) | undefined
+  vi.spyOn(window, 'setInterval').mockImplementation((handler) => {
+    poll = handler as () => void
+    return 1 as unknown as ReturnType<typeof setInterval>
+  })
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/runs/8')) {
+      runRequests += 1
+      return {
+        ok: true,
+        json: async () => ({
+          id: 8,
+          experiment_id: 1,
+          condition_id: 3,
+          run_number: 1,
+          status: runRequests === 1 ? 'generating' : 'complete',
+          progress_message: runRequests === 1 ? 'Generating Assessment' : 'Complete',
+        }),
+      } as Response
+    }
+    if (url.endsWith('/api/experiments/1')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 1,
+          course: 'MSE302',
+          topic: 'Phase stability',
+          learning_objectives: 'Analyze phase stability.',
+          assessment_type: 'mixed',
+          difficulty: 'advanced',
+          number_of_questions: 1,
+          estimated_time_minutes: 30,
+          cognitive_demand: 'evaluate_create',
+          additional_instruction: null,
+          created_at: '2026-07-17T09:00:00Z',
+          conditions: [],
+          runs: [],
+        }),
+      } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  })
+
+  render(<App />)
+
+  expect(await screen.findByText('Generating questions')).toBeVisible()
+  expect(poll).toBeDefined()
+  await act(async () => { poll?.() })
+
+  expect(await screen.findByText('Complete')).toBeVisible()
+  expect(screen.getByRole('link', { name: 'View Assessment' })).toHaveAttribute(
+    'href',
+    '/experiments/1/viewer/8',
+  )
 })
 
 

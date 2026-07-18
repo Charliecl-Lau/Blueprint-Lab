@@ -47,6 +47,15 @@ export function ProgressPage() {
   }, [applyRunSnapshot])
   useSSE(id || null, receive)
 
+  const runStatus = run?.status
+  useEffect(() => {
+    if (!id || !runStatus || runStatus === 'complete' || runStatus === 'error') return
+    const timer = window.setInterval(() => {
+      void runsApi.get(id).then(mergeRun).catch(() => undefined)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [id, mergeRun, runStatus])
+
   const condition = experiment?.conditions.find((item) => item.id === run?.condition_id)
   return (
     <main className="experiment-page">
