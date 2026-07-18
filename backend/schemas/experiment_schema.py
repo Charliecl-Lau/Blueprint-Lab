@@ -62,6 +62,8 @@ class ExperimentCreate(BaseModel):
     @model_validator(mode="after")
     def require_enabled_factor_content(self):
         for name, enabled in self.factors.model_dump().items():
+            if name == "reference_content":
+                continue
             value = getattr(self.factor_inputs, name)
             if enabled and (value is None or not value.strip()):
                 raise ValueError(f"Enabled factor '{name}' requires content")

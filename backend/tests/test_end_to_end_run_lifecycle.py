@@ -40,7 +40,7 @@ def create_valid_experiment(client, key):
         response = client.post(
             "/experiments",
             headers={"Idempotency-Key": key},
-            json=valid_payload(),
+            data={"payload": json.dumps(valid_payload())},
         )
     assert response.status_code == 200
     body = response.json()
@@ -279,7 +279,7 @@ def test_incomplete_submission_creates_no_research_rows_or_task(client, test_db)
         response = client.post(
             "/experiments",
             headers={"Idempotency-Key": "bad"},
-            json={},
+            data={"payload": json.dumps({})},
         )
     assert response.status_code == 422
     assert test_db.query(Experiment).count() == 0

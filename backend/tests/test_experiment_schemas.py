@@ -96,12 +96,14 @@ def test_assessment_text_fields_are_trimmed(valid_payload):
     assert payload.topic == "Statics"
 
 
-def test_enabled_reference_content_requires_trimmed_text(valid_payload):
+def test_enabled_reference_content_uses_pdf_metadata_instead_of_text(valid_payload):
     valid_payload["factors"]["reference_content"] = True
-    valid_payload["factor_inputs"]["reference_content"] = "  "
+    valid_payload["factor_inputs"].pop("reference_content", None)
 
-    with pytest.raises(ValidationError):
-        ExperimentCreate(**valid_payload)
+    payload = ExperimentCreate(**valid_payload)
+
+    assert payload.factors.reference_content is True
+    assert payload.factor_inputs.reference_content is None
 
 
 def test_assessment_detail_defaults_and_normalization(valid_payload):

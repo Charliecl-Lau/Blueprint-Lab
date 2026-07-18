@@ -1,12 +1,12 @@
 import re
 from dataclasses import asdict, dataclass
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.models import Condition, Experiment, Run
+from backend.models import Condition, Experiment, Run, RunReferencePdf
 from backend.schemas.experiment_schema import ExperimentCreate
 from backend.services.actual_prompt import build_condition_label
 
@@ -153,15 +153,47 @@ def _existing_graph(db: Session, key: str):
     return experiment, experiment.runs[0], False
 
 
+def existing_experiment_graph(db: Session, idempotency_key: str):
+    return _existing_graph(db, _validated_idempotency_key(idempotency_key))
+
+
+def validate_reference_pdf_filenames(
+    payload: ExperimentCreate,
+    reference_pdf_filenames: Sequence[str],
+) -> None:
+    count = len(reference_pdf_filenames)
+    enabled = payload.factors.reference_content
+    if enabled and count == 0:
+        message = "Upload at least one PDF when Reference Content is enabled."
+    elif enabled and count > 3:
+        message = "Upload no more than three PDFs for Reference Content."
+    elif not enabled and count:
+        message = "Enable Reference Content before uploading reference PDFs."
+    else:
+        return
+    raise ExperimentValidationError(
+        [
+            ValidationIssue(
+                section="Prompt Design Factors",
+                field="reference_pdfs",
+                label="Reference Content PDFs",
+                message=message,
+            )
+        ]
+    )
+
+
 def create_experiment_with_run(
     db: Session,
     payload: ExperimentCreate,
     idempotency_key: str,
+    reference_pdf_filenames: Sequence[str] = (),
 ):
     key = _validated_idempotency_key(idempotency_key)
     existing = _existing_graph(db, key)
     if existing is not None:
         return existing
+    validate_reference_pdf_filenames(payload, reference_pdf_filenames)
 
     experiment = Experiment(
         idempotency_key=key,
@@ -175,6 +207,8 @@ def create_experiment_with_run(
         cognitive_demand=payload.cognitive_demand,
         additional_instruction=payload.additional_instruction,
     )
+    factor_inputs = payload.factor_inputs.model_dump(exclude_none=True)
+    factor_inputs.pop("reference_content", None)
     condition = Condition(
         experiment=experiment,
         condition_code="C100",
@@ -184,7 +218,7 @@ def create_experiment_with_run(
         reference_content_enabled=payload.factors.reference_content,
         reasoning_guidance_enabled=payload.factors.reasoning_guidance,
         factor_configuration=payload.factors.model_dump(),
-        factor_inputs=payload.factor_inputs.model_dump(exclude_none=True),
+        factor_inputs=factor_inputs,
         condition_label=build_condition_label(payload.factors),
     )
     run = Run(
@@ -198,6 +232,10 @@ def create_experiment_with_run(
         total_tokens=0,
         model_call_count=0,
     )
+    run.reference_pdfs = [
+        RunReferencePdf(ordinal=ordinal, original_filename=filename)
+        for ordinal, filename in enumerate(reference_pdf_filenames)
+    ]
     db.add(experiment)
     try:
         db.flush()
