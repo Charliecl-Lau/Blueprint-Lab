@@ -1,7 +1,8 @@
 import json
+from typing import Optional
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,6 +19,14 @@ from backend.schemas.run_schema import (
     token_usage_detail,
 )
 from backend.services.run_service import create_run, retry_run
+from backend.services.llm_client import LLMClient
+from backend.services.reference_pdfs import (
+    ProviderFileAttachment,
+    ReferencePdfValidationError,
+    delete_provider_attachments,
+    read_reference_pdfs,
+    upload_provider_attachments,
+)
 from backend.workers.assessment_worker import run_generation_pipeline
 
 router = APIRouter(tags=["runs"])
@@ -151,6 +160,7 @@ def run_detail(run: Run, include_raw_response: bool = False):
             else None
         ),
         "model_settings": run.model_settings,
+        "reference_pdf_filenames": run.reference_pdf_filenames,
         "prompt": prompt,
         "assessment": None if not run.assessment else {
             "id": run.assessment.id,
@@ -253,6 +263,7 @@ def get_recent_runs(
             "condition_label": run.condition.condition_label,
             "created_at": run.created_at,
             "completed_at": run.completed_at,
+            "reference_pdf_filenames": run.reference_pdf_filenames,
             "token_usage": token_usage_detail(run),
         }
         for run in runs
@@ -279,8 +290,62 @@ def get_run(run_id: int, include_raw_response: bool = False, db: Session = Depen
     return run_detail(run, include_raw_response)
 
 @router.post("/runs/{run_id}/retry", response_model=RunSummary)
-def post_retry(run_id: int, db: Session = Depends(get_db)):
-    run = retry_run(db, run_id); run_generation_pipeline.delay(run.id); return run
+async def post_retry(
+    run_id: int,
+    reference_pdfs: Optional[list[UploadFile]] = File(default=None),
+    db: Session = Depends(get_db),
+):
+    original = db.get(Run, run_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    uploads = list(reference_pdfs or [])
+    if not original.reference_pdfs:
+        run = retry_run(
+            db,
+            run_id,
+            [upload.filename or "" for upload in uploads] if uploads else None,
+        )
+        run_generation_pipeline.delay(run.id)
+        return run
+    if not uploads:
+        retry_run(db, run_id)
+        raise RuntimeError("unreachable")
+
+    try:
+        validated_pdfs = await read_reference_pdfs(uploads)
+    except ReferencePdfValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+
+    llm = LLMClient()
+    attachments: list[ProviderFileAttachment] = []
+    try:
+        attachments = upload_provider_attachments(llm, validated_pdfs)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "reference_pdf_upload_failed",
+                "message": "Reference PDFs could not be prepared for generation.",
+            },
+        ) from exc
+
+    try:
+        run = retry_run(
+            db,
+            run_id,
+            [pdf.filename for pdf in validated_pdfs],
+        )
+        run_generation_pipeline.delay(
+            run.id,
+            [attachment.to_dict() for attachment in attachments],
+        )
+    except Exception:
+        delete_provider_attachments(llm, attachments)
+        raise
+    return run
 
 
 @router.get("/runs/{run_id}/export-docx")

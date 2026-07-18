@@ -43,6 +43,28 @@ class ProviderFileAttachment:
         )
 
 
+def delete_provider_attachments(llm, attachments) -> None:
+    for attachment in reversed(attachments):
+        try:
+            llm.delete_file(attachment.name)
+        except Exception:
+            continue
+
+
+def upload_provider_attachments(
+    llm,
+    pdfs: list[ValidatedReferencePdf],
+) -> list[ProviderFileAttachment]:
+    attachments = []
+    try:
+        for pdf in pdfs:
+            attachments.append(llm.upload_pdf(pdf))
+    except Exception:
+        delete_provider_attachments(llm, attachments)
+        raise
+    return attachments
+
+
 async def read_reference_pdfs(
     files: list[UploadFile],
 ) -> list[ValidatedReferencePdf]:

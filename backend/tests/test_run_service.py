@@ -2,11 +2,18 @@ import hashlib
 from unittest.mock import patch
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from backend.models.experiment import Condition, Experiment
-from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
+from backend.models.run import (
+    Assessment,
+    DocumentArtifact,
+    Prompt,
+    Run,
+    RunReferencePdf,
+)
 from backend.models.source_document import SourceDocument
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 from backend.services.assessment_evaluation import persist_assessment_questions
@@ -53,6 +60,59 @@ def test_retry_copies_source_binding_snapshot(test_db):
     test_db.commit()
     retried = retry_run(test_db, original.id)
     assert [(b.source_document_id, b.role, b.ordinal, b.included_text_hash) for b in retried.source_documents] == [(source.id, "reference_content", 0, original_hash)]
+
+
+def test_pdf_backed_retry_requires_fresh_filename_metadata(test_db):
+    item = condition(test_db)
+    original = create_run(test_db, item.id, [])
+    original.reference_pdfs = [
+        RunReferencePdf(ordinal=0, original_filename="old.pdf")
+    ]
+    test_db.commit()
+
+    with pytest.raises(HTTPException) as raised:
+        retry_run(test_db, original.id)
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["code"] == "reference_pdfs_required"
+
+
+def test_pdf_backed_retry_uses_new_ordered_names_without_mutating_original(
+    test_db,
+):
+    item = condition(test_db)
+    original = create_run(
+        test_db,
+        item.id,
+        [],
+        ModelSettings(model="gemini-test", temperature=0.2),
+    )
+    original.reference_pdfs = [
+        RunReferencePdf(ordinal=0, original_filename="old.pdf")
+    ]
+    test_db.commit()
+
+    retried = retry_run(
+        test_db,
+        original.id,
+        ["new-one.pdf", "new-two.pdf"],
+    )
+
+    assert retried.reference_pdf_filenames == ["new-one.pdf", "new-two.pdf"]
+    assert retried.model_settings == original.model_settings
+    test_db.refresh(original)
+    assert original.reference_pdf_filenames == ["old.pdf"]
+
+
+def test_non_pdf_retry_rejects_supplied_filename_metadata(test_db):
+    item = condition(test_db)
+    original = create_run(test_db, item.id, [])
+
+    with pytest.raises(HTTPException) as raised:
+        retry_run(test_db, original.id, ["unexpected.pdf"])
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail["code"] == "reference_pdfs_not_allowed"
 
 
 def test_public_binding_always_hashes_persisted_extracted_text(test_db):

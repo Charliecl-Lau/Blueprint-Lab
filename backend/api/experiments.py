@@ -23,7 +23,9 @@ from backend.services.llm_client import LLMClient
 from backend.services.reference_pdfs import (
     ProviderFileAttachment,
     ReferencePdfValidationError,
+    delete_provider_attachments,
     read_reference_pdfs,
+    upload_provider_attachments,
 )
 from backend.workers.assessment_worker import run_generation_pipeline
 
@@ -69,16 +71,6 @@ def _reference_pdf_issue(message: str) -> ExperimentValidationError:
     )
 
 
-def _delete_provider_files(
-    llm: LLMClient, attachments: list[ProviderFileAttachment]
-) -> None:
-    for attachment in reversed(attachments):
-        try:
-            llm.delete_file(attachment.name)
-        except Exception:
-            continue
-
-
 @router.post("", response_model=ExperimentResponse)
 async def create_experiment(
     payload: str = Form(...),
@@ -119,10 +111,8 @@ async def create_experiment(
     attachments: list[ProviderFileAttachment] = []
     try:
         if llm is not None:
-            for pdf in validated_pdfs:
-                attachments.append(llm.upload_pdf(pdf))
+            attachments = upload_provider_attachments(llm, validated_pdfs)
     except Exception as exc:
-        _delete_provider_files(llm, attachments)
         raise HTTPException(
             status_code=502,
             detail={
@@ -140,14 +130,14 @@ async def create_experiment(
         )
         if not created:
             if llm is not None:
-                _delete_provider_files(llm, attachments)
+                delete_provider_attachments(llm, attachments)
             return experiment
         run_generation_pipeline.delay(
             run.id, [attachment.to_dict() for attachment in attachments]
         )
     except Exception:
         if llm is not None:
-            _delete_provider_files(llm, attachments)
+            delete_provider_attachments(llm, attachments)
         raise
     return experiment
 

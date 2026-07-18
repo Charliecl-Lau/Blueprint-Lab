@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from typing import Sequence
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from backend.config import settings
 from backend.models.evaluation import Evaluation
 from backend.models.experiment import Condition
-from backend.models.run import Assessment, Run
+from backend.models.run import Assessment, Run, RunReferencePdf
 from backend.models.source_document import RunSourceDocument, SourceDocument
 from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.schemas.run_schema import ModelSettings, SourceBinding
@@ -35,7 +36,13 @@ def create_run(db: Session, condition_id: int, source_bindings: list[SourceBindi
     return _create_run(db, condition_id, source_bindings, model_settings)
 
 
-def _create_run(db: Session, condition_id: int, source_bindings, model_settings: ModelSettings | None = None) -> Run:
+def _create_run(
+    db: Session,
+    condition_id: int,
+    source_bindings,
+    model_settings: ModelSettings | None = None,
+    reference_pdf_filenames: Sequence[str] = (),
+) -> Run:
     _validate(source_bindings)
     settings = model_settings or ModelSettings()
     for attempt in range(3):
@@ -62,6 +69,13 @@ def _create_run(db: Session, condition_id: int, source_bindings, model_settings:
                     **values,
                 )
                 db.add(run); db.flush()
+                run.reference_pdfs = [
+                    RunReferencePdf(
+                        ordinal=ordinal,
+                        original_filename=filename,
+                    )
+                    for ordinal, filename in enumerate(reference_pdf_filenames)
+                ]
                 for binding in source_bindings:
                     source = db.get(SourceDocument, binding.source_document_id)
                     if source is None:
@@ -82,12 +96,47 @@ def _create_run(db: Session, condition_id: int, source_bindings, model_settings:
     raise RuntimeError("unreachable")
 
 
-def retry_run(db: Session, run_id: int) -> Run:
+def retry_run(
+    db: Session,
+    run_id: int,
+    reference_pdf_filenames: Sequence[str] | None = None,
+) -> Run:
     original = db.get(Run, run_id)
     if original is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    pdf_backed = bool(original.reference_pdfs)
+    if pdf_backed and not reference_pdf_filenames:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "reference_pdfs_required",
+                "message": "Upload fresh reference PDFs to retry this run.",
+            },
+        )
+    if pdf_backed and len(reference_pdf_filenames) > 3:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "too_many_reference_pdfs",
+                "message": "Upload no more than three reference PDFs.",
+            },
+        )
+    if not pdf_backed and reference_pdf_filenames is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "reference_pdfs_not_allowed",
+                "message": "This run was not created with reference PDFs.",
+            },
+        )
     bindings = [_SnapshotBinding(source_document_id=item.source_document_id, role=item.role, ordinal=item.ordinal, included_text_hash=item.included_text_hash) for item in original.source_documents]
-    return _create_run(db, original.condition_id, bindings, ModelSettings(**original.model_settings))
+    return _create_run(
+        db,
+        original.condition_id,
+        bindings,
+        ModelSettings(**original.model_settings),
+        reference_pdf_filenames or (),
+    )
 
 
 def retry_llm_evaluation(db: Session, assessment_id: int) -> Run:

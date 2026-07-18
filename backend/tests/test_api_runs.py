@@ -1,15 +1,22 @@
 import hashlib
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
 from backend.models import ModelCallUsage
 from backend.models.experiment import Condition, Experiment
 from backend.models.experiment import utc_now
-from backend.models.run import Assessment, DocumentArtifact, Prompt, Run
+from backend.models.run import (
+    Assessment,
+    DocumentArtifact,
+    Prompt,
+    Run,
+    RunReferencePdf,
+)
 from backend.models.source_document import SourceDocument
+from backend.services.reference_pdfs import ProviderFileAttachment
 
 
 def _experiment_and_condition(test_db, *, topic="Statics"):
@@ -31,6 +38,32 @@ def _experiment_and_condition(test_db, *, topic="Statics"):
     test_db.add(experiment)
     test_db.flush()
     return experiment, condition
+
+
+def _pdf_backed_run(test_db):
+    experiment, condition = _experiment_and_condition(test_db)
+    condition.reference_content_enabled = True
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="error",
+        model_settings={},
+    )
+    run.reference_pdfs = [
+        RunReferencePdf(ordinal=0, original_filename="old.pdf")
+    ]
+    test_db.add(run)
+    test_db.commit()
+    return run
+
+
+def _attachment(number):
+    return ProviderFileAttachment(
+        name=f"files/{number}",
+        uri=f"https://files/{number}",
+        mime_type="application/pdf",
+    )
 
 
 @pytest.fixture
@@ -217,10 +250,89 @@ def test_canonical_create_detail_retry_raw_and_export(client, test_db):
     assert raw_detail["prompt"]["actual_prompt"] == "# Role\nAssessment generator"
     assert raw_detail["prompt"]["generation_context"] == "Generate the assessment now."
     assert client.get(f"/runs/{run_id}/export-docx").content == b"docx"
-    with patch("backend.api.runs.run_generation_pipeline.delay"):
+    with patch("backend.api.runs.run_generation_pipeline.delay") as retry_delay:
         retried = client.post(f"/runs/{run_id}/retry")
     assert retried.status_code == 200
     assert retried.json()["id"] != run_id
+    retry_delay.assert_called_once_with(retried.json()["id"])
+
+
+def test_pdf_backed_retry_without_fresh_files_returns_stable_409(client, test_db):
+    run = _pdf_backed_run(test_db)
+
+    response = client.post(f"/runs/{run.id}/retry")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "reference_pdfs_required"
+
+
+def test_pdf_backed_retry_uploads_fresh_files_and_enqueues_metadata(client, test_db):
+    run = _pdf_backed_run(test_db)
+    first = _attachment("one")
+    second = _attachment("two")
+    with (
+        patch("backend.api.runs.LLMClient") as llm_client,
+        patch("backend.api.runs.run_generation_pipeline.delay") as delay,
+    ):
+        llm_client.return_value.upload_pdf.side_effect = [first, second]
+        response = client.post(
+            f"/runs/{run.id}/retry",
+            files=[
+                (
+                    "reference_pdfs",
+                    ("new-one.pdf", b"%PDF-1.7\none", "application/pdf"),
+                ),
+                (
+                    "reference_pdfs",
+                    ("new-two.pdf", b"%PDF-1.7\ntwo", "application/pdf"),
+                ),
+            ],
+        )
+
+    assert response.status_code == 200
+    assert response.json()["reference_pdf_filenames"] == [
+        "new-one.pdf",
+        "new-two.pdf",
+    ]
+    delay.assert_called_once_with(
+        response.json()["id"],
+        [first.to_dict(), second.to_dict()],
+    )
+    test_db.refresh(run)
+    assert run.reference_pdf_filenames == ["old.pdf"]
+
+
+def test_pdf_retry_partial_upload_failure_cleans_provider_state(client, test_db):
+    run = _pdf_backed_run(test_db)
+    first = _attachment("one")
+    with patch("backend.api.runs.LLMClient") as llm_client:
+        llm = llm_client.return_value
+        llm.upload_pdf.side_effect = [first, RuntimeError("provider unavailable")]
+        response = client.post(
+            f"/runs/{run.id}/retry",
+            files=[
+                (
+                    "reference_pdfs",
+                    ("new-one.pdf", b"%PDF-1.7\none", "application/pdf"),
+                ),
+                (
+                    "reference_pdfs",
+                    ("new-two.pdf", b"%PDF-1.7\ntwo", "application/pdf"),
+                ),
+            ],
+        )
+
+    assert response.status_code == 502
+    llm.delete_file.assert_has_calls([call("files/one")])
+    assert test_db.query(Run).filter_by(condition_id=run.condition_id).count() == 1
+
+
+def test_run_detail_reports_reference_pdf_filenames(client, test_db):
+    run = _pdf_backed_run(test_db)
+
+    response = client.get(f"/runs/{run.id}")
+
+    assert response.json()["reference_pdf_filenames"] == ["old.pdf"]
 
 
 def test_create_rejects_caller_supplied_snapshot_hash(client, test_db):
