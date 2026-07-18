@@ -5,8 +5,8 @@ from typing import Optional, Sequence
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
-ACTUAL_PROMPT_GENERATOR_VERSION = "9"
-OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "2"
+ACTUAL_PROMPT_GENERATOR_VERSION = "10"
+OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "3"
 OPENAI_TEMPLATE_PROVENANCE = "local-template:docs/actual_prompt_template.md"
 _OPENAI_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[2] / "docs" / "actual_prompt_template.md"
@@ -21,7 +21,11 @@ EQUATION_GENERATION_INSTRUCTION = (
     "Use a unique ASCII identifier for label and replace the original mathematical "
     "expression at its exact position in body, option body, or model_answer with "
     "[[EQ:label]], where label exactly matches the equation entry. Never repeat the "
-    "plain expression beside its placeholder. "
+    "plain expression beside its placeholder. Use one reference for the complete "
+    "equality or derivation chain, including every operator and operand. Never join "
+    "multiple references with an operator. For example, never return "
+    "[[EQ:left]] = [[EQ:right]]; instead return [[EQ:complete_equation]] and store "
+    "the entire equality in that one equation entry. "
     "Write expression using Microsoft Word linear equation syntax with Unicode math "
     "characters and plain operators so the backend can insert it into an editable OMML "
     "equation. Use / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) "
@@ -50,6 +54,11 @@ ASSESSMENT_REPAIR_INSTRUCTION = (
     "body, and model_answer mechanically before returning the JSON; move every "
     "offending expression identified by the validation error into equations[] and "
     "replace it at the same location with a matching [[EQ:label]] reference. "
+    "Use one reference for the complete equality or derivation chain, including all "
+    "operators and operands. Never place an operator between equation references. "
+    "For example, replace \"[[EQ:left]] = [[EQ:right]]\" with "
+    "\"[[EQ:complete_equation]]\" and store the full equality in the expression of "
+    "that single equation entry. Apply the same rule to multi-step equality chains. "
     "Variable-definition prose is not exempt. For example, never return "
     "\"C_p is the isobaric heat capacity\"; return "
     "\"[[EQ:cp_symbol]] is the isobaric heat capacity\" and add a solution "

@@ -88,8 +88,8 @@ def test_openai_template_and_versions_require_location_specific_labels():
         in prompt
     )
     assert "two equation entries with distinct labels" in prompt
-    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "9"
-    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "2"
+    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "10"
+    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "3"
 
 
 def test_structure_input_contains_details_and_enabled_factor_values_only():
@@ -214,6 +214,8 @@ def test_openai_template_demonstrates_required_equation_references():
     assert '"location": "solution"' in prompt
     assert "contains no placeholder text" not in prompt
     assert "[[EQ:label]] references are required equation references" in prompt
+    assert "one reference for the complete equality or derivation chain" in prompt
+    assert "Never join multiple references with an operator" in prompt
 
 
 def test_openai_template_changes_only_substituted_values():
@@ -319,6 +321,12 @@ def test_assessment_repair_prompt_preserves_content_and_reports_validation_error
     assert "Scan body, every option body, and model_answer" in system_prompt
     assert "Variable-definition prose is not exempt" in system_prompt
     assert '"[[EQ:cp_symbol]] is the isobaric heat capacity"' in system_prompt
+    assert (
+        "one reference for the complete equality or derivation chain"
+        in system_prompt
+    )
+    assert "Never place an operator between equation references" in system_prompt
+    assert '"[[EQ:left]] = [[EQ:right]]"' in system_prompt
     assert "body: mathematical expression must use an equation reference" in user_message
     assert '"body":"R = 8.314 J/(mol K)"' in user_message
 

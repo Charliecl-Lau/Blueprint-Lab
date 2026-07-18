@@ -267,6 +267,51 @@ def test_flat_equation_validation_reports_all_offending_fields_and_text(
     assert "C_p = (partial H/partial T)_P" in message
 
 
+def test_flat_equation_references_reject_fragmented_equation_chains(
+    complete_payload,
+):
+    question = complete_payload["questions"][0]
+    question["model_answer"] = (
+        "Taking the derivative yields [[EQ:partial_v_t_ideal]] = "
+        "[[EQ:r_p]] = [[EQ:v_t]]. Substitution gives [[EQ:jt_calc]] = 0."
+    )
+    question["equations"] = [
+        {
+            "label": "partial_v_t_ideal",
+            "expression": "(partial V/partial T)_P",
+            "location": "solution",
+        },
+        {
+            "label": "r_p",
+            "expression": "R/P",
+            "location": "solution",
+        },
+        {
+            "label": "v_t",
+            "expression": "V/T",
+            "location": "solution",
+        },
+        {
+            "label": "jt_calc",
+            "expression": "mu_J-T",
+            "location": "solution",
+        },
+    ]
+
+    with pytest.raises(ValidationError) as caught:
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+    message = str(caught.value)
+    assert (
+        "model_answer: fragmented equation references must be combined into "
+        "one equation entry"
+    ) in message
+    assert (
+        "[[EQ:partial_v_t_ideal]] = [[EQ:r_p]] = [[EQ:v_t]]" in message
+    )
+    assert "[[EQ:jt_calc]] = 0" in message
+
+
 def test_flat_equation_references_reject_signed_superscript_text(
     complete_payload,
 ):

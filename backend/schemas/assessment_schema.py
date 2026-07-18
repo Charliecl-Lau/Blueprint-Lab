@@ -5,6 +5,11 @@ from pydantic import BaseModel, Field, model_validator
 
 
 _EQUATION_REFERENCE_PATTERN = re.compile(r"\[\[EQ:([A-Za-z0-9_-]+)\]\]")
+_EQUATION_REFERENCE_TEXT = r"\[\[EQ:[A-Za-z0-9_-]+\]\]"
+_FRAGMENTED_EQUATION_REFERENCE_PATTERN = re.compile(
+    rf"(?:{_EQUATION_REFERENCE_TEXT}\s*[=+*/^−]|[=+*/^−]\s*"
+    rf"{_EQUATION_REFERENCE_TEXT})"
+)
 _PLAIN_EQUATION_PATTERNS = (
     re.compile(r"\S\s*=\s*\S"),
     re.compile(r"(?<=[^\W_])[_^](?=[+\-−]?[^\W_])"),
@@ -28,6 +33,17 @@ def _plain_equation_excerpts(text: Optional[str]) -> List[str]:
         if not normalized:
             continue
         if any(pattern.search(normalized) for pattern in _PLAIN_EQUATION_PATTERNS):
+            excerpts.append(normalized)
+    return excerpts
+
+
+def _fragmented_equation_reference_excerpts(
+    text: Optional[str],
+) -> List[str]:
+    excerpts = []
+    for segment in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or ""):
+        normalized = " ".join(segment.split())
+        if _FRAGMENTED_EQUATION_REFERENCE_PATTERN.search(normalized):
             excerpts.append(normalized)
     return excerpts
 
@@ -264,6 +280,23 @@ class QuestionResponse(BaseModel):
         for label in labels:
             if label not in referenced_labels:
                 raise ValueError(f"equation is not referenced: {label}")
+
+        fragmented_reference_errors = []
+        for field_name, text in question_content + solution_content:
+            excerpts = _fragmented_equation_reference_excerpts(text)
+            if not excerpts:
+                continue
+            offending_text = "; ".join(
+                f'"{excerpt}"' for excerpt in excerpts
+            )
+            fragmented_reference_errors.append(
+                f"{field_name}: fragmented equation references must be "
+                "combined into one equation entry; operators cannot appear "
+                "between or beside equation references; offending text: "
+                f"{offending_text}"
+            )
+        if fragmented_reference_errors:
+            raise ValueError(" | ".join(fragmented_reference_errors))
 
         plain_equation_errors = []
         for field_name, text in question_content + solution_content:
