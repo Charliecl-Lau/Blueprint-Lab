@@ -103,10 +103,41 @@ class Run(Base):
     model_call_usages: Mapped[list["ModelCallUsage"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
+    reference_pdfs: Mapped[list["RunReferencePdf"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="RunReferencePdf.ordinal",
+    )
     model_name = synonym("model")
     model_version = synonym("version")
     generation_time_ms = synonym("duration_ms")
     prompt_record = synonym("prompt")
+
+    @property
+    def reference_pdf_filenames(self) -> list[str]:
+        return [item.original_filename for item in self.reference_pdfs]
+
+
+class RunReferencePdf(Base):
+    __tablename__ = "run_reference_pdfs"
+    __table_args__ = (
+        CheckConstraint(
+            "ordinal >= 0 AND ordinal <= 2",
+            name="ck_run_reference_pdfs_ordinal",
+        ),
+        UniqueConstraint(
+            "run_id",
+            "ordinal",
+            name="uq_run_reference_pdfs_run_ordinal",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    run: Mapped[Run] = relationship(back_populates="reference_pdfs")
 
 
 class Prompt(Base):

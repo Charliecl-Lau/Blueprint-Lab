@@ -7,13 +7,22 @@ from backend.models.evaluation import (
     EvaluationRevision,
 )
 from backend.models.model_call_usage import ModelCallUsage
-from backend.models.run import Assessment, DocumentArtifact, Generation, Prompt, PromptRecord, Run
+from backend.models.run import (
+    Assessment,
+    DocumentArtifact,
+    Generation,
+    Prompt,
+    PromptRecord,
+    Run,
+    RunReferencePdf,
+)
 from backend.models.source_document import RunSourceDocument, SourceDocument
 
 __all__ = [
     "Experiment",
     "Condition",
     "Run",
+    "RunReferencePdf",
     "Prompt",
     "Assessment",
     "AssessmentQuestion",

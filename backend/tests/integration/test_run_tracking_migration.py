@@ -1,5 +1,7 @@
+from pathlib import Path
+
 from alembic import command
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 
 from backend.tests.integration.test_research_migration import LEGACY_DDL, alembic_config
 
@@ -46,3 +48,36 @@ def test_run_tracking_migration_preserves_legacy_usage_as_null(postgres_url):
         "total_tokens": None,
         "model_call_count": None,
     }
+
+
+def test_reference_pdf_migration_stores_filename_metadata_only(postgres_url):
+    migration_path = (
+        Path(__file__).parents[2]
+        / "migrations"
+        / "versions"
+        / "20260717_03_reference_pdf_attachments.py"
+    )
+    assert migration_path.exists(), "reference PDF metadata migration must exist"
+
+    engine = create_engine(postgres_url)
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
+
+    command.upgrade(alembic_config(postgres_url), "20260717_03")
+
+    inspector = inspect(engine)
+    columns = {
+        item["name"] for item in inspector.get_columns("run_reference_pdfs")
+    }
+    unique_constraints = {
+        item["name"]
+        for item in inspector.get_unique_constraints("run_reference_pdfs")
+    }
+    check_constraints = {
+        item["name"]
+        for item in inspector.get_check_constraints("run_reference_pdfs")
+    }
+
+    assert columns == {"id", "run_id", "ordinal", "original_filename"}
+    assert unique_constraints == {"uq_run_reference_pdfs_run_ordinal"}
+    assert "ck_run_reference_pdfs_ordinal" in check_constraints

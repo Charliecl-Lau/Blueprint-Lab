@@ -95,6 +95,7 @@ class GenerationSummary(BaseModel):
     model_call_count: Optional[int] = None
     viewer_ready_at: Optional[datetime] = None
     progress_message: Optional[str] = None
+    reference_pdf_filenames: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True, "protected_namespaces": ()}
 

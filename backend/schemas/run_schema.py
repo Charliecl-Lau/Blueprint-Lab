@@ -43,6 +43,7 @@ class RunSummary(BaseModel):
         "error",
     ]
     model_settings: dict
+    reference_pdf_filenames: list[str] = Field(default_factory=list)
     model_config = {"from_attributes": True, "protected_namespaces": ()}
 
 
@@ -90,6 +91,7 @@ class RunDetail(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     error: Optional[dict] = None
     artifact_available: bool
+    reference_pdf_filenames: list[str] = Field(default_factory=list)
     model_config = {"protected_namespaces": ()}
 
 
@@ -104,6 +106,7 @@ class RecentRun(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime]
     token_usage: TokenTotals
+    reference_pdf_filenames: list[str] = Field(default_factory=list)
 
 
 def _reported_sum(items, attribute: str) -> Optional[int]:

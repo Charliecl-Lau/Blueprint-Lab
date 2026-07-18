@@ -3,6 +3,8 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from backend.models import Assessment, Condition, Experiment, Prompt, Run
+from backend.models import run as run_models
+from backend.schemas.experiment_schema import GenerationSummary
 from backend.schemas.run_schema import RunSummary
 
 
@@ -31,6 +33,47 @@ def test_run_summary_rejects_evaluation_as_a_generation_status():
             status="evaluating_quality",
             model_settings={},
         )
+
+
+def test_run_records_only_ordered_reference_pdf_filenames(test_db):
+    assert hasattr(run_models, "RunReferencePdf"), (
+        "RunReferencePdf must store filename metadata for each run"
+    )
+    run_reference_pdf = run_models.RunReferencePdf
+    experiment = Experiment(
+        course="ENGR 101",
+        topic="Statics",
+        learning_objectives="Apply equilibrium equations.",
+        assessment_type="mixed",
+        difficulty="introductory",
+        number_of_questions=2,
+    )
+    condition = Condition(
+        experiment=experiment,
+        prompt_structure="openai",
+        factor_inputs={},
+        condition_label="Reference PDFs",
+    )
+    run = Run(experiment=experiment, condition=condition, run_number=1)
+    run.reference_pdfs = [
+        run_reference_pdf(ordinal=1, original_filename="second.pdf"),
+        run_reference_pdf(ordinal=0, original_filename="first.pdf"),
+    ]
+    test_db.add(experiment)
+    test_db.commit()
+    test_db.refresh(run)
+
+    assert run.reference_pdf_filenames == ["first.pdf", "second.pdf"]
+    assert not hasattr(run.reference_pdfs[0], "content")
+    assert not hasattr(run.reference_pdfs[0], "provider_uri")
+    assert GenerationSummary.model_validate(run).reference_pdf_filenames == [
+        "first.pdf",
+        "second.pdf",
+    ]
+    assert RunSummary.model_validate(run).reference_pdf_filenames == [
+        "first.pdf",
+        "second.pdf",
+    ]
 
 
 def test_immutable_research_run_round_trip(test_db):
