@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.experiment import DocumentArtifact, Generation
 from backend.api.runs import run_detail
-from backend.services.run_service import retry_run
+from backend.services.run_service import mark_generation_dispatch_failed, retry_run
 from backend.workers.assessment_worker import run_generation_pipeline
 
 
@@ -29,7 +29,17 @@ def regenerate_generation(generation_id: int, response: Response, db: Session = 
         raise HTTPException(status_code=404, detail="Generation not found")
 
     run = retry_run(db, generation.id)
-    run_generation_pipeline.delay(run.id)
+    try:
+        run_generation_pipeline.delay(run.id)
+    except Exception as exc:
+        mark_generation_dispatch_failed(db, run)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "generation_dispatch_failed",
+                "message": "Assessment generation could not be queued. Retry the run.",
+            },
+        ) from exc
     response.headers["Deprecation"] = "true"
     response.headers["Link"] = f'</runs/{generation_id}/retry>; rel="successor-version"'
     return {

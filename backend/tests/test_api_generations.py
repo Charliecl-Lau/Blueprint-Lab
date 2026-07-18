@@ -88,6 +88,34 @@ def test_regenerate_creates_new_run_and_preserves_old_evidence(client, test_db):
     delay.assert_called_once_with(new_id)
 
 
+def test_regenerate_marks_new_run_failed_when_dispatch_fails(client, test_db):
+    generation = make_generation(test_db)
+
+    with patch(
+        "backend.api.generations.run_generation_pipeline.delay",
+        side_effect=RuntimeError("broker unavailable"),
+    ):
+        response = client.post(f"/generations/{generation.id}/regenerate")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "generation_dispatch_failed",
+        "message": "Assessment generation could not be queued. Retry the run.",
+    }
+    new_run = (
+        test_db.query(Generation)
+        .filter(Generation.id != generation.id)
+        .order_by(Generation.id.desc())
+        .first()
+    )
+    assert new_run is not None
+    test_db.refresh(new_run)
+    assert new_run.status == "error"
+    assert new_run.error_type == "generation_dispatch_error"
+    assert new_run.error_message == "Assessment generation could not be queued. Retry the run."
+    assert new_run.completed_at is not None
+
+
 def test_generation_routes_return_404_for_missing_records(client):
     assert client.get("/generations/999999").status_code == 404
     assert client.post("/generations/999999/regenerate").status_code == 404
