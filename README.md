@@ -178,3 +178,33 @@ To verify a fresh PostgreSQL database, point `DATABASE_URL` at an empty test dat
 ## License
 
 MIT
+# Assessment evidence and reproducibility
+
+Blueprint Lab stores raw provider output in
+`assessments.raw_response_text` and the validated, application-enriched
+assessment in `assessments.parsed_json`. Runtime code does not use
+`runs.generated_json` as storage.
+
+Every new run resolves and persists a versioned `execution_config` snapshot
+before dispatch. The snapshot distinguishes requested values from the effective
+provider, model, temperature, `top_p`, seed, maximum output tokens, and
+provider-specific settings. Provider request IDs and provider-reported model
+versions are observed results stored separately.
+
+Prompt records preserve the generated Actual Prompt plus the exact execution
+system instruction and exact user message supplied to the provider. The system
+instruction already includes equation-formatting requirements when it is
+saved. Assessment traceability IDs are populated by the application after the
+database assigns assessment and question IDs; the model is never asked to
+invent them.
+
+Learning objectives are ordered arrays of nonblank strings throughout the
+frontend, API, database, prompt, and assessment contracts. The obsolete
+`experiments.description`, `experiments.topic_area`, and
+`experiments.research_question` columns and the assessment metadata field
+`intended_assessment_setting` are removed by migration `20260727_02`.
+
+Historical raw responses remain unchanged and can therefore contain fields
+that are no longer part of the canonical contract. Exact stored text and
+settings make calls auditable, but provider-side service state and deleted
+remote reference attachments cannot be recreated solely from the database.

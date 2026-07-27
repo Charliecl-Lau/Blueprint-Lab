@@ -95,11 +95,25 @@ export interface PromptProvenance {
 export interface AssessmentOutput {
   id: number
   question_ids: number[]
-  parsed_json: { questions: Question[] } | null
+  parsed_json: {
+    traceability?: AssessmentTraceability
+    questions: Question[]
+  } | null
   output_hash: string
   schema_version: string
   raw_response_text?: string
   validation?: AssessmentValidation
+}
+
+export interface AssessmentTraceability {
+  experiment_id: number
+  condition_id: number
+  run_id: number
+  prompt_id: number | null
+  prompt_template_version: string
+  assessment_id: number
+  assessment_version: number
+  assessment_schema_version: string
 }
 
 export interface AssessmentValidationIssue {
@@ -211,6 +225,11 @@ export interface Question {
     materials_science_context: string
     estimated_time_minutes: number
     learning_objectives?: string[]
+  }
+  traceability?: {
+    assessment_question_id: number
+    ordinal: number
+    assessment_version: number
   }
   body: string
   body_segments?: ContentSegment[]
