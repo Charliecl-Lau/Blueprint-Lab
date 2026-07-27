@@ -18,6 +18,7 @@ from backend.models.source_document import SourceDocument
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 from backend.services.assessment_evaluation import persist_assessment_questions
 from backend.services.run_service import create_run, retry_llm_evaluation, retry_run
+from backend.config import settings
 
 
 def condition(db):
@@ -48,6 +49,52 @@ def test_retry_creates_next_run_without_mutating_original(test_db):
     assert original.status == "complete"
     assert original.prompt.prompt_hash == hashlib.sha256(b"original").hexdigest()
     assert retried.model_settings == original.model_settings
+
+
+def test_run_without_overrides_persists_effective_environment_settings(
+    test_db, monkeypatch
+):
+    item = condition(test_db)
+    monkeypatch.setattr(settings, "llm_provider", "google")
+    monkeypatch.setattr(settings, "llm_model", "gemini-environment")
+    monkeypatch.setattr(settings, "llm_temperature", 0.31)
+    monkeypatch.setattr(settings, "llm_top_p", 0.82)
+    monkeypatch.setattr(settings, "llm_max_output_tokens", 4096)
+
+    run = create_run(test_db, item.id, [])
+
+    assert run.execution_config == {
+        "schema_version": "1",
+        "requested": {},
+        "effective": {
+            "provider": "google",
+            "model": "gemini-environment",
+            "temperature": 0.31,
+            "top_p": 0.82,
+            "seed": None,
+            "max_output_tokens": 4096,
+            "provider_settings": {},
+        },
+    }
+    assert run.provider == "google"
+    assert run.model == "gemini-environment"
+    assert run.temperature == 0.31
+    assert run.top_p == 0.82
+    assert run.max_tokens == 4096
+
+
+def test_retry_copies_effective_snapshot_when_environment_defaults_change(
+    test_db, monkeypatch
+):
+    item = condition(test_db)
+    monkeypatch.setattr(settings, "llm_model", "gemini-original")
+    original = create_run(test_db, item.id, [])
+    monkeypatch.setattr(settings, "llm_model", "gemini-new-default")
+
+    retried = retry_run(test_db, original.id)
+
+    assert retried.execution_config == original.execution_config
+    assert retried.model == "gemini-original"
 
 
 def test_retry_copies_source_binding_snapshot(test_db):

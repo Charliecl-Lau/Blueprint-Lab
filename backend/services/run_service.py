@@ -37,15 +37,58 @@ def create_run(db: Session, condition_id: int, source_bindings: list[SourceBindi
     return _create_run(db, condition_id, source_bindings, model_settings)
 
 
+def resolve_execution_config(
+    requested_settings: ModelSettings | None = None,
+) -> dict:
+    requested_model = requested_settings or ModelSettings()
+    requested = requested_model.model_dump(
+        exclude_none=True,
+        exclude_defaults=True,
+        by_alias=False,
+    )
+    effective = {
+        "provider": requested_model.provider or settings.llm_provider,
+        "model": requested_model.model or settings.llm_model,
+        "temperature": (
+            requested_model.temperature
+            if requested_model.temperature is not None
+            else settings.llm_temperature
+        ),
+        "top_p": (
+            requested_model.top_p
+            if requested_model.top_p is not None
+            else settings.llm_top_p
+        ),
+        "seed": (
+            requested_model.seed
+            if requested_model.seed is not None
+            else settings.llm_seed
+        ),
+        "max_output_tokens": (
+            requested_model.max_output_tokens
+            if requested_model.max_output_tokens is not None
+            else settings.llm_max_output_tokens
+        ),
+        "provider_settings": dict(requested_model.provider_settings),
+    }
+    return {
+        "schema_version": "1",
+        "requested": requested,
+        "effective": effective,
+    }
+
+
 def _create_run(
     db: Session,
     condition_id: int,
     source_bindings,
     model_settings: ModelSettings | None = None,
     reference_pdf_filenames: Sequence[str] = (),
+    execution_config: dict | None = None,
 ) -> Run:
     _validate(source_bindings)
-    settings = model_settings or ModelSettings()
+    snapshot = execution_config or resolve_execution_config(model_settings)
+    effective = dict(snapshot["effective"])
     for attempt in range(3):
         try:
             with db.begin_nested():
@@ -74,18 +117,23 @@ def _create_run(
                         },
                     )
                 number = (db.scalar(select(func.max(Run.run_number)).where(Run.condition_id == condition_id)) or 0) + 1
-                values = settings.model_dump(exclude_none=True)
                 run = Run(
                     experiment_id=condition.experiment_id,
                     condition_id=condition.id,
                     run_number=number,
                     status="pending",
-                    model_settings=values,
+                    provider=effective["provider"],
+                    model=effective["model"],
+                    temperature=effective["temperature"],
+                    top_p=effective["top_p"],
+                    seed=effective["seed"],
+                    max_tokens=effective["max_output_tokens"],
+                    model_settings=effective,
+                    execution_config=snapshot,
                     input_tokens=0,
                     output_tokens=0,
                     total_tokens=0,
                     model_call_count=0,
-                    **values,
                 )
                 db.add(run); db.flush()
                 run.reference_pdfs = [
@@ -162,8 +210,8 @@ def retry_run(
         db,
         original.condition_id,
         bindings,
-        ModelSettings(**original.model_settings),
-        reference_pdf_filenames or (),
+        reference_pdf_filenames=reference_pdf_filenames or (),
+        execution_config=original.execution_config,
     )
 
 

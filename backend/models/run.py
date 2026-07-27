@@ -79,6 +79,7 @@ class Run(Base):
     seed: Mapped[Optional[int]] = mapped_column(Integer)
     max_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     model_settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    execution_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     request_id: Mapped[Optional[str]] = mapped_column(String)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     finish_reason: Mapped[Optional[str]] = mapped_column(String)
