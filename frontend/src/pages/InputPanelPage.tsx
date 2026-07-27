@@ -10,6 +10,7 @@ import {
   PROMPT_FACTORS,
   factorContentId,
   REFERENCE_PDF_INPUT_ID,
+  parseLearningObjectives,
   validateExperimentForm,
   type ExperimentFormValues,
   type FactorKey,
@@ -126,7 +127,7 @@ export function InputPanelPage() {
     try {
       submissionKey.current ??= createIdempotencyKey()
       const experiment = await experimentsApi.create({
-        course: course.trim(), topic: topic.trim(), learning_objectives: objectives.trim(), assessment_type: assessmentType, difficulty,
+        course: course.trim(), topic: topic.trim(), learning_objectives: parseLearningObjectives(objectives), assessment_type: assessmentType, difficulty,
         number_of_questions: Number(questionCount), estimated_time_minutes: Number(estimatedTime), prompt_structure: promptStructure,
         cognitive_demand: cognitiveDemand, additional_instruction: additionalInstruction.trim() || null,
         factors: { concept_bridge: enabled.conceptBridge, few_shot: enabled.fewShot, reference_content: enabled.referenceContent, reasoning_guidance: enabled.reasoningGuidance },

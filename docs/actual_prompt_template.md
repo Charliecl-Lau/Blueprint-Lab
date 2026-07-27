@@ -10,7 +10,7 @@ Goal (Dynamic)
 
 Generate assessment questions that evaluate the following learning objective.
 
-Learning Objective:
+Learning Objectives:
 {learning_objective}
 
 The assessment should measure the intended cognitive demand while remaining appropriate for the supplied course, topic, and assessment parameters.
@@ -23,7 +23,7 @@ Course:
 Topic:
 {topic}
 
-Learning Objective:
+Learning Objectives:
 {learning_objective}
 
 Question Type:
@@ -136,7 +136,7 @@ Return exactly one valid JSON object with the following structure.
        "concept_map_bridge": "{concept_bridge}",
        "materials_science_context": "{materials_science_context}",
        "estimated_time": "{estimated_time}",
-       "learning_objectives": ["{learning_objective}"],
+       "learning_objectives": {learning_objectives_json},
        "id_requirements": "Not Assigned"
      }
    }

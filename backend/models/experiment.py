@@ -17,13 +17,12 @@ class Experiment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False, default="Untitled experiment")
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    topic_area: Mapped[str] = mapped_column(String, nullable=False, default="Unspecified")
-    research_question: Mapped[str] = mapped_column(Text, nullable=False, default="Unspecified")
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
     course: Mapped[str] = mapped_column(String, nullable=False)
     topic: Mapped[str] = mapped_column(String, nullable=False)
-    learning_objectives: Mapped[str] = mapped_column(Text, nullable=False)
+    learning_objectives: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     assessment_type: Mapped[str] = mapped_column(String, nullable=False)
     difficulty: Mapped[str] = mapped_column(String, nullable=False)
     number_of_questions: Mapped[int] = mapped_column(Integer, nullable=False)

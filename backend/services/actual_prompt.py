@@ -1,4 +1,5 @@
 import re
+import json
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -100,6 +101,7 @@ _OPENAI_SECTIONS = (
 )
 _OPENAI_PLACEHOLDERS = (
     "learning_objective",
+    "learning_objectives_json",
     "course",
     "topic",
     "question_type",
@@ -188,7 +190,7 @@ def render_openai_actual_prompt(
     *,
     course: str,
     topic: str,
-    learning_objectives: str,
+    learning_objectives: Sequence[str],
     assessment_type: str,
     difficulty: str,
     number_of_questions: int,
@@ -208,8 +210,15 @@ def render_openai_actual_prompt(
 
     normalized_course = course.strip().casefold()
     normalized_topic = topic.strip()
+    objective_lines = "\n".join(
+        f"- {objective.strip()}" for objective in learning_objectives
+    )
     values = {
-        "learning_objective": learning_objectives.strip(),
+        "learning_objective": objective_lines,
+        "learning_objectives_json": json.dumps(
+            [objective.strip() for objective in learning_objectives],
+            ensure_ascii=False,
+        ),
         "course": course.strip(),
         "topic": normalized_topic,
         "question_type": assessment_type,
@@ -265,7 +274,7 @@ def build_structure_input(
     *,
     course: str,
     topic: str,
-    learning_objectives: str,
+    learning_objectives: Sequence[str],
     assessment_type: str,
     difficulty: str,
     number_of_questions: int,
@@ -280,7 +289,10 @@ def build_structure_input(
         "# Assessment Details",
         f"Course: {course}",
         f"Topic: {topic}",
-        f"Learning Objectives: {learning_objectives}",
+        "Learning Objectives:\n"
+        + "\n".join(
+            f"- {objective.strip()}" for objective in learning_objectives
+        ),
         f"Assessment Type: {assessment_type}",
         f"Difficulty: {difficulty}",
         f"Number of Questions: {number_of_questions}",

@@ -45,7 +45,7 @@ def test_openai_template_and_hash_are_deterministic_for_identical_inputs():
     prompt_inputs = {
         "course": "MSE302",
         "topic": "Chemical Potential",
-        "learning_objectives": "Analyze phase stability using chemical potential.",
+        "learning_objectives": ["Analyze phase stability using chemical potential."],
         "assessment_type": "short_answer",
         "difficulty": "advanced",
         "number_of_questions": 2,

@@ -108,13 +108,10 @@ class FakeLLM:
 def generation_fixture(test_db):
     experiment = Experiment(
         name="MSE assessment quality",
-        description="Evaluate generated assessments.",
-        topic_area="Materials thermodynamics",
-        research_question="Are generated questions instructor-ready?",
         status="active",
         course="MSE302",
         topic="Phase stability",
-        learning_objectives="Analyze phase stability using chemical potential.",
+        learning_objectives=["Analyze phase stability using chemical potential."],
         assessment_type="long_answer",
         difficulty="advanced",
         number_of_questions=1,

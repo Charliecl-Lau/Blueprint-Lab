@@ -5,7 +5,7 @@ def _run():
     experiment = Experiment(
         course="ENGR 101",
         topic="Statics",
-        learning_objectives="Apply equilibrium equations.",
+        learning_objectives=["Apply equilibrium equations."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=3,

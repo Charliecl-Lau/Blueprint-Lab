@@ -166,7 +166,7 @@ export interface Experiment {
   id: number
   course: string
   topic: string
-  learning_objectives: string
+  learning_objectives: string[]
   assessment_type: AssessmentType
   difficulty: string
   number_of_questions: number
@@ -392,7 +392,7 @@ export interface ValidationErrorResponse {
 export interface CreateExperimentPayload {
   course: string
   topic: string
-  learning_objectives: string
+  learning_objectives: string[]
   assessment_type: AssessmentType
   difficulty: string
   number_of_questions: number

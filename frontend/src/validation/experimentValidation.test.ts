@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import {
   MAX_REFERENCE_PDF_BYTES,
+  parseLearningObjectives,
   validateExperimentForm,
   type ExperimentFormValues,
 } from './experimentValidation'
@@ -37,6 +38,11 @@ const emptyForm: ExperimentFormValues = {
   topic: '   ',
   learningObjectives: '',
 }
+
+test('converts each nonblank input line into one learning objective', () => {
+  expect(parseLearningObjectives(' First objective \r\n\n Second objective '))
+    .toEqual(['First objective', 'Second objective'])
+})
 
 test('returns every missing field grouped by user-facing section', () => {
   const errors = validateExperimentForm(emptyForm)

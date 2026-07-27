@@ -20,7 +20,7 @@ def _run(test_db, *, status):
     experiment = Experiment(
         course="C",
         topic="T",
-        learning_objectives="L",
+        learning_objectives=["L"],
         assessment_type="mixed",
         difficulty="D",
         number_of_questions=1,

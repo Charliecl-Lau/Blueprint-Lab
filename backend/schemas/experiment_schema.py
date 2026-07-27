@@ -35,7 +35,7 @@ class PromptFactorInputs(BaseModel):
 class ExperimentCreate(BaseModel):
     course: str = Field(min_length=1)
     topic: str = Field(min_length=1)
-    learning_objectives: str = Field(min_length=1)
+    learning_objectives: list[str] = Field(min_length=1)
     assessment_type: AssessmentType = "mixed"
     difficulty: str = Field(min_length=1)
     number_of_questions: int = Field(default=4, ge=1, le=50)
@@ -46,10 +46,18 @@ class ExperimentCreate(BaseModel):
     factors: PromptFactors = Field(default_factory=PromptFactors)
     factor_inputs: PromptFactorInputs = Field(default_factory=PromptFactorInputs)
 
-    @field_validator("course", "topic", "learning_objectives", mode="before")
+    @field_validator("course", "topic", mode="before")
     @classmethod
     def trim_required_assessment_text(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("learning_objectives")
+    @classmethod
+    def trim_learning_objectives(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values]
+        if any(not value for value in cleaned):
+            raise ValueError("Learning objectives must be nonblank")
+        return cleaned
 
     @field_validator("additional_instruction", mode="before")
     @classmethod
@@ -106,7 +114,7 @@ class ExperimentResponse(BaseModel):
     id: int
     course: str
     topic: str
-    learning_objectives: str
+    learning_objectives: list[str]
     assessment_type: str
     difficulty: str
     number_of_questions: int

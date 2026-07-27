@@ -58,7 +58,7 @@ def evaluated_run(test_db, *, question_count=2, llm_scores=None):
     experiment = Experiment(
         course="MSE302",
         topic="Phase stability",
-        learning_objectives="Analyze phase stability.",
+        learning_objectives=["Analyze phase stability."],
         assessment_type="long_answer",
         difficulty="advanced",
         number_of_questions=question_count,

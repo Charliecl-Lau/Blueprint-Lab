@@ -23,7 +23,7 @@ def _experiment_and_condition(test_db, *, topic="Statics"):
     experiment = Experiment(
         course="C",
         topic=topic,
-        learning_objectives="L",
+        learning_objectives=["L"],
         assessment_type="mixed",
         difficulty="D",
         number_of_questions=1,
@@ -203,7 +203,7 @@ def test_evaluation_retry_endpoint_reuses_viewer_ready_run(client, test_db):
 
 
 def test_canonical_create_detail_retry_raw_and_export(client, test_db):
-    experiment = Experiment(course="C", topic="T", learning_objectives="L", assessment_type="mixed", difficulty="D", number_of_questions=1)
+    experiment = Experiment(course="C", topic="T", learning_objectives=["L"], assessment_type="mixed", difficulty="D", number_of_questions=1)
     test_db.add(experiment); test_db.flush()
     condition = Condition(experiment_id=experiment.id, prompt_structure="openai", factor_inputs={}, condition_label="test")
     test_db.add(condition); test_db.commit()
@@ -387,7 +387,7 @@ def test_run_detail_reports_reference_pdf_filenames(client, test_db):
 
 
 def test_create_rejects_caller_supplied_snapshot_hash(client, test_db):
-    experiment = Experiment(course="C", topic="T", learning_objectives="L", assessment_type="mixed", difficulty="D", number_of_questions=1)
+    experiment = Experiment(course="C", topic="T", learning_objectives=["L"], assessment_type="mixed", difficulty="D", number_of_questions=1)
     test_db.add(experiment); test_db.flush()
     condition = Condition(experiment_id=experiment.id, prompt_structure="openai", factor_inputs={}, condition_label="test")
     source = SourceDocument(name="S", document_type="reference", version="1", original_filename="s.txt", media_type="text/plain", content=b"persisted", content_hash=hashlib.sha256(b"persisted").hexdigest(), extracted_text="persisted text")

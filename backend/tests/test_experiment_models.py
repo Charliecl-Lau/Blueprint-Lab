@@ -2,16 +2,22 @@ from backend.models import Assessment, Condition, DocumentArtifact, Experiment, 
 from backend.models.run import RubricResult
 
 
+def test_experiment_table_uses_objective_array_without_obsolete_research_columns():
+    columns = Experiment.__table__.columns
+
+    assert columns["learning_objectives"].type.python_type is dict
+    assert {"description", "topic_area", "research_question"}.isdisjoint(
+        columns.keys()
+    )
+
+
 def test_experiment_condition_metadata_round_trip(test_db):
     experiment = Experiment(
         name="Free-body diagram study",
-        description="Research prompt factors.",
-        topic_area="Statics",
-        research_question="Which factors improve alignment?",
         status="active",
         course="ENGR 101",
         topic="Free-body diagrams",
-        learning_objectives="Apply equilibrium equations to planar systems.",
+        learning_objectives=["Apply equilibrium equations to planar systems."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=3,
@@ -45,13 +51,10 @@ def test_experiment_condition_metadata_round_trip(test_db):
 def test_legacy_generation_children_round_trip(test_db):
     experiment = Experiment(
         name="Compatibility study",
-        description="Exercise temporary model aliases.",
-        topic_area="Statics",
-        research_question="Do legacy call sites retain their metadata?",
         status="active",
         course="ENGR 101",
         topic="Free-body diagrams",
-        learning_objectives="Apply equilibrium equations.",
+        learning_objectives=["Apply equilibrium equations."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=3,

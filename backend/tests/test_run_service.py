@@ -21,7 +21,7 @@ from backend.services.run_service import create_run, retry_llm_evaluation, retry
 
 
 def condition(db):
-    experiment = Experiment(course="C", topic="T", learning_objectives="L", assessment_type="mixed", difficulty="D", number_of_questions=1)
+    experiment = Experiment(course="C", topic="T", learning_objectives=["L"], assessment_type="mixed", difficulty="D", number_of_questions=1)
     db.add(experiment); db.flush()
     value = Condition(experiment_id=experiment.id, prompt_structure="openai", factor_inputs={}, condition_label="test")
     db.add(value); db.flush()

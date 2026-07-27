@@ -9,7 +9,7 @@ def valid_payload():
     return {
         "course": "ENGR 101",
         "topic": "Statics",
-        "learning_objectives": "Resolve forces.",
+        "learning_objectives": ["Resolve forces."],
         "assessment_type": "mixed",
         "difficulty": "introductory",
         "number_of_questions": 4,
@@ -27,7 +27,7 @@ def test_experiment_create_defaults_to_openai_and_all_factors_off():
     payload = ExperimentCreate(
         course="ENGR 101",
         topic="Statics",
-        learning_objectives="Solve equilibrium problems.",
+        learning_objectives=["Solve equilibrium problems."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=4,
@@ -44,11 +44,44 @@ def test_experiment_create_defaults_to_openai_and_all_factors_off():
     assert payload.factors.reasoning_guidance is False
 
 
+def test_experiment_create_normalizes_nonblank_learning_objective_items():
+    payload = ExperimentCreate(
+        course="MSE 302",
+        topic="Phase stability",
+        learning_objectives=[
+            "  Compare Gibbs energies  ",
+            "Predict stable phases",
+        ],
+        difficulty="medium",
+    )
+
+    assert payload.learning_objectives == [
+        "Compare Gibbs energies",
+        "Predict stable phases",
+    ]
+
+
+@pytest.mark.parametrize(
+    "learning_objectives",
+    [[], [""], ["Valid objective", "   "], "Scalar objective"],
+)
+def test_experiment_create_rejects_invalid_learning_objective_arrays(
+    learning_objectives,
+):
+    with pytest.raises(ValidationError):
+        ExperimentCreate(
+            course="MSE 302",
+            topic="Phase stability",
+            learning_objectives=learning_objectives,
+            difficulty="medium",
+        )
+
+
 def test_experiment_create_accepts_anthropic_prompt_structure():
     payload = ExperimentCreate(
         course="ENGR 201",
         topic="Signals",
-        learning_objectives="Analyze simple signals.",
+        learning_objectives=["Analyze simple signals."],
         assessment_type="short_answer",
         difficulty="intermediate",
         number_of_questions=2,
@@ -63,7 +96,7 @@ def test_experiment_create_accepts_anthropic_prompt_structure():
 
 def test_enabled_factor_requires_content():
     with pytest.raises(ValidationError):
-        ExperimentCreate(course="ENGR", topic="Statics", learning_objectives="Resolve forces", difficulty="medium", factors={"reasoning_guidance": True})
+        ExperimentCreate(course="ENGR", topic="Statics", learning_objectives=["Resolve forces"], difficulty="medium", factors={"reasoning_guidance": True})
 
 
 def test_experiment_create_rejects_removed_frameworks():
@@ -71,7 +104,7 @@ def test_experiment_create_rejects_removed_frameworks():
         ExperimentCreate(
             course="ENGR 101",
             topic="Statics",
-            learning_objectives="Solve equilibrium problems.",
+            learning_objectives=["Solve equilibrium problems."],
             assessment_type="mixed",
             difficulty="introductory",
             number_of_questions=4,

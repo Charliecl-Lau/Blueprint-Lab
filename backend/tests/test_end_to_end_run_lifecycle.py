@@ -19,7 +19,7 @@ def valid_payload():
     return {
         "course": "ENGR 101",
         "topic": "Statics",
-        "learning_objectives": "Solve equilibrium problems.",
+        "learning_objectives": ["Solve equilibrium problems."],
         "assessment_type": "mixed",
         "difficulty": "introductory",
         "number_of_questions": 2,

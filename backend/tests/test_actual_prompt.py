@@ -96,7 +96,7 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
     text = build_structure_input(
         course="MSE202",
         topic="Gibbs Phase Rule",
-        learning_objectives="Apply the phase rule.",
+        learning_objectives=["Apply the phase rule."],
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
@@ -124,7 +124,7 @@ def test_structure_input_omits_blank_additional_instruction():
     text = build_structure_input(
         course="MSE202",
         topic="Gibbs Phase Rule",
-        learning_objectives="Apply the phase rule.",
+        learning_objectives=["Apply the phase rule."],
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
@@ -143,7 +143,7 @@ def test_structure_input_describes_pdfs_without_embedding_content():
     text = build_structure_input(
         course="MSE202",
         topic="Gibbs Phase Rule",
-        learning_objectives="Apply the phase rule.",
+        learning_objectives=["Apply the phase rule."],
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
@@ -171,7 +171,7 @@ def render_openai(**overrides):
     values = {
         "course": "MSE202",
         "topic": "Gibbs Phase Rule",
-        "learning_objectives": "Apply the phase rule to alloy systems.",
+        "learning_objectives": ["Apply the phase rule to alloy systems."],
         "assessment_type": "short_answer",
         "difficulty": "medium",
         "number_of_questions": 2,

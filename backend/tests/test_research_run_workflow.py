@@ -25,7 +25,7 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
     experiment = Experiment(
         course="ENGR 101",
         topic="Statics",
-        learning_objectives="Solve equilibrium problems.",
+        learning_objectives=["Solve equilibrium problems."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=1,

@@ -5,7 +5,7 @@ from backend.services.prompt_generator import generate_prompt
 def test_generate_prompt_serializes_first_call_input():
     result = generate_prompt(
         course="MSE302", topic="Phase equilibrium",
-        learning_objectives="Relate Gibbs energy to phase stability.",
+        learning_objectives=["Relate Gibbs energy to phase stability."],
         assessment_type="mcq", difficulty="intermediate", number_of_questions=2,
         estimated_time_minutes=50,
         cognitive_demand="apply_analyze",
