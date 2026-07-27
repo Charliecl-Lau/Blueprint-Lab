@@ -34,6 +34,7 @@ export function AssessmentViewerPage() {
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [retryingEvaluation, setRetryingEvaluation] = useState(false)
+  const [acceptingDefects, setAcceptingDefects] = useState(false)
   const [retryPdfs, setRetryPdfs] = useState<File[]>([])
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export function AssessmentViewerPage() {
     (item) => item.experiment_id === id || experimentRunIds.has(item.id),
   )
   const viewerReady = experimentRuns.filter(
-    (item) => item.viewer_ready_at || item.status === 'complete',
+    (item) => item.viewer_available || item.viewer_ready_at || item.status === 'complete' || item.status === 'complete_with_warnings',
   )
   const selectedId = routeRunId ?? selectedRunId ?? viewerReady[0]?.id
   const selected = selectedId ? runs[selectedId] : undefined
@@ -69,7 +70,8 @@ export function AssessmentViewerPage() {
     return () => window.clearInterval(timer)
   }, [mergeRun, selected?.evaluation_status, selectedId])
 
-  const questions = selected?.assessment?.parsed_json?.questions ?? selected?.generated_json?.questions ?? []
+  const questions = selected?.assessment?.parsed_json?.questions ?? []
+  const validation = selected?.assessment?.validation
   const condition = selected?.condition ?? experiment?.conditions.find((item) => item.id === selected?.condition_id)
   const evaluationStatus = selected?.evaluation_status === 'failed'
     ? 'Evaluation unavailable'
@@ -111,6 +113,17 @@ export function AssessmentViewerPage() {
       mergeRun({ ...run, evaluation_status: 'in_progress' })
     } finally {
       setRetryingEvaluation(false)
+    }
+  }
+
+  const acceptDefects = async () => {
+    if (!selectedId || !validation?.acceptance_required) return
+    if (!window.confirm('Accept the recorded assessment defects? The assessment will remain marked as completed with warnings, and this enables export and automated evaluation.')) return
+    setAcceptingDefects(true)
+    try {
+      mergeRun(await runsApi.acceptAssessmentDefects(selectedId))
+    } finally {
+      setAcceptingDefects(false)
     }
   }
 
@@ -157,7 +170,7 @@ export function AssessmentViewerPage() {
                   >
                     Grade Assessment
                   </Link>
-                ) : selected?.assessment?.id && (
+                ) : !validation?.acceptance_required && selected?.assessment?.id && (
                   selected.evaluation_status === 'failed'
                   || selected.evaluation_status === 'not_started'
                 ) ? (
@@ -169,7 +182,7 @@ export function AssessmentViewerPage() {
                     {retryingEvaluation ? 'Retrying LLM Evaluation…' : 'Retry LLM Evaluation'}
                   </button>
                 ) : (
-                  <button className="primary" disabled>{evaluationStatus}</button>
+                  <button className="primary" disabled>{validation?.acceptance_required ? 'Accept defects to grade' : evaluationStatus}</button>
                 )}
                 <button
                   className="secondary"
@@ -182,6 +195,30 @@ export function AssessmentViewerPage() {
               </div>
             )}
           </div>
+          {validation?.status === 'warning' && (
+            <section className="assessment-warning" role="alert">
+              <h2>Assessment completed with warnings</h2>
+              <p>
+                This response is viewable, but unresolved validation defects remain.
+                {validation.defects_accepted_at
+                  ? ` Accepted ${new Date(validation.defects_accepted_at).toLocaleString()}.`
+                  : ' Export and grading remain locked until you accept the defects.'}
+              </p>
+              {validation.issues.length > 0 && <ul>
+                {validation.issues.map((issue, index) => (
+                  <li key={`${issue.field_path}-${index}`}>
+                    {issue.question_ordinal !== null ? `Question ${issue.question_ordinal + 1}, ` : ''}
+                    {issue.field_path || 'assessment'}: {issue.message}
+                  </li>
+                ))}
+              </ul>}
+              {validation.acceptance_required && (
+                <button className="primary" disabled={acceptingDefects} onClick={acceptDefects}>
+                  {acceptingDefects ? 'Accepting defects...' : 'Accept assessment with defects'}
+                </button>
+              )}
+            </section>
+          )}
           <section>
             <h2>Experiment Condition</h2>
             <p><strong>Course:</strong> {experiment?.course}</p>

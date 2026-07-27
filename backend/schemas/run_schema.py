@@ -40,6 +40,7 @@ class RunSummary(BaseModel):
         "generating",
         "documenting",
         "complete",
+        "complete_with_warnings",
         "error",
     ]
     model_settings: dict
@@ -124,7 +125,7 @@ def token_usage_detail(run) -> dict:
     )
     if all(value is None for value in aggregates):
         recording_state: RecordingState = "not_recorded"
-    elif run.status in {"complete", "error"}:
+    elif run.status in {"complete", "complete_with_warnings", "error"}:
         recording_state = "recorded"
     else:
         recording_state = "in_progress"

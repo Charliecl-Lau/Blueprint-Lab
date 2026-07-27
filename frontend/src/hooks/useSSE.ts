@@ -12,7 +12,7 @@ export function useSSE(
     es.onmessage = (e) => {
       const snapshot: RunSnapshot = JSON.parse(e.data)
       onSnapshot(snapshot)
-      if (snapshot.status === 'complete' || snapshot.status === 'error') es.close()
+      if (snapshot.status === 'complete' || snapshot.status === 'complete_with_warnings' || snapshot.status === 'error') es.close()
     }
 
     es.onerror = () => {

@@ -12,6 +12,7 @@ from backend.services.assessment_evaluation import (
     evaluate_question,
 )
 from backend.services.assessment_rubric import RUBRIC_VERSION
+from backend.services.assessment_recovery_service import assessment_is_accepted_or_valid
 from backend.services.llm_client import LLMClient
 
 
@@ -51,7 +52,7 @@ def run_llm_evaluation_pipeline(run_id: int) -> None:
         run = db.get(Run, run_id)
         if (
             run is None
-            or run.status != "complete"
+            or not assessment_is_accepted_or_valid(run)
             or run.assessment is None
             or run.document_artifact is None
         ):

@@ -35,6 +35,11 @@ from backend.services.assessment_evaluation import (
     EvaluationValidationError,
     persist_assessment_questions,
 )
+from backend.services.assessment_recovery_service import (
+    mark_strictly_valid,
+    recover_saved_assessment,
+    set_warning_run_state,
+)
 from backend.services.generation_context import build_generation_context
 from backend.services.generator import generate_questions
 from backend.services.document_artifact import save_assessment_artifact
@@ -364,7 +369,11 @@ def run_generation_pipeline(
             )
             return
 
-        if run.assessment is not None and run.assessment.parsed_json is not None:
+        if (
+            run.assessment is not None
+            and run.assessment.parsed_json is not None
+            and run.assessment.validation_status == "valid"
+        ):
             try:
                 persist_assessment_questions(db, run.assessment)
                 run.status = "documenting"
@@ -387,6 +396,15 @@ def run_generation_pipeline(
                 _publish_progress(experiment.id, run.id, condition.id, "error")
                 return
             run_llm_evaluation_pipeline.delay(run.id)
+            return
+        if (
+            run.assessment is not None
+            and run.assessment.validation_status == "warning"
+            and run.assessment.defects_accepted_at is None
+        ):
+            _publish_progress(
+                experiment.id, run.id, condition.id, "complete_with_warnings"
+            )
             return
 
         run.progress_message = "Generating Assessment"
@@ -426,6 +444,7 @@ def run_generation_pipeline(
             parsed_json=None,
             output_hash=sha256_text(result.raw_text),
             schema_version=_ASSESSMENT_SCHEMA_VERSION,
+            validation_status="invalid",
         )
         db.add(assessment)
         run.request_id = result.provider_request_id
@@ -449,7 +468,8 @@ def run_generation_pipeline(
                     break
                 except ValidationError as exc:
                     if repair_attempt == _MAX_ASSESSMENT_REPAIR_ATTEMPTS:
-                        raise
+                        validation_error = str(exc)
+                        break
                     validation_error = str(exc)
 
                 run.progress_message = "Repairing Assessment"
@@ -504,9 +524,21 @@ def run_generation_pipeline(
                     (time.perf_counter() - generation_started) * 1000
                 )
                 db.commit()
-            assert generated is not None
-            assessment.parsed_json = generated.model_dump()
-            run.generated_json = assessment.parsed_json
+            if generated is None:
+                recovered = recover_saved_assessment(
+                    db, run, source="repair_limit_exhausted"
+                )
+                if recovered == "warning":
+                    set_warning_run_state(run)
+                    db.commit()
+                    _publish_progress(
+                        experiment.id, run.id, condition.id, "complete_with_warnings"
+                    )
+                    return
+                if recovered == "invalid":
+                    raise EvaluationValidationError(validation_error)
+            else:
+                mark_strictly_valid(assessment, generated.model_dump())
             persist_assessment_questions(db, assessment)
             run.status = "documenting"
             run.progress_message = "Creating assessment document"

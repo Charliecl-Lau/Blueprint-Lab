@@ -471,3 +471,142 @@ def test_recent_runs_returns_active_and_completed_in_reverse_order(
 def test_recent_runs_limit_is_bounded(client):
     assert client.get("/runs/recent?limit=0").status_code == 422
     assert client.get("/runs/recent?limit=51").status_code == 422
+
+
+def _recoverable_payload(body: str):
+    return {
+        "questions": [
+            {
+                "type": "short_answer",
+                "metadata": {
+                    "question_title": "Component fractions",
+                    "question_type": "short_answer",
+                    "difficulty_level": "introductory",
+                    "intended_assessment_setting": "Quiz",
+                    "mse202_concepts": ["Mixtures"],
+                    "mse302_concepts": ["Solutions"],
+                    "concept_map_bridge": "Not Provided",
+                    "materials_science_context": "Alloy solution.",
+                    "estimated_time": "10 minutes",
+                    "learning_objectives": ["Compare component fractions."],
+                },
+                "body": body,
+                "model_answer": "Use x_A.",
+                "equations": [],
+                "revision_options": ["Add data.", "Explain assumptions."],
+            }
+        ]
+    }
+
+
+def test_recover_assessment_repairs_saved_component_tokens(client, test_db):
+    import json
+
+    experiment, condition = _experiment_and_condition(test_db)
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="error",
+        model_settings={},
+        error_type="assessment_parse_error",
+    )
+    run.assessment = Assessment(
+        raw_response_text=json.dumps(_recoverable_payload("Compare x_B.")),
+        parsed_json=None,
+        output_hash="b" * 64,
+        schema_version="1",
+        validation_status="invalid",
+    )
+    test_db.add(run)
+    test_db.commit()
+
+    with (
+        patch("backend.api.runs.save_assessment_artifact"),
+        patch("backend.api.runs.run_llm_evaluation_pipeline.delay") as delay,
+    ):
+        response = client.post(f"/runs/{run.id}/recover-assessment")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "complete"
+    assert response.json()["assessment"]["validation"]["status"] == "valid"
+    assert response.json()["assessment"]["parsed_json"]["questions"][0]["body"] == (
+        "Compare [[EQ:auto_q1_body_x_b_1]]."
+    )
+    delay.assert_called_once_with(run.id)
+
+
+def test_recover_assessment_exposes_renderable_warnings(client, test_db):
+    import json
+
+    experiment, condition = _experiment_and_condition(test_db)
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="error",
+        model_settings={},
+        error_type="assessment_parse_error",
+    )
+    run.assessment = Assessment(
+        raw_response_text=json.dumps(_recoverable_payload("Use G = H - T S.")),
+        parsed_json=None,
+        output_hash="c" * 64,
+        schema_version="1",
+        validation_status="invalid",
+    )
+    test_db.add(run)
+    test_db.commit()
+
+    response = client.post(f"/runs/{run.id}/recover-assessment")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "complete_with_warnings"
+    assert response.json()["viewer_available"] is True
+    validation = response.json()["assessment"]["validation"]
+    assert validation["status"] == "warning"
+    assert validation["acceptance_required"] is True
+    assert response.json()["artifact_available"] is False
+
+
+def test_accept_warning_assessment_enables_evaluation(client, test_db):
+    experiment, condition = _experiment_and_condition(test_db)
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="complete_with_warnings",
+        model_settings={},
+    )
+    run.prompt = Prompt(
+        prompt_structure="openai",
+        structure_system_prompt="rules",
+        structure_input="input",
+        actual_prompt="prompt",
+        actual_prompt_hash="a" * 64,
+        structure_prompt_version="4",
+        actual_prompt_generator_version="11",
+        generation_envelope_hash="b" * 64,
+    )
+    run.assessment = Assessment(
+        raw_response_text='{"questions": []}',
+        parsed_json={"questions": []},
+        output_hash="d" * 64,
+        schema_version="1",
+        validation_status="warning",
+        validation_issues=[{"message": "Unresolved equation"}],
+    )
+    test_db.add(run)
+    test_db.commit()
+
+    with (
+        patch("backend.api.runs.save_assessment_artifact"),
+        patch("backend.api.runs.run_llm_evaluation_pipeline.delay") as delay,
+    ):
+        response = client.post(f"/runs/{run.id}/accept-assessment-defects")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "complete_with_warnings"
+    assert response.json()["assessment"]["validation"]["acceptance_required"] is False
+    assert response.json()["assessment"]["validation"]["defects_accepted_at"] is not None
+    delay.assert_called_once_with(run.id)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
@@ -13,6 +13,7 @@ const labels: Record<Stage, string> = {
   generating: 'Generating questions',
   documenting: 'Building Word document',
   complete: 'Complete',
+  complete_with_warnings: 'Completed with warnings',
   error: 'Failed',
 }
 
@@ -26,6 +27,7 @@ export function ProgressPage() {
   const mergeRun = useRunStore((state) => state.mergeRun)
   const mergeExperiment = useRunStore((state) => state.mergeExperiment)
   const applyRunSnapshot = useRunStore((state) => state.applyRunSnapshot)
+  const [recovering, setRecovering] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -49,7 +51,7 @@ export function ProgressPage() {
 
   const runStatus = run?.status
   useEffect(() => {
-    if (!id || !runStatus || runStatus === 'complete' || runStatus === 'error') return
+    if (!id || !runStatus || runStatus === 'complete' || runStatus === 'complete_with_warnings' || runStatus === 'error') return
     const timer = window.setInterval(() => {
       void runsApi.get(id).then(mergeRun).catch(() => undefined)
     }, 2000)
@@ -57,6 +59,15 @@ export function ProgressPage() {
   }, [id, mergeRun, runStatus])
 
   const condition = experiment?.conditions.find((item) => item.id === run?.condition_id)
+  const recoverAssessment = async () => {
+    if (!run || !id) return
+    setRecovering(true)
+    try {
+      mergeRun(await runsApi.recoverAssessment(id))
+    } finally {
+      setRecovering(false)
+    }
+  }
   return (
     <main className="experiment-page">
       <AppHeader subtitle="Run progress" />
@@ -76,10 +87,15 @@ export function ProgressPage() {
           ) : <p>Loading persisted run state…</p>}
           {run?.error?.message && <p className="error">{run.error.message}</p>}
         </section>
-        {run?.status === 'complete' && run.experiment_id && (
+        {(run?.status === 'complete' || run?.status === 'complete_with_warnings') && run.experiment_id && (
           <Link className="primary inline-action" to={`/experiments/${run.experiment_id}/viewer/${run.id}`}>
             View Assessment
           </Link>
+        )}
+        {run?.status === 'error' && run.error?.type === 'assessment_parse_error' && (
+          <button className="primary inline-action" disabled={recovering} onClick={recoverAssessment}>
+            {recovering ? 'Recovering assessment...' : 'Recover saved assessment'}
+          </button>
         )}
         <div className="progress-exit">
           <p>This experiment will continue running in the background.</p>

@@ -60,6 +60,8 @@ def assessment_response():
                 "mse302_concepts": ["Mechanical stability"],
                 "concept_map_bridge": "Connects force balance to stability.",
                 "materials_science_context": "Applies equilibrium to stable systems.",
+                "estimated_time": "15 minutes",
+                "learning_objectives": ["Solve equilibrium problems."],
             },
             "body": "State the equilibrium condition.",
             "options": [],

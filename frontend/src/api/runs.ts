@@ -10,6 +10,8 @@ export const runsApi = {
     referencePdfs.forEach((pdf) => form.append('reference_pdfs', pdf))
     return api.post(`/runs/${id}/retry`, form)
   },
+  recoverAssessment: (id: number): Promise<Run> => api.post(`/runs/${id}/recover-assessment`, {}),
+  acceptAssessmentDefects: (id: number): Promise<Run> => api.post(`/runs/${id}/accept-assessment-defects`, {}),
   exportDocx: async (id: number): Promise<void> => {
     const response = await fetch(`/api/runs/${id}/export-docx`)
     if (!response.ok) throw new Error('DOCX export failed')

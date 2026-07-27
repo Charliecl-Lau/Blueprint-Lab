@@ -4,6 +4,7 @@ export type Stage =
   | 'generating'
   | 'documenting'
   | 'complete'
+  | 'complete_with_warnings'
   | 'error'
 export type PromptStructure = 'openai' | 'anthropic'
 export type AssessmentType = 'mcq' | 'short_answer' | 'mixed'
@@ -98,6 +99,26 @@ export interface AssessmentOutput {
   output_hash: string
   schema_version: string
   raw_response_text?: string
+  validation?: AssessmentValidation
+}
+
+export interface AssessmentValidationIssue {
+  code: string
+  question_ordinal: number | null
+  field_path: string
+  excerpt: string | null
+  message: string
+  recoverable: boolean
+}
+
+export interface AssessmentValidation {
+  status: 'valid' | 'warning' | 'invalid'
+  issues: AssessmentValidationIssue[]
+  recovery_actions: Array<Record<string, unknown>>
+  parsed_json_hash: string | null
+  defects_accepted_at: string | null
+  defects_accepted_by: string | null
+  acceptance_required: boolean
 }
 
 export interface RunSource {
@@ -118,6 +139,7 @@ export interface Run {
   status: Stage
   viewer_ready_at?: string | null
   progress_message?: string | null
+  viewer_available?: boolean
   evaluation_status?: 'not_started' | 'in_progress' | 'complete' | 'failed'
   grading_available?: boolean
   grading_question_id?: number | null

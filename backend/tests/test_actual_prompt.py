@@ -88,8 +88,8 @@ def test_openai_template_and_versions_require_location_specific_labels():
         in prompt
     )
     assert "two equation entries with distinct labels" in prompt
-    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "10"
-    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "3"
+    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "11"
+    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "4"
 
 
 def test_structure_input_contains_details_and_enabled_factor_values_only():
@@ -203,7 +203,8 @@ def test_openai_template_demonstrates_required_equation_references():
 
     assert (
         '"body": "The gas constant is [[EQ:gas_constant]]. '
-        'Use [[EQ:question_equation]]."'
+        'Compare [[EQ:x_a_symbol]] with [[EQ:x_b_symbol]] and use '
+        '[[EQ:question_equation]]."'
     ) in prompt
     assert '"model_answer": "Apply [[EQ:solution_equation]]."' in prompt
     assert '"label": "gas_constant"' in prompt
@@ -216,6 +217,14 @@ def test_openai_template_demonstrates_required_equation_references():
     assert "[[EQ:label]] references are required equation references" in prompt
     assert "one reference for the complete equality or derivation chain" in prompt
     assert "Never join multiple references with an operator" in prompt
+    assert "explicit lowercase component subscripts: x_a and x_b, y_a and y_b" in prompt
+    assert '"expression": "x_a"' in prompt
+    assert '"expression": "x_b"' in prompt
+    assert '"expression": "G_mix/(R T) = x_a ln(x_a) + x_b ln(x_b)"' in prompt
+    assert "x_A ln(x_A)" not in prompt
+    assert '"mse202_concepts": ["Gibbs Phase Rule"]' in prompt
+    assert '"mse302_concepts": ["Not Provided"]' in prompt
+    assert '"learning_objectives": ["Apply the phase rule to alloy systems."]' in prompt
 
 
 def test_openai_template_changes_only_substituted_values():

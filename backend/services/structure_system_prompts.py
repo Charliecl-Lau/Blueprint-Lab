@@ -91,6 +91,8 @@ Equation Notation Requirement
 
 The generated prompt must require the final DOCX to use editable native Microsoft Word OMML equations. For every equation or mathematical expression in a question body, answer option, or model answer, it must require one corresponding entry in that question's equations[] array and replace the original expression at its exact position with [[EQ:label]].
 
+For a multi-component variable family, the generated prompt must require explicit lowercase component subscripts such as x_a, x_b, y_a, and y_b. It must forbid ambiguous bare x or y where a component identity is needed and require every such identifier in body, options, and model_answer to use a matching equation reference.
+
 Each equations[] entry must contain exactly label, expression, and location. Label must be a unique ASCII identifier that exactly matches its [[EQ:label]] placeholder. The generated prompt must forbid repeating the plain expression beside its placeholder. It must require expression to use Microsoft Word linear equation syntax with Unicode math characters and plain operators: / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals. Location must be question or solution. It must state that a question containing mathematical content with equations = [] is invalid.
 
 The generated prompt must explicitly forbid returning equations as images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\]).
@@ -285,6 +287,8 @@ Never modify user-supplied values.
 Never invent missing information.
 
 Within <constraints>, the generated prompt must also instruct the assessment-generation model to:
+
+use explicit lowercase component variables such as x_a, x_b, y_a, and y_b rather than ambiguous bare x or y when a component identity is needed; require every such identifier in body, options, and model_answer to use a matching equation reference
 
 require the final DOCX to use editable native Microsoft Word OMML equations; for every equation or mathematical expression in a question body, answer option, or model answer, add one corresponding equations[] entry containing exactly label, expression, and location; use a unique ASCII identifier for label and replace the expression at its exact position with [[EQ:label]]; never repeat the plain expression beside its placeholder; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; set location to question or solution; state that mathematical content with equations = [] is invalid; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
 

@@ -81,6 +81,8 @@ Use Robert DeHoff notation consistently. Use G, H, S, and V for molar or intensi
 
 For every mathematical expression, add one entry to the equations array and replace the expression at its exact position in the question, answer option, or model answer with the matching [[EQ:label]] reference. [[EQ:label]] references are required equation references, not unresolved template placeholders. Use one reference for the complete equality or derivation chain, including every operator and operand. Never join multiple references with an operator. For example, never return [[EQ:left]] = [[EQ:right]]; instead return [[EQ:complete_equation]] and store the entire equality or multi-step chain in that one equation entry. Do not embed standalone equations only within the question or model answer.
 
+When a problem has multiple components or members of one variable family, use explicit lowercase component subscripts: x_a and x_b, y_a and y_b, and the same pattern for any additional components. Do not use an ambiguous bare x or y where a component identity is required. Every component-indexed identifier must be represented by a matching [[EQ:label]] reference in the question body, every answer option, and the model answer; store its canonical form, such as x_a, in equations[].expression.
+
 Set location to question when the label appears in the question body or an answer option, and set location to solution when it appears in the model answer. A label is prohibited from appearing in both question and solution content. If the same mathematical expression is needed in both, create two equation entries with distinct labels and matching locations, then use the corresponding label in each place.
 
 Output Format
@@ -91,7 +93,7 @@ Return exactly one valid JSON object with the following structure.
  "questions": [
    {
      "type": "{question_type}",
-     "body": "The gas constant is [[EQ:gas_constant]]. Use [[EQ:question_equation]].",
+     "body": "The gas constant is [[EQ:gas_constant]]. Compare [[EQ:x_a_symbol]] with [[EQ:x_b_symbol]] and use [[EQ:question_equation]].",
      "model_answer": "Apply [[EQ:solution_equation]].",
      "equations": [
        {
@@ -105,8 +107,18 @@ Return exactly one valid JSON object with the following structure.
          "location": "question"
        },
        {
+         "label": "x_a_symbol",
+         "expression": "x_a",
+         "location": "question"
+       },
+       {
+         "label": "x_b_symbol",
+         "expression": "x_b",
+         "location": "question"
+       },
+       {
          "label": "solution_equation",
-         "expression": "G_mix/(R T) = x_A ln(x_A) + x_B ln(x_B)",
+         "expression": "G_mix/(R T) = x_a ln(x_a) + x_b ln(x_b)",
          "location": "solution"
        }
      ],
@@ -119,12 +131,12 @@ Return exactly one valid JSON object with the following structure.
        "question_type": "{question_type}",
        "difficulty_level": "{difficulty}",
        "intended_assessment_setting": "Not Assigned",
-       "mse202_concepts": "{mse202_concepts}",
-       "mse302_concepts": "{mse302_concepts}",
+       "mse202_concepts": ["{mse202_concepts}"],
+       "mse302_concepts": ["{mse302_concepts}"],
        "concept_map_bridge": "{concept_bridge}",
        "materials_science_context": "{materials_science_context}",
        "estimated_time": "{estimated_time}",
-       "learning_objectives": "{learning_objective}",
+       "learning_objectives": ["{learning_objective}"],
        "id_requirements": "Not Assigned"
      }
    }

@@ -15,6 +15,7 @@ from backend.models.experiment import Condition, utc_now
 from backend.models.run import Assessment, Run, RunReferencePdf
 from backend.models.source_document import RunSourceDocument, SourceDocument
 from backend.services.assessment_rubric import RUBRIC_VERSION
+from backend.services.assessment_recovery_service import assessment_is_accepted_or_valid
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 
 
@@ -172,7 +173,7 @@ def retry_llm_evaluation(db: Session, assessment_id: int) -> Run:
         raise HTTPException(status_code=404, detail="Assessment not found")
     run = assessment.run
     if (
-        run.status != "complete"
+        not assessment_is_accepted_or_valid(run)
         or assessment.parsed_json is None
         or run.document_artifact is None
     ):

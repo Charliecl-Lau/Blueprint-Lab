@@ -40,7 +40,8 @@ class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','prompting','generating','documenting','complete','error')",
+            "status IN ('pending','prompting','generating','documenting','complete',"
+            "'complete_with_warnings','error')",
             name="ck_runs_status",
         ),
         UniqueConstraint("condition_id", "run_number"),
@@ -78,7 +79,6 @@ class Run(Base):
     seed: Mapped[Optional[int]] = mapped_column(Integer)
     max_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     model_settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    generated_json: Mapped[Optional[dict]] = mapped_column(JSON)
     request_id: Mapped[Optional[str]] = mapped_column(String)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     finish_reason: Mapped[Optional[str]] = mapped_column(String)
@@ -116,6 +116,11 @@ class Run(Base):
     @property
     def reference_pdf_filenames(self) -> list[str]:
         return [item.original_filename for item in self.reference_pdfs]
+
+    @property
+    def generated_json(self) -> Optional[dict]:
+        """Deprecated compatibility view; assessments.parsed_json is canonical."""
+        return self.assessment.parsed_json if self.assessment is not None else None
 
 
 class RunReferencePdf(Base):
@@ -183,13 +188,37 @@ class Prompt(Base):
 
 class Assessment(Base):
     __tablename__ = "assessments"
-    __table_args__ = (CheckConstraint("length(output_hash) = 64"),)
+    __table_args__ = (
+        CheckConstraint("length(output_hash) = 64"),
+        CheckConstraint(
+            "validation_status IN ('valid','warning','invalid')",
+            name="ck_assessments_validation_status",
+        ),
+        CheckConstraint(
+            "parsed_json_hash IS NULL OR length(parsed_json_hash) = 64",
+            name="ck_assessments_parsed_json_hash",
+        ),
+        CheckConstraint(
+            "defects_accepted_at IS NULL OR validation_status = 'warning'",
+            name="ck_assessments_warning_acceptance",
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=False)
     raw_response_text: Mapped[str] = mapped_column(Text, nullable=False)
     parsed_json: Mapped[Optional[dict]] = mapped_column(JSON)
     output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     schema_version: Mapped[str] = mapped_column(String, nullable=False)
+    validation_status: Mapped[str] = mapped_column(
+        String, nullable=False, default="valid"
+    )
+    validation_issues: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    recovery_actions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    parsed_json_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    defects_accepted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    defects_accepted_by: Mapped[Optional[str]] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     run: Mapped[Run] = relationship(back_populates="assessment")
     questions: Mapped[list["AssessmentQuestion"]] = relationship(

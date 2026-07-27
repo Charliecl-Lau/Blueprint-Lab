@@ -187,8 +187,8 @@ class QuestionMetadata(BaseModel):
     mse302_concepts: List[str] = Field(min_length=1)
     concept_map_bridge: str
     materials_science_context: str
-    estimated_time: str = ""
-    learning_objectives: List[str] = Field(default_factory=list)
+    estimated_time: str = Field(min_length=1)
+    learning_objectives: List[str] = Field(min_length=1)
     id_requirements: str = ""
 
 
@@ -355,6 +355,12 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                             },
                             "concept_map_bridge": {"type": "string"},
                             "materials_science_context": {"type": "string"},
+                            "estimated_time": {"type": "string"},
+                            "learning_objectives": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 1,
+                            },
                         },
                         "required": [
                             "question_title",
@@ -365,6 +371,8 @@ ASSESSMENT_PROVIDER_SCHEMA = {
                             "mse302_concepts",
                             "concept_map_bridge",
                             "materials_science_context",
+                            "estimated_time",
+                            "learning_objectives",
                         ],
                     },
                     "model_answer": {"type": "string"},

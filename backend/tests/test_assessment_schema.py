@@ -23,6 +23,8 @@ def complete_payload():
                 "mse302_concepts": ["Gas-solid equilibrium"],
                 "concept_map_bridge": "Uses free energy to determine phase equilibrium.",
                 "materials_science_context": "Connects thermodynamics to phase transformations.",
+                "estimated_time": "15 minutes",
+                "learning_objectives": ["Apply Gibbs free energy to equilibrium."],
             },
             "body": "Determine the equilibrium oxygen pressure.",
             "model_answer": "Set the reaction Gibbs free energy to zero.",
@@ -48,6 +50,8 @@ def complete_payload():
     "mse302_concepts",
     "concept_map_bridge",
     "materials_science_context",
+    "estimated_time",
+    "learning_objectives",
 ])
 def test_required_metadata_fields_cannot_be_omitted(complete_payload, field):
     payload = deepcopy(complete_payload)
@@ -103,9 +107,12 @@ def test_provider_schema_requires_complete_assessment_contract():
         "mse302_concepts",
         "concept_map_bridge",
         "materials_science_context",
+        "estimated_time",
+        "learning_objectives",
     }
     assert metadata["properties"]["mse202_concepts"]["minItems"] == 1
     assert metadata["properties"]["mse302_concepts"]["minItems"] == 1
+    assert metadata["properties"]["learning_objectives"]["minItems"] == 1
     assert question["properties"]["revision_options"]["minItems"] == 2
     assert question["properties"]["revision_options"]["maxItems"] == 3
 

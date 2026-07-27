@@ -11,6 +11,15 @@ from sse_starlette.sse import EventSourceResponse
 from backend.config import settings
 from backend.database import SessionLocal, get_db
 from backend.models.run import Run
+from backend.models.experiment import utc_now
+from backend.services.assessment_recovery_service import (
+    AssessmentRecoveryError,
+    accept_assessment_defects,
+    assessment_is_accepted_or_valid,
+    recover_saved_assessment,
+    set_warning_run_state,
+)
+from backend.services.document_artifact import save_assessment_artifact
 from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.schemas.run_schema import (
     RecentRun,
@@ -32,9 +41,17 @@ from backend.services.reference_pdfs import (
     upload_provider_attachments,
 )
 from backend.workers.assessment_worker import run_generation_pipeline
+from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
 
 router = APIRouter(tags=["runs"])
-_TERMINAL_RUN_STATES = {"complete", "error"}
+_TERMINAL_RUN_STATES = {"complete", "complete_with_warnings", "error"}
+
+
+def _locked_run(db: Session, run_id: int) -> Optional[Run]:
+    statement = select(Run).where(Run.id == run_id)
+    if db.bind.dialect.name == "postgresql":
+        statement = statement.with_for_update()
+    return db.scalar(statement)
 
 
 def _ordered_questions(run: Run):
@@ -110,13 +127,13 @@ def _grading_question_id(run: Run, reviewer_id: str):
 
 def run_detail(run: Run, include_raw_response: bool = False):
     questions = _ordered_questions(run)
-    grading_available = bool(questions) and run.status == "complete" and all(
+    grading_available = bool(questions) and assessment_is_accepted_or_valid(run) and all(
         _has_current_llm_evaluation(question) for question in questions
     )
     viewer_ready_at = run.viewer_ready_at
     if (
         viewer_ready_at is None
-        and run.status == "complete"
+        and run.status in {"complete", "complete_with_warnings"}
         and run.assessment is not None
         and run.assessment.parsed_json is not None
     ):
@@ -156,6 +173,11 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "status": run.status,
         "viewer_ready_at": viewer_ready_at,
         "progress_message": run.progress_message,
+        "viewer_available": bool(
+            run.assessment
+            and run.assessment.parsed_json is not None
+            and run.status in {"complete", "complete_with_warnings"}
+        ),
         "evaluation_status": _evaluation_status(questions),
         "grading_available": grading_available,
         "grading_question_id": (
@@ -172,6 +194,21 @@ def run_detail(run: Run, include_raw_response: bool = False):
             "parsed_json": run.assessment.parsed_json,
             "output_hash": run.assessment.output_hash,
             "schema_version": run.assessment.schema_version,
+            "validation": {
+                "status": run.assessment.validation_status,
+                "issues": list(run.assessment.validation_issues or []),
+                "recovery_actions": list(run.assessment.recovery_actions or []),
+                "parsed_json_hash": run.assessment.parsed_json_hash,
+                "defects_accepted_at": (
+                    run.assessment.defects_accepted_at.isoformat()
+                    if run.assessment.defects_accepted_at else None
+                ),
+                "defects_accepted_by": run.assessment.defects_accepted_by,
+                "acceptance_required": (
+                    run.assessment.validation_status == "warning"
+                    and run.assessment.defects_accepted_at is None
+                ),
+            },
             **({"raw_response_text": run.assessment.raw_response_text}
                if include_raw_response else {}),
         },
@@ -302,6 +339,65 @@ def get_run(run_id: int, include_raw_response: bool = False, db: Session = Depen
     run = db.get(Run, run_id)
     if run is None: raise HTTPException(404, "Run not found")
     return run_detail(run, include_raw_response)
+
+
+@router.post("/runs/{run_id}/recover-assessment")
+def recover_assessment(run_id: int, db: Session = Depends(get_db)):
+    run = _locked_run(db, run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    if run.status in {"complete", "complete_with_warnings"}:
+        return run_detail(run)
+    if run.status != "error" or run.error_type != "assessment_parse_error":
+        raise HTTPException(409, "Run is not eligible for assessment recovery")
+    try:
+        state = recover_saved_assessment(db, run, source="manual_recovery")
+        if state == "valid":
+            run.status = "documenting"
+            run.progress_message = "Creating assessment document"
+            save_assessment_artifact(db, run)
+            run.status = "complete"
+            run.progress_message = "Complete"
+            run.viewer_ready_at = utc_now()
+            run.completed_at = utc_now()
+            run.error_type = None
+            run.error_message = None
+        elif state == "warning":
+            set_warning_run_state(run)
+        db.commit()
+    except AssessmentRecoveryError as exc:
+        db.rollback()
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+    if state == "valid":
+        run_llm_evaluation_pipeline.delay(run.id)
+    return run_detail(run)
+
+
+@router.post("/runs/{run_id}/accept-assessment-defects")
+def accept_defects(run_id: int, db: Session = Depends(get_db)):
+    run = _locked_run(db, run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    already_accepted = bool(
+        run.assessment and run.assessment.defects_accepted_at is not None
+    )
+    try:
+        accept_assessment_defects(db, run, settings.local_reviewer_id)
+        if run.document_artifact is None:
+            save_assessment_artifact(db, run)
+        db.commit()
+    except AssessmentRecoveryError as exc:
+        db.rollback()
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+    if not already_accepted:
+        run_llm_evaluation_pipeline.delay(run.id)
+    return run_detail(run)
 
 @router.post("/runs/{run_id}/retry", response_model=RunSummary)
 async def post_retry(

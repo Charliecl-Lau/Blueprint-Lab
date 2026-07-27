@@ -23,6 +23,7 @@ from backend.services.assessment_rubric import (
     RUBRIC_VERSION,
     calculate_evaluation,
 )
+from backend.services.assessment_recovery_service import assessment_is_accepted_or_valid
 
 
 class EvaluationServiceError(RuntimeError):
@@ -132,7 +133,7 @@ def create_human_draft(
     if existing is not None:
         return existing
     run = question.assessment.run
-    if run.status != "complete" or _current_llm_evaluation(question) is None:
+    if not assessment_is_accepted_or_valid(run) or _current_llm_evaluation(question) is None:
         raise EvaluationConflictError(
             "Human grading is unavailable until LLM evaluation completes"
         )
@@ -392,7 +393,7 @@ def _ordered_experiment_questions(db: Session, run: Run) -> list[AssessmentQuest
     return [
         item
         for item in questions
-        if item.assessment.run.status == "complete"
+        if assessment_is_accepted_or_valid(item.assessment.run)
         and _current_llm_evaluation(item) is not None
     ]
 
@@ -403,7 +404,7 @@ def build_grading_context(
     question = _question(db, question_id)
     run = question.assessment.run
     llm = _current_llm_evaluation(question)
-    if run.status != "complete" or llm is None:
+    if not assessment_is_accepted_or_valid(run) or llm is None:
         raise EvaluationConflictError(
             "Grading is unavailable until LLM evaluation completes"
         )

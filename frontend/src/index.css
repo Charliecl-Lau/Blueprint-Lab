@@ -44,6 +44,10 @@ body { margin: 0; background: #f5f5f7; color: #1d1d1f; font-family: Inter, syste
 .viewer-action-group { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 10px; }
 .evaluation-status { display: inline-flex; margin-top: 5px; padding: 5px 9px; border-radius: 999px; color: #7a4d00; background: #fff4d6; font-size: 12px; font-weight: 600; }
 .evaluation-status.complete { color: #137333; background: #e6f4ea; }
+.status.complete_with_warnings { color: #8a4b00; background: #fff3cd; }
+.assessment-warning { border: 1px solid #d99800; background: #fff8e1; color: #5f3700; padding: 16px; margin: 18px 0; border-radius: 8px; }
+.assessment-warning h2 { margin-top: 0; }
+.assessment-warning ul { padding-left: 20px; }
 .evaluation-status.failed { color: #b42318; background: #fce8e6; }
 .condition-factors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
 .condition-factor { margin: 0; padding: 10px 12px; border-radius: 8px; background: #f7f7f8; }

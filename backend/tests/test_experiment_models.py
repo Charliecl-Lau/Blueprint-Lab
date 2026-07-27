@@ -1,4 +1,4 @@
-from backend.models import Condition, DocumentArtifact, Experiment, Generation, PromptRecord
+from backend.models import Assessment, Condition, DocumentArtifact, Experiment, Generation, PromptRecord
 from backend.models.run import RubricResult
 
 
@@ -71,7 +71,12 @@ def test_legacy_generation_children_round_trip(test_db):
         model_name="gemini-2.0-flash",
         model_version="2026-01",
         generation_time_ms=1200,
-        generated_json={"questions": []},
+    )
+    generation.assessment = Assessment(
+        raw_response_text='{"questions": []}',
+        parsed_json={"questions": []},
+        output_hash="c" * 64,
+        schema_version="1",
     )
     generation.prompt_record = PromptRecord(
         prompt_structure="openai",

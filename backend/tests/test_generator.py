@@ -14,6 +14,7 @@ def test_generate_questions_uses_full_prompt_and_rich_schema_directly():
                 "mse302_concepts": ["mechanical work"],
                 "concept_map_bridge": "Relate force intensity to mechanical work.",
                 "materials_science_context": "Mechanics of materials.",
+                "estimated_time": "10 minutes",
                 "learning_objectives": ["Define engineering stress."]
             },
             "body": "Which expression defines stress as force per area?",

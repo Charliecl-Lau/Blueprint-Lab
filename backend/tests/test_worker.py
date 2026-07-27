@@ -89,6 +89,8 @@ def complete_question(*, question_type, body, model_answer):
             "mse302_concepts": ["Mechanical stability"],
             "concept_map_bridge": "Connects force balance to mechanical stability.",
             "materials_science_context": "Applies equilibrium to stable material systems.",
+            "estimated_time": "10 minutes",
+            "learning_objectives": ["Solve equilibrium problems."],
         },
         "body": body,
         "options": [],
@@ -795,6 +797,78 @@ def test_generation_pipeline_stops_after_three_invalid_repairs(
     assert usage_stages == ["assessment", "repair", "repair", "repair"]
     assert generation_fixture.model_call_count == 4
     assert generation_fixture.total_tokens == 85
+    mock_redis.evaluation_delay.assert_not_called()
+
+
+def test_generation_pipeline_recovers_explicit_component_symbols_after_repair_limit(
+    generation_fixture,
+    test_db,
+):
+    generation_fixture.experiment.number_of_questions = 1
+    test_db.commit()
+    question = complete_question(
+        question_type="short_answer",
+        body="Compare x_B with the reference value.",
+        model_answer="The relevant component is x_A.",
+    )
+    question["equations"] = []
+    rejected_raw = __import__("json").dumps({"questions": [question]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(rejected_raw, 20, 8, 28),
+        result(rejected_raw, 12, 6, 18),
+        result(rejected_raw, 13, 6, 19),
+        result(rejected_raw, 14, 6, 20),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assessment = generation_fixture.assessment
+    assert generation_fixture.status == "complete"
+    assert assessment.validation_status == "valid"
+    assert assessment.parsed_json["questions"][0]["body"] == (
+        "Compare [[EQ:auto_q1_body_x_b_1]] with the reference value."
+    )
+    assert assessment.parsed_json["questions"][0]["model_answer"] == (
+        "The relevant component is [[EQ:auto_q1_model_answer_x_a_1]]."
+    )
+    assert assessment.recovery_actions
+    assert generation_fixture.document_artifact is not None
+    mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+
+
+def test_generation_pipeline_keeps_renderable_assessment_with_warnings_after_repair_limit(
+    generation_fixture,
+    test_db,
+):
+    generation_fixture.experiment.number_of_questions = 1
+    test_db.commit()
+    question = complete_question(
+        question_type="short_answer",
+        body="Use G = H - T S to determine the free energy.",
+        model_answer="Substitute the supplied values.",
+    )
+    question["equations"] = []
+    rejected_raw = __import__("json").dumps({"questions": [question]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(rejected_raw, 20, 8, 28),
+        result(rejected_raw, 12, 6, 18),
+        result(rejected_raw, 13, 6, 19),
+        result(rejected_raw, 14, 6, 20),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assessment = generation_fixture.assessment
+    assert generation_fixture.status == "complete_with_warnings"
+    assert generation_fixture.viewer_ready_at is not None
+    assert assessment.validation_status == "warning"
+    assert assessment.parsed_json is not None
+    assert assessment.validation_issues
+    assert generation_fixture.document_artifact is None
     mock_redis.evaluation_delay.assert_not_called()
 
 

@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from backend.models.experiment import Condition, DocumentArtifact, Experiment, Generation, PromptRecord
+from backend.models.experiment import Assessment, Condition, DocumentArtifact, Experiment, Generation, PromptRecord
 
 
 def make_generation(test_db):
@@ -33,7 +33,12 @@ def make_generation(test_db):
         model_name="gemini",
         model_version="v1",
         generation_time_ms=20,
-        generated_json={"questions": []},
+    )
+    generation.assessment = Assessment(
+        raw_response_text='{"questions": []}',
+        parsed_json={"questions": []},
+        output_hash="c" * 64,
+        schema_version="1",
     )
     test_db.add(generation)
     test_db.flush()
