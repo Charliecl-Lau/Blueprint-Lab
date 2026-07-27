@@ -118,12 +118,6 @@ class Run(Base):
     def reference_pdf_filenames(self) -> list[str]:
         return [item.original_filename for item in self.reference_pdfs]
 
-    @property
-    def generated_json(self) -> Optional[dict]:
-        """Deprecated compatibility view; assessments.parsed_json is canonical."""
-        return self.assessment.parsed_json if self.assessment is not None else None
-
-
 class RunReferencePdf(Base):
     __tablename__ = "run_reference_pdfs"
     __table_args__ = (

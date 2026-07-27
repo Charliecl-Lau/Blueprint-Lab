@@ -28,6 +28,7 @@ def save_assessment_artifact(db: Session, run: Run) -> DocumentArtifact:
         course=run.experiment.course,
         topic=run.experiment.topic,
         questions=assessment.parsed_json["questions"],
+        traceability=assessment.parsed_json.get("traceability"),
     )
     artifact = DocumentArtifact(
         run_id=run.id,

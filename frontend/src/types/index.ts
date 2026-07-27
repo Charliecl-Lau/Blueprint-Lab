@@ -147,7 +147,6 @@ export interface Run {
   model_name?: string | null
   model_version?: string | null
   generation_time_ms?: number | null
-  generated_json?: { questions: Question[] } | null
   condition?: Condition
   prompt_text?: string | null
   prompt?: PromptProvenance | null

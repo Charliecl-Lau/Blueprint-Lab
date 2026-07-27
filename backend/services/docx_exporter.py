@@ -13,21 +13,12 @@ METADATA_FIELDS = (
     ("Question Title", "question_title"),
     ("Question Type", "question_type"),
     ("Difficulty Level", "difficulty_level"),
-    ("Intended Assessment Setting", "intended_assessment_setting"),
     ("MSE202 Concept(s)", "mse202_concepts"),
     ("MSE302 Concept(s)", "mse302_concepts"),
     ("Concept-Map Bridge", "concept_map_bridge"),
     ("Materials Science Context", "materials_science_context"),
-    ("Estimated Time", "estimated_time"),
+    ("Estimated Time (minutes)", "estimated_time_minutes"),
     ("Learning Objectives", "learning_objectives"),
-    ("ID Requirements", "id_requirements"),
-)
-
-TRACEABILITY_FIELDS = (
-    ("Prompt Template ID", "prompt_template_id"),
-    ("Actual Prompt ID", "actual_prompt_id"),
-    ("Output ID", "output_id"),
-    ("Final Question ID", "final_question_id"),
 )
 
 
@@ -68,10 +59,14 @@ def _text_value(value):
 
 
 def _metadata_rows(*, run_id, prompt_id, condition_code, run_number,
-                   course, topic, questions):
+                   course, topic, questions, traceability=None):
+    traceability = traceability or {}
     rows = [
+        ("Experiment ID", _text_value(traceability.get("experiment_id")) or "Not Assigned"),
+        ("Condition ID", _text_value(traceability.get("condition_id")) or "Not Assigned"),
         ("Run ID", str(run_id)),
         ("Prompt ID", str(prompt_id)),
+        ("Assessment ID", _text_value(traceability.get("assessment_id")) or "Not Assigned"),
         ("Condition Code", str(condition_code)),
         ("Run Number", str(run_number)),
         ("Course", str(course)),
@@ -85,8 +80,6 @@ def _metadata_rows(*, run_id, prompt_id, condition_code, run_number,
         value = _text_value(metadata.get(key))
         if value:
             rows.append((label, value))
-    for label, key in TRACEABILITY_FIELDS:
-        rows.append((label, _text_value(metadata.get(key)) or "Not Assigned"))
     return rows
 
 
@@ -151,6 +144,11 @@ def _add_item_heading(document, *, kind, index, question):
     text = f"{kind} {index}"
     if title:
         text += f": {title}"
+    question_id = question.get("traceability", {}).get(
+        "assessment_question_id"
+    )
+    if question_id is not None:
+        text += f" [Question ID {question_id}]"
     document.add_heading(text, level=3)
 
 
@@ -165,7 +163,7 @@ def _add_standalone_equation(document, equation):
 
 def build_assessment_docx(*, run_id: int, prompt_id: int,
                           condition_code: str, run_number: int, course: str, topic: str,
-                          questions: list[dict]) -> bytes:
+                          questions: list[dict], traceability=None) -> bytes:
     document = Document()
     _configure_styles(document)
     document.add_heading("Blueprint Lab Assessment", level=1)
@@ -179,6 +177,7 @@ def build_assessment_docx(*, run_id: int, prompt_id: int,
         course=course,
         topic=topic,
         questions=questions,
+        traceability=traceability,
     )
 
     document.add_heading("Generated Questions", level=2)
