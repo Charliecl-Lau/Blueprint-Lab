@@ -134,7 +134,7 @@ def test_llm_client_passes_provider_structured_output_schema():
         assert not contains_default(config.response_json_schema)
 
 
-def test_llm_client_uses_flat_schema_field_for_assessment_provider_schema():
+def test_llm_client_uses_json_schema_for_canonical_assessment_contract():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         response = MagicMock()
         response.text = '{"questions": []}'
@@ -151,8 +151,8 @@ def test_llm_client_uses_flat_schema_field_for_assessment_provider_schema():
         )
 
         config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
-        assert config.response_schema["properties"]["questions"]
-        assert config.response_json_schema is None
+        assert config.response_json_schema["properties"]["questions"]
+        assert config.response_schema is None
 
 
 def test_llm_client_uses_configured_model_defaults_without_thinking_override():

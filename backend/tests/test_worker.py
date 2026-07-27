@@ -84,17 +84,17 @@ def complete_question(*, question_type, body, model_answer):
             "question_title": "Equilibrium condition",
             "question_type": question_type,
             "difficulty_level": "introductory",
-            "intended_assessment_setting": "In-class assessment",
             "mse202_concepts": ["Static equilibrium"],
             "mse302_concepts": ["Mechanical stability"],
             "concept_map_bridge": "Connects force balance to mechanical stability.",
             "materials_science_context": "Applies equilibrium to stable material systems.",
-            "estimated_time": "10 minutes",
+            "estimated_time_minutes": 10,
             "learning_objectives": ["Solve equilibrium problems."],
         },
         "body": body,
         "options": [],
         "model_answer": model_answer,
+        "equations": [],
         "revision_options": [
             "Add a numerical force balance.",
             "Ask students to state assumptions.",
@@ -374,19 +374,18 @@ def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test
         assert generation_fixture.status == "complete"
         assert llm.generate.call_count == 1
         assert llm.generate.call_args.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
-        question_schema = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
+        question_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionResponse"]
         assert set(question_schema["required"]) >= {
             "type", "body", "metadata", "revision_options"
         }
-        assert "quality_check" not in question_schema["required"]
-        assert "quality_check" not in question_schema["properties"]
+        assert "quality_checks" in question_schema["properties"]
         assert "metadata" in question_schema["properties"]
-        assert "$defs" not in ASSESSMENT_PROVIDER_SCHEMA
-        assert "body_segments" not in question_schema["properties"]
-        equation_schema = question_schema["properties"]["equations"]["items"]
-        assert equation_schema["required"] == ["label", "expression", "location"]
-        assert "math" not in equation_schema["properties"]
-        assert "model_answer_segments" not in question_schema["properties"]
+        assert "$defs" in ASSESSMENT_PROVIDER_SCHEMA
+        assert "body_segments" in question_schema["properties"]
+        equation_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["EquationSchema"]
+        assert {"label", "location"}.issubset(equation_schema["required"])
+        assert "math" in equation_schema["properties"]
+        assert "model_answer_segments" in question_schema["properties"]
         usage_calls = (
             test_db.query(ModelCallUsage)
             .filter_by(run_id=generation_fixture.id)

@@ -203,21 +203,15 @@ export interface Question {
   id?: number
   type: 'mcq' | 'long_answer' | 'short_answer'
   metadata?: {
-    prompt_template_id?: string
-    actual_prompt_id?: string
-    output_id?: string
-    final_question_id?: string
     question_title: string
     question_type: 'mcq' | 'long_answer' | 'short_answer'
     difficulty_level: string
-    intended_assessment_setting: string
     mse202_concepts: string[]
     mse302_concepts: string[]
-    concept_map_bridge: string
+    concept_map_bridge: string | null
     materials_science_context: string
-    estimated_time?: string
+    estimated_time_minutes: number
     learning_objectives?: string[]
-    id_requirements?: string
   }
   body: string
   body_segments?: ContentSegment[]

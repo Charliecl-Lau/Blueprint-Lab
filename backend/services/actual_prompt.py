@@ -109,6 +109,7 @@ _OPENAI_PLACEHOLDERS = (
     "cognitive_demand",
     "number_of_questions",
     "estimated_time",
+    "estimated_time_minutes",
     "mse202_concepts",
     "mse302_concepts",
     "concept_bridge_section",
@@ -232,6 +233,7 @@ def render_openai_actual_prompt(
         ),
         "number_of_questions": str(number_of_questions),
         "estimated_time": f"{estimated_time_minutes} minutes",
+        "estimated_time_minutes": str(estimated_time_minutes),
         "mse202_concepts": (
             normalized_topic if normalized_course == "mse202" else "Not Provided"
         ),

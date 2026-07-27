@@ -169,30 +169,38 @@ ContentSegment = Annotated[
 
 
 class MCQOptionSchema(BaseModel):
+    model_config = {"extra": "forbid"}
+
     body: str
     is_correct: bool
     segments: Optional[List[ContentSegment]] = None
 
 
 class QuestionMetadata(BaseModel):
-    prompt_template_id: str = "Not Assigned"
-    actual_prompt_id: str = "Not Assigned"
-    output_id: str = "Not Assigned"
-    final_question_id: str = "Not Assigned"
+    model_config = {"extra": "forbid"}
+
     question_title: str
     question_type: Literal["mcq", "short_answer", "long_answer"]
     difficulty_level: str
-    intended_assessment_setting: str
     mse202_concepts: List[str] = Field(min_length=1)
     mse302_concepts: List[str] = Field(min_length=1)
-    concept_map_bridge: str
+    concept_map_bridge: Optional[str]
     materials_science_context: str
-    estimated_time: str = Field(min_length=1)
+    estimated_time_minutes: int = Field(ge=1)
     learning_objectives: List[str] = Field(min_length=1)
-    id_requirements: str = ""
+
+
+class QualityCheckSchema(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    criterion: str
+    rating: int = Field(ge=1, le=5)
+    comment: str
 
 
 class EquationSchema(BaseModel):
+    model_config = {"extra": "forbid"}
+
     label: str
     math: Optional[MathNode] = None
     expression: Optional[str] = None
@@ -206,7 +214,7 @@ class EquationSchema(BaseModel):
 
 
 class QuestionResponse(BaseModel):
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "extra": "forbid"}
 
     type: Literal["mcq", "short_answer", "long_answer"]
     metadata: QuestionMetadata
@@ -215,7 +223,8 @@ class QuestionResponse(BaseModel):
     options: List[MCQOptionSchema] = Field(default_factory=list)
     model_answer: Optional[str] = None
     model_answer_segments: Optional[List[ContentSegment]] = None
-    equations: List[EquationSchema] = Field(default_factory=list)
+    equations: List[EquationSchema]
+    quality_checks: List[QualityCheckSchema] = Field(default_factory=list)
     revision_options: List[str] = Field(min_length=2, max_length=3)
 
     @model_validator(mode="after")
@@ -317,107 +326,9 @@ class QuestionResponse(BaseModel):
 
 
 class AssessmentGenerationResponse(BaseModel):
+    model_config = {"extra": "forbid"}
+
     questions: List[QuestionResponse]
 
 
-ASSESSMENT_PROVIDER_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "questions": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "enum": ["mcq", "short_answer", "long_answer"],
-                    },
-                    "body": {"type": "string"},
-                    "metadata": {
-                        "type": "object",
-                        "properties": {
-                            "question_title": {"type": "string"},
-                            "question_type": {
-                                "type": "string",
-                                "enum": ["mcq", "short_answer", "long_answer"],
-                            },
-                            "difficulty_level": {"type": "string"},
-                            "intended_assessment_setting": {"type": "string"},
-                            "mse202_concepts": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                            },
-                            "mse302_concepts": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                            },
-                            "concept_map_bridge": {"type": "string"},
-                            "materials_science_context": {"type": "string"},
-                            "estimated_time": {"type": "string"},
-                            "learning_objectives": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                            },
-                        },
-                        "required": [
-                            "question_title",
-                            "question_type",
-                            "difficulty_level",
-                            "intended_assessment_setting",
-                            "mse202_concepts",
-                            "mse302_concepts",
-                            "concept_map_bridge",
-                            "materials_science_context",
-                            "estimated_time",
-                            "learning_objectives",
-                        ],
-                    },
-                    "model_answer": {"type": "string"},
-                    "options": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "body": {"type": "string"},
-                                "is_correct": {"type": "boolean"},
-                            },
-                            "required": ["body", "is_correct"],
-                        },
-                    },
-                    "equations": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "label": {"type": "string"},
-                                "expression": {"type": "string"},
-                                "location": {
-                                    "type": "string",
-                                    "enum": ["question", "solution"],
-                                },
-                            },
-                            "required": ["label", "expression", "location"],
-                        },
-                    },
-                    "revision_options": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": 2,
-                        "maxItems": 3,
-                    },
-                },
-                "required": [
-                    "type",
-                    "body",
-                    "metadata",
-                    "equations",
-                    "revision_options",
-                ],
-            },
-        }
-    },
-    "required": ["questions"],
-}
+ASSESSMENT_PROVIDER_SCHEMA = AssessmentGenerationResponse.model_json_schema()

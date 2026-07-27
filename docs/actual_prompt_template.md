@@ -122,21 +122,15 @@ Return exactly one valid JSON object with the following structure.
        }
      ],
      "metadata": {
-       "prompt_template_id": "Not Assigned",
-       "actual_prompt_id": "Not Assigned",
-       "output_id": "Not Assigned",
-       "final_question_id": "Not Assigned",
        "question_title": "Generated thermodynamics question",
        "question_type": "{question_type}",
        "difficulty_level": "{difficulty}",
-       "intended_assessment_setting": "Not Assigned",
        "mse202_concepts": ["{mse202_concepts}"],
        "mse302_concepts": ["{mse302_concepts}"],
        "concept_map_bridge": {concept_bridge_metadata_value},
        "materials_science_context": "{materials_science_context}",
-       "estimated_time": "{estimated_time}",
-       "learning_objectives": {learning_objectives_json},
-       "id_requirements": "Not Assigned"
+       "estimated_time_minutes": {estimated_time_minutes},
+       "learning_objectives": {learning_objectives_json}
      }
    }
  ]

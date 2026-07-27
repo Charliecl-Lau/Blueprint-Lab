@@ -41,7 +41,6 @@ def question_payload(ordinal=0):
             "question_title": f"Question {ordinal + 1}",
             "question_type": "long_answer",
             "difficulty_level": "advanced",
-            "intended_assessment_setting": "Homework",
             "mse202_concepts": ["Equilibrium"],
             "mse302_concepts": ["Chemical potential"],
             "concept_map_bridge": "Connects equilibrium to chemical potential.",

@@ -99,7 +99,7 @@ The generated prompt must explicitly forbid returning equations as images, scree
 
 Assessment Metadata Requirement
 
-The generated prompt must instruct the assessment model to populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements. Traceability IDs that were not supplied must be set to "Not Assigned" rather than invented.
+The generated prompt must instruct the assessment model to populate a metadata object for every question containing exactly these fields: question_title, question_type, difficulty_level, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time_minutes, and learning_objectives. Database traceability IDs are application-owned and must not be invented by the model.
 
 JSON Output Specification
 
@@ -292,7 +292,7 @@ use explicit lowercase component variables such as x_a, x_b, y_a, and y_b rather
 
 require the final DOCX to use editable native Microsoft Word OMML equations; for every equation or mathematical expression in a question body, answer option, or model answer, add one corresponding equations[] entry containing exactly label, expression, and location; use a unique ASCII identifier for label and replace the expression at its exact position with [[EQ:label]]; never repeat the plain expression beside its placeholder; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; set location to question or solution; state that mathematical content with equations = [] is invalid; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
 
-populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements, using "Not Assigned" for any traceability ID that was not supplied rather than inventing one
+populate a metadata object for every question containing exactly these fields: question_title, question_type, difficulty_level, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time_minutes, and learning_objectives; database traceability IDs are application-owned and must not be invented
 JSON Output Requirements
 
 The generated prompt must instruct the assessment-generation model to return exactly one valid JSON object.

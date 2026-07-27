@@ -18,17 +18,17 @@ def complete_payload():
                 "question_title": "Oxygen equilibrium pressure",
                 "question_type": "short_answer",
                 "difficulty_level": "hard",
-                "intended_assessment_setting": "Timed examination",
                 "mse202_concepts": ["Gibbs free energy"],
                 "mse302_concepts": ["Gas-solid equilibrium"],
                 "concept_map_bridge": "Uses free energy to determine phase equilibrium.",
                 "materials_science_context": "Connects thermodynamics to phase transformations.",
-                "estimated_time": "15 minutes",
+                "estimated_time_minutes": 15,
                 "learning_objectives": ["Apply Gibbs free energy to equilibrium."],
             },
             "body": "Determine the equilibrium oxygen pressure.",
             "model_answer": "Set the reaction Gibbs free energy to zero.",
-            "quality_check": [{
+            "equations": [],
+            "quality_checks": [{
                 "criterion": "Technical correctness",
                 "rating": 5,
                 "comment": "The equilibrium criterion is applied correctly.",
@@ -45,12 +45,11 @@ def complete_payload():
     "question_title",
     "question_type",
     "difficulty_level",
-    "intended_assessment_setting",
     "mse202_concepts",
     "mse302_concepts",
     "concept_map_bridge",
     "materials_science_context",
-    "estimated_time",
+    "estimated_time_minutes",
     "learning_objectives",
 ])
 def test_required_metadata_fields_cannot_be_omitted(complete_payload, field):
@@ -70,15 +69,30 @@ def test_concept_lists_cannot_be_empty(complete_payload, field):
         AssessmentGenerationResponse.model_validate(payload)
 
 
-def test_quality_check_is_not_required_and_legacy_values_remain_readable(complete_payload):
+def test_declared_quality_checks_are_preserved_and_optional(complete_payload):
     without_quality_check = deepcopy(complete_payload)
-    del without_quality_check["questions"][0]["quality_check"]
+    del without_quality_check["questions"][0]["quality_checks"]
 
     parsed = AssessmentGenerationResponse.model_validate(without_quality_check)
-    legacy = AssessmentGenerationResponse.model_validate(complete_payload)
+    checked = AssessmentGenerationResponse.model_validate(complete_payload)
 
-    assert not hasattr(parsed.questions[0], "quality_check")
-    assert not hasattr(legacy.questions[0], "quality_check")
+    assert parsed.questions[0].quality_checks == []
+    assert checked.questions[0].quality_checks[0].criterion == "Technical correctness"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("intended_assessment_setting", "Exam"),
+        ("unexpected_metadata", "must fail"),
+    ],
+)
+def test_removed_or_unknown_metadata_is_rejected(complete_payload, field, value):
+    payload = deepcopy(complete_payload)
+    payload["questions"][0]["metadata"][field] = value
+
+    with pytest.raises(ValidationError):
+        AssessmentGenerationResponse.model_validate(payload)
 
 
 @pytest.mark.parametrize("count", [0, 1, 4])
@@ -91,23 +105,21 @@ def test_revision_options_require_two_or_three_items(complete_payload, count):
 
 
 def test_provider_schema_requires_complete_assessment_contract():
-    question = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
+    question = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionResponse"]
     assert set(question["required"]) >= {
         "type", "body", "metadata", "equations", "revision_options"
     }
-    assert "quality_check" not in question["required"]
-    assert "quality_check" not in question["properties"]
-    metadata = question["properties"]["metadata"]
+    assert "quality_checks" in question["properties"]
+    metadata = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionMetadata"]
     assert set(metadata["required"]) >= {
         "question_title",
         "question_type",
         "difficulty_level",
-        "intended_assessment_setting",
         "mse202_concepts",
         "mse302_concepts",
         "concept_map_bridge",
         "materials_science_context",
-        "estimated_time",
+        "estimated_time_minutes",
         "learning_objectives",
     }
     assert metadata["properties"]["mse202_concepts"]["minItems"] == 1
@@ -393,23 +405,15 @@ def test_malformed_structured_fraction_is_rejected(complete_payload):
         AssessmentGenerationResponse.model_validate(complete_payload)
 
 
-def test_provider_schema_remains_flat_and_does_not_send_recursive_math_to_provider():
-    question = ASSESSMENT_PROVIDER_SCHEMA["properties"]["questions"]["items"]
-    assert "$defs" not in ASSESSMENT_PROVIDER_SCHEMA
-    assert "body_segments" not in question["properties"]
-    assert "model_answer_segments" not in question["properties"]
-    equation = question["properties"]["equations"]["items"]
-    assert equation == {
-        "type": "object",
-        "properties": {
-            "label": {"type": "string"},
-            "expression": {"type": "string"},
-            "location": {
-                "type": "string",
-                "enum": ["question", "solution"],
-            },
-        },
-        "required": ["label", "expression", "location"],
-    }
-    option = question["properties"]["options"]["items"]
-    assert "segments" not in option["properties"]
+def test_provider_schema_is_generated_from_the_canonical_pydantic_contract():
+    question = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionResponse"]
+    equation = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["EquationSchema"]
+    option = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["MCQOptionSchema"]
+
+    assert "body_segments" in question["properties"]
+    assert "model_answer_segments" in question["properties"]
+    assert "quality_checks" in question["properties"]
+    assert {"label", "location"}.issubset(equation["required"])
+    assert "math" in equation["properties"]
+    assert "expression" in equation["properties"]
+    assert "segments" in option["properties"]

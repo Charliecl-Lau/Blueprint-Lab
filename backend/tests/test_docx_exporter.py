@@ -164,7 +164,7 @@ def test_docx_contains_rich_research_content_and_native_word_equation():
             ],
             "model_answer": "Chemical potentials are equal at equilibrium.",
             "equations": [{"label": "Equilibrium", "expression": "mu_alpha = mu_beta", "location": "solution"}],
-            "quality_check": [{"criterion": "Correctness", "rating": 5, "comment": "Thermodynamically correct."}],
+            "quality_checks": [{"criterion": "Correctness", "rating": 5, "comment": "Thermodynamically correct."}],
             "revision_options": ["Ask students to derive the equilibrium condition."],
         }],
     )
