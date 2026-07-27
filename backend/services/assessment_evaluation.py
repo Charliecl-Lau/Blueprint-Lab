@@ -18,6 +18,7 @@ from backend.services.assessment_rubric import (
 )
 from backend.services.llm_client import LLMClient, TruncatedResponseError
 from backend.services.reproducibility import canonical_json, sha256_text
+from backend.services.assessment_traceability import question_content_payload
 from backend.services.usage_tracking import record_model_call
 
 
@@ -71,7 +72,9 @@ def persist_assessment_questions(
             raise EvaluationValidationError(
                 f"validated assessment question {ordinal} must be an object"
             )
-        content_hash = sha256_text(canonical_json(question_payload))
+        content_hash = sha256_text(
+            canonical_json(question_content_payload(question_payload))
+        )
         question = existing.get(ordinal)
         if question is None:
             question = AssessmentQuestion(
@@ -97,7 +100,9 @@ def build_evaluation_input(run, question: AssessmentQuestion) -> str:
         raise EvaluationValidationError("question does not belong to the saved assessment")
 
     saved_question = _saved_question(assessment, question.ordinal)
-    content_hash = sha256_text(canonical_json(saved_question))
+    content_hash = sha256_text(
+        canonical_json(question_content_payload(saved_question))
+    )
     if content_hash != question.content_hash:
         raise EvaluationValidationError(
             "saved assessment content hash does not match the evaluation version"

@@ -40,6 +40,7 @@ from backend.services.assessment_recovery_service import (
     recover_saved_assessment,
     set_warning_run_state,
 )
+from backend.services.assessment_traceability import enrich_assessment_traceability
 from backend.services.generation_context import build_generation_context
 from backend.services.generator import generate_questions
 from backend.services.document_artifact import save_assessment_artifact
@@ -380,6 +381,7 @@ def run_generation_pipeline(
         ):
             try:
                 persist_assessment_questions(db, run.assessment)
+                enrich_assessment_traceability(db, run.assessment)
                 run.status = "documenting"
                 run.progress_message = "Creating assessment document"
                 db.commit()
@@ -544,6 +546,7 @@ def run_generation_pipeline(
             else:
                 mark_strictly_valid(assessment, generated.model_dump())
             persist_assessment_questions(db, assessment)
+            enrich_assessment_traceability(db, assessment)
             run.status = "documenting"
             run.progress_message = "Creating assessment document"
             db.commit()

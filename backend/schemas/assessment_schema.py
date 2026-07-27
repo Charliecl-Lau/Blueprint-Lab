@@ -331,4 +331,36 @@ class AssessmentGenerationResponse(BaseModel):
     questions: List[QuestionResponse]
 
 
+class AssessmentTraceability(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    experiment_id: int
+    condition_id: int
+    run_id: int
+    prompt_id: Optional[int]
+    prompt_template_version: str
+    assessment_id: int
+    assessment_version: int = Field(ge=1)
+    assessment_schema_version: str
+
+
+class QuestionTraceability(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    assessment_question_id: int
+    ordinal: int = Field(ge=0)
+    assessment_version: int = Field(ge=1)
+
+
+class StoredQuestionResponse(QuestionResponse):
+    traceability: QuestionTraceability
+
+
+class StoredAssessmentPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    traceability: AssessmentTraceability
+    questions: List[StoredQuestionResponse]
+
+
 ASSESSMENT_PROVIDER_SCHEMA = AssessmentGenerationResponse.model_json_schema()
