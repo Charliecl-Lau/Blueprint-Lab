@@ -198,6 +198,25 @@ def test_openai_template_rendering_is_stable_and_preserves_json():
     assert '"type": "short_answer"' in first
 
 
+def test_openai_prompt_omits_all_concept_bridge_guidance_when_disabled():
+    prompt = render_openai()
+
+    assert "concept bridge" not in prompt.casefold()
+    assert "concept_map_bridge" in prompt
+    assert '"concept_map_bridge": null' in prompt
+
+
+def test_openai_prompt_includes_only_supplied_concept_bridge_when_enabled():
+    supplied = "Connect equilibrium to chemical potential."
+    prompt = render_openai(
+        factors=PromptFactors(concept_bridge=True),
+        factor_inputs={"concept_bridge": supplied},
+    )
+
+    assert prompt.count(supplied) == 2
+    assert '"concept_map_bridge": "Connect equilibrium to chemical potential."' in prompt
+
+
 def test_openai_template_demonstrates_required_equation_references():
     prompt = render_openai()
 
@@ -274,10 +293,7 @@ def test_openai_template_formats_enabled_factors_in_stable_order():
     ]
     positions = [prompt.index(block) for block in blocks]
     assert positions == sorted(positions)
-    assert (
-        "Concept Map Bridge:\nConnect chemical potential to phase stability."
-        in prompt
-    )
+    assert "Connect chemical potential to phase stability." in prompt
 
 
 def test_openai_template_handles_disabled_factors_and_optional_instruction():
@@ -286,7 +302,7 @@ def test_openai_template_handles_disabled_factors_and_optional_instruction():
         additional_instruction="  Use one laboratory scenario.  "
     )
     assert "Selected Prompt Design Factors:\nNone Selected" in prompt
-    assert "Concept Map Bridge:\nNot Provided" in prompt
+    assert "concept bridge" not in prompt.casefold()
     assert "must not appear" not in prompt
     assert "Additional Instruction:" not in prompt
     assert (

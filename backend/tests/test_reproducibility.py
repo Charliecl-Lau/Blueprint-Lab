@@ -82,8 +82,8 @@ def test_openai_template_and_hash_are_deterministic_for_identical_inputs():
 
 def test_generation_envelope_hash_changes_with_source_order():
     common = dict(
-        actual_prompt="actual",
-        generation_context="context",
+        execution_system_prompt="system",
+        execution_user_message="context",
         model_settings={"temperature": 0.2},
     )
     assert build_generation_envelope_hash(**common, source_hashes=["a", "b"]) != \

@@ -111,7 +111,9 @@ _OPENAI_PLACEHOLDERS = (
     "estimated_time",
     "mse202_concepts",
     "mse302_concepts",
-    "concept_bridge",
+    "concept_bridge_section",
+    "concept_bridge_solution_instruction",
+    "concept_bridge_metadata_value",
     "materials_science_context",
     "prompt_design_factors",
     "additional_instruction_block",
@@ -178,6 +180,8 @@ def _format_prompt_design_factors(
     blocks = []
     for name, label in _FACTOR_DEFINITIONS:
         if getattr(factors, name):
+            if name == "concept_bridge":
+                continue
             if name == "reference_content":
                 value = _reference_pdf_instruction(reference_pdf_filenames)
             else:
@@ -234,10 +238,20 @@ def render_openai_actual_prompt(
         "mse302_concepts": (
             normalized_topic if normalized_course == "mse302" else "Not Provided"
         ),
-        "concept_bridge": (
-            factor_inputs["concept_bridge"].strip()
+        "concept_bridge_section": (
+            "Concept Bridge:\n" + factor_inputs["concept_bridge"].strip()
             if factors.concept_bridge
-            else "Not Provided"
+            else ""
+        ),
+        "concept_bridge_solution_instruction": (
+            "Connect the solution back to the supplied Concept Bridge."
+            if factors.concept_bridge
+            else ""
+        ),
+        "concept_bridge_metadata_value": (
+            json.dumps(factor_inputs["concept_bridge"].strip(), ensure_ascii=False)
+            if factors.concept_bridge
+            else "null"
         ),
         "materials_science_context": (
             "Derive from the supplied course, topic, and learning objective."

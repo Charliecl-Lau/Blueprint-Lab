@@ -37,14 +37,14 @@ def build_actual_prompt_hash(
 
 def build_generation_envelope_hash(
     *,
-    actual_prompt: str,
-    generation_context: str,
+    execution_system_prompt: str,
+    execution_user_message: str,
     model_settings: dict,
     source_hashes: list[str],
 ) -> str:
     return sha256_text(canonical_json({
-        "actual_prompt": actual_prompt,
-        "generation_context": generation_context,
+        "execution_system_prompt": execution_system_prompt,
+        "execution_user_message": execution_user_message,
         "model_settings": model_settings,
         "source_hashes": source_hashes,
     }))

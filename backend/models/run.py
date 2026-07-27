@@ -173,6 +173,15 @@ class Prompt(Base):
     structure_finish_reason: Mapped[Optional[str]] = mapped_column(String)
     structure_duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     generation_context: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    execution_system_prompt: Mapped[str] = mapped_column(
+        Text, nullable=False, default=""
+    )
+    execution_user_message: Mapped[str] = mapped_column(
+        Text, nullable=False, default=""
+    )
+    execution_schema_version: Mapped[str] = mapped_column(
+        String, nullable=False, default="legacy"
+    )
     generation_envelope_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, default=_generation_envelope_hash_default
     )

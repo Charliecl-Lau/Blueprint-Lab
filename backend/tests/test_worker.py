@@ -241,6 +241,14 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         ]
         assert generation_fixture.prompt.structure_input == expected_input
         assert generation_fixture.prompt.actual_prompt == expected_prompt
+        assert (
+            generation_fixture.prompt.execution_system_prompt
+            == llm.generate.call_args_list[0].kwargs["system_prompt"]
+        )
+        assert (
+            generation_fixture.prompt.execution_user_message
+            == llm.generate.call_args_list[0].kwargs["user_message"]
+        )
         assert generation_fixture.prompt.structure_system_prompt == OPENAI_TEMPLATE_PROVENANCE
         assert generation_fixture.prompt.structure_prompt_version == OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION
         assert generation_fixture.prompt.structure_request_id is None
