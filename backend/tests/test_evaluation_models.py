@@ -22,13 +22,10 @@ from backend.services.assessment_rubric import RUBRIC_SNAPSHOT, RUBRIC_VERSION
 def generation_fixture(test_db):
     experiment = Experiment(
         name="Thermodynamics quality study",
-        description="Compare assessment quality.",
-        topic_area="Materials thermodynamics",
-        research_question="How does prompt design affect quality?",
         status="active",
         course="MSE302",
         topic="Phase equilibria",
-        learning_objectives="Connect chemical potential to phase stability.",
+        learning_objectives=["Connect chemical potential to phase stability."],
         assessment_type="long_answer",
         difficulty="advanced",
         number_of_questions=1,

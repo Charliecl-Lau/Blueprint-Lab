@@ -7,7 +7,7 @@ def make_generation(test_db):
     experiment = Experiment(
         course="ENGR 101",
         topic="Statics",
-        learning_objectives="Solve equilibrium problems.",
+        learning_objectives=["Solve equilibrium problems."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=1,
@@ -82,7 +82,7 @@ def test_regenerate_creates_new_run_and_preserves_old_evidence(client, test_db):
     assert response.status_code == 200
     test_db.refresh(generation)
     assert generation.status == "complete"
-    assert generation.generated_json == {"questions": []}
+    assert generation.assessment.parsed_json == {"questions": []}
     assert generation.prompt_record is not None
     assert generation.document_artifact is not None
     new_id = response.json()["run_id"]

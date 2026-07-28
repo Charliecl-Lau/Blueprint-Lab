@@ -21,7 +21,13 @@ class ModelSettings(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     seed: Optional[int] = None
-    max_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = Field(default=None, alias="max_tokens")
+    provider_settings: dict[str, object] = Field(default_factory=dict)
+    model_config = {
+        "extra": "forbid",
+        "populate_by_name": True,
+        "protected_namespaces": (),
+    }
 
 
 class RunCreate(BaseModel):

@@ -10,7 +10,7 @@ Goal (Dynamic)
 
 Generate assessment questions that evaluate the following learning objective.
 
-Learning Objective:
+Learning Objectives:
 {learning_objective}
 
 The assessment should measure the intended cognitive demand while remaining appropriate for the supplied course, topic, and assessment parameters.
@@ -23,7 +23,7 @@ Course:
 Topic:
 {topic}
 
-Learning Objective:
+Learning Objectives:
 {learning_objective}
 
 Question Type:
@@ -50,8 +50,7 @@ MSE202 Concept(s):
 MSE302 Concept(s):
 {mse302_concepts}
 
-Concept Map Bridge:
-{concept_bridge}
+{concept_bridge_section}
 
 Materials Science Context:
 {materials_science_context}
@@ -75,7 +74,7 @@ Make all assumptions explicit whenever necessary.
 
 The student-facing question must be self-contained and include all numerical data, scenario information, and assumptions needed to solve the problem. Do not provide governing thermodynamic identities, equilibrium criteria, or other knowledge that students are expected to recall unless explicitly requested.
 
-The instructor solution must state the governing thermodynamic principles, define all variables, explicitly state assumptions, show complete reasoning and algebraic steps, include units where appropriate, explain the physical interpretation of the answer, and connect the solution back to the supplied MSE202–MSE302 concept bridge.
+The instructor solution must state the governing thermodynamic principles, define all variables, explicitly state assumptions, show complete reasoning and algebraic steps, include units where appropriate, and explain the physical interpretation of the answer. {concept_bridge_solution_instruction}
 
 Use Robert DeHoff notation consistently. Use G, H, S, and V for molar or intensive properties, G′, H′, S′, and V′ for total extensive properties, T for temperature, P for pressure, Φ for the number of phases, C for the number of components, and F for degrees of freedom. Define every symbol before it is used.
 
@@ -123,21 +122,15 @@ Return exactly one valid JSON object with the following structure.
        }
      ],
      "metadata": {
-       "prompt_template_id": "Not Assigned",
-       "actual_prompt_id": "Not Assigned",
-       "output_id": "Not Assigned",
-       "final_question_id": "Not Assigned",
        "question_title": "Generated thermodynamics question",
        "question_type": "{question_type}",
        "difficulty_level": "{difficulty}",
-       "intended_assessment_setting": "Not Assigned",
        "mse202_concepts": ["{mse202_concepts}"],
        "mse302_concepts": ["{mse302_concepts}"],
-       "concept_map_bridge": "{concept_bridge}",
+       "concept_map_bridge": {concept_bridge_metadata_value},
        "materials_science_context": "{materials_science_context}",
-       "estimated_time": "{estimated_time}",
-       "learning_objectives": ["{learning_objective}"],
-       "id_requirements": "Not Assigned"
+       "estimated_time_minutes": {estimated_time_minutes},
+       "learning_objectives": {learning_objectives_json}
      }
    }
  ]

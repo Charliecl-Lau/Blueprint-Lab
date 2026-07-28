@@ -43,7 +43,7 @@ def test_run_records_only_ordered_reference_pdf_filenames(test_db):
     experiment = Experiment(
         course="ENGR 101",
         topic="Statics",
-        learning_objectives="Apply equilibrium equations.",
+        learning_objectives=["Apply equilibrium equations."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=2,
@@ -79,13 +79,10 @@ def test_run_records_only_ordered_reference_pdf_filenames(test_db):
 def test_immutable_research_run_round_trip(test_db):
     experiment = Experiment(
         name="Statics prompt study",
-        description="Compare prompt configurations.",
-        topic_area="Engineering mechanics",
-        research_question="Which prompt produces the clearest assessment?",
         status="active",
         course="ENGR 101",
         topic="Free-body diagrams",
-        learning_objectives="Apply equilibrium equations.",
+        learning_objectives=["Apply equilibrium equations."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=3,
@@ -161,13 +158,10 @@ def test_immutable_research_run_round_trip(test_db):
 def test_prompt_hash_rejects_non_sha256_length(test_db):
     experiment = Experiment(
         name="Hash validation",
-        description="Validate evidence hashes.",
-        topic_area="Testing",
-        research_question="Are malformed hashes rejected?",
         status="draft",
         course="ENGR 101",
         topic="Hashes",
-        learning_objectives="Validate provenance.",
+        learning_objectives=["Validate provenance."],
         assessment_type="mixed",
         difficulty="introductory",
         number_of_questions=1,

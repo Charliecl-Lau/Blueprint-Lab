@@ -163,6 +163,9 @@ def run_detail(run: Run, include_raw_response: bool = False):
                 "structure_input": run.prompt.structure_input,
                 "actual_prompt": run.prompt.actual_prompt,
                 "generation_context": run.prompt.generation_context,
+                "execution_system_prompt": run.prompt.execution_system_prompt,
+                "execution_user_message": run.prompt.execution_user_message,
+                "execution_schema_version": run.prompt.execution_schema_version,
             })
     return {
         "id": run.id,

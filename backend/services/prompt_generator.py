@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import Optional, Sequence
 
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 from backend.services.actual_prompt import build_structure_input
 
 
-def generate_prompt(*, course: str = "", topic: str, learning_objectives: str = "",
+def generate_prompt(*, course: str = "", topic: str,
+                    learning_objectives: Sequence[str] = (),
                     assessment_type: str = "mixed", difficulty: str = "",
                     number_of_questions: int = 1, prompt_structure: PromptStructure = "openai",
                     estimated_time_minutes: int = 30,

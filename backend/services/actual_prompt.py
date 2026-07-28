@@ -1,4 +1,5 @@
 import re
+import json
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -100,6 +101,7 @@ _OPENAI_SECTIONS = (
 )
 _OPENAI_PLACEHOLDERS = (
     "learning_objective",
+    "learning_objectives_json",
     "course",
     "topic",
     "question_type",
@@ -107,9 +109,12 @@ _OPENAI_PLACEHOLDERS = (
     "cognitive_demand",
     "number_of_questions",
     "estimated_time",
+    "estimated_time_minutes",
     "mse202_concepts",
     "mse302_concepts",
-    "concept_bridge",
+    "concept_bridge_section",
+    "concept_bridge_solution_instruction",
+    "concept_bridge_metadata_value",
     "materials_science_context",
     "prompt_design_factors",
     "additional_instruction_block",
@@ -176,6 +181,8 @@ def _format_prompt_design_factors(
     blocks = []
     for name, label in _FACTOR_DEFINITIONS:
         if getattr(factors, name):
+            if name == "concept_bridge":
+                continue
             if name == "reference_content":
                 value = _reference_pdf_instruction(reference_pdf_filenames)
             else:
@@ -188,7 +195,7 @@ def render_openai_actual_prompt(
     *,
     course: str,
     topic: str,
-    learning_objectives: str,
+    learning_objectives: Sequence[str],
     assessment_type: str,
     difficulty: str,
     number_of_questions: int,
@@ -208,8 +215,15 @@ def render_openai_actual_prompt(
 
     normalized_course = course.strip().casefold()
     normalized_topic = topic.strip()
+    objective_lines = "\n".join(
+        f"- {objective.strip()}" for objective in learning_objectives
+    )
     values = {
-        "learning_objective": learning_objectives.strip(),
+        "learning_objective": objective_lines,
+        "learning_objectives_json": json.dumps(
+            [objective.strip() for objective in learning_objectives],
+            ensure_ascii=False,
+        ),
         "course": course.strip(),
         "topic": normalized_topic,
         "question_type": assessment_type,
@@ -219,16 +233,27 @@ def render_openai_actual_prompt(
         ),
         "number_of_questions": str(number_of_questions),
         "estimated_time": f"{estimated_time_minutes} minutes",
+        "estimated_time_minutes": str(estimated_time_minutes),
         "mse202_concepts": (
             normalized_topic if normalized_course == "mse202" else "Not Provided"
         ),
         "mse302_concepts": (
             normalized_topic if normalized_course == "mse302" else "Not Provided"
         ),
-        "concept_bridge": (
-            factor_inputs["concept_bridge"].strip()
+        "concept_bridge_section": (
+            "Concept Bridge:\n" + factor_inputs["concept_bridge"].strip()
             if factors.concept_bridge
-            else "Not Provided"
+            else ""
+        ),
+        "concept_bridge_solution_instruction": (
+            "Connect the solution back to the supplied Concept Bridge."
+            if factors.concept_bridge
+            else ""
+        ),
+        "concept_bridge_metadata_value": (
+            json.dumps(factor_inputs["concept_bridge"].strip(), ensure_ascii=False)
+            if factors.concept_bridge
+            else "null"
         ),
         "materials_science_context": (
             "Derive from the supplied course, topic, and learning objective."
@@ -265,7 +290,7 @@ def build_structure_input(
     *,
     course: str,
     topic: str,
-    learning_objectives: str,
+    learning_objectives: Sequence[str],
     assessment_type: str,
     difficulty: str,
     number_of_questions: int,
@@ -280,7 +305,10 @@ def build_structure_input(
         "# Assessment Details",
         f"Course: {course}",
         f"Topic: {topic}",
-        f"Learning Objectives: {learning_objectives}",
+        "Learning Objectives:\n"
+        + "\n".join(
+            f"- {objective.strip()}" for objective in learning_objectives
+        ),
         f"Assessment Type: {assessment_type}",
         f"Difficulty: {difficulty}",
         f"Number of Questions: {number_of_questions}",

@@ -65,6 +65,10 @@ export const REFERENCE_PDF_INPUT_ID = 'factor-referenceContent-pdfs'
 export const MAX_REFERENCE_PDF_BYTES = 20 * 1024 * 1024
 export const MAX_REFERENCE_PDFS = 3
 
+export function parseLearningObjectives(value: string): string[] {
+  return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+}
+
 export function referencePdfValidationMessages(files: File[]): string[] {
   const messages: string[] = []
   if (files.length === 0) {

@@ -79,6 +79,7 @@ class Run(Base):
     seed: Mapped[Optional[int]] = mapped_column(Integer)
     max_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     model_settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    execution_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     request_id: Mapped[Optional[str]] = mapped_column(String)
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     finish_reason: Mapped[Optional[str]] = mapped_column(String)
@@ -116,12 +117,6 @@ class Run(Base):
     @property
     def reference_pdf_filenames(self) -> list[str]:
         return [item.original_filename for item in self.reference_pdfs]
-
-    @property
-    def generated_json(self) -> Optional[dict]:
-        """Deprecated compatibility view; assessments.parsed_json is canonical."""
-        return self.assessment.parsed_json if self.assessment is not None else None
-
 
 class RunReferencePdf(Base):
     __tablename__ = "run_reference_pdfs"
@@ -172,6 +167,15 @@ class Prompt(Base):
     structure_finish_reason: Mapped[Optional[str]] = mapped_column(String)
     structure_duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
     generation_context: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    execution_system_prompt: Mapped[str] = mapped_column(
+        Text, nullable=False, default=""
+    )
+    execution_user_message: Mapped[str] = mapped_column(
+        Text, nullable=False, default=""
+    )
+    execution_schema_version: Mapped[str] = mapped_column(
+        String, nullable=False, default="legacy"
+    )
     generation_envelope_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, default=_generation_envelope_hash_default
     )

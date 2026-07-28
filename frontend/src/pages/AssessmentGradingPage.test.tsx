@@ -95,7 +95,6 @@ function context(humanFinalized = false) {
         question_title: 'Chemical potential and phase stability',
         question_type: 'long_answer',
         difficulty_level: 'advanced',
-        intended_assessment_setting: 'Homework',
         mse202_concepts: ['Equilibrium'],
         mse302_concepts: ['Chemical potential'],
         concept_map_bridge: 'A bridge.',

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from backend.models import Condition, Experiment, Run, RunReferencePdf
 from backend.schemas.experiment_schema import ExperimentCreate
 from backend.services.actual_prompt import build_condition_label
+from backend.services.run_service import resolve_execution_config
 
 
 @dataclass(frozen=True)
@@ -236,12 +237,21 @@ def create_experiment_with_run(
         factor_inputs=factor_inputs,
         condition_label=build_condition_label(payload.factors),
     )
+    execution_config = resolve_execution_config()
+    effective = execution_config["effective"]
     run = Run(
         experiment=experiment,
         condition=condition,
         run_number=1,
         status="pending",
-        model_settings={},
+        provider=effective["provider"],
+        model=effective["model"],
+        temperature=effective["temperature"],
+        top_p=effective["top_p"],
+        seed=effective["seed"],
+        max_tokens=effective["max_output_tokens"],
+        model_settings=effective,
+        execution_config=execution_config,
         input_tokens=0,
         output_tokens=0,
         total_tokens=0,

@@ -37,6 +37,56 @@ def table_rows(document):
     ]
 
 
+def test_docx_displays_application_traceability_and_omits_removed_setting():
+    content = build_assessment_docx(
+        run_id=12,
+        prompt_id=34,
+        condition_code="C101",
+        run_number=2,
+        course="MSE302",
+        topic="Phase equilibrium",
+        traceability={
+            "experiment_id": 5,
+            "condition_id": 7,
+            "run_id": 12,
+            "prompt_id": 34,
+            "assessment_id": 56,
+        },
+        questions=[{
+            "traceability": {
+                "assessment_question_id": 78,
+                "ordinal": 0,
+                "assessment_version": 1,
+            },
+            "metadata": {
+                "question_title": "Phase stability",
+                "question_type": "short_answer",
+                "difficulty_level": "medium",
+                "mse202_concepts": ["Equilibrium"],
+                "mse302_concepts": ["Gibbs energy"],
+                "concept_map_bridge": None,
+                "materials_science_context": "Binary alloy",
+                "estimated_time_minutes": 10,
+                "learning_objectives": ["Compare Gibbs energies"],
+            },
+            "body": "Explain stability.",
+            "options": [],
+            "model_answer": "Compare Gibbs energies.",
+            "equations": [],
+            "revision_options": [],
+        }],
+    )
+
+    document = Document(BytesIO(content))
+    rows = table_rows(document)
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert ("Experiment ID", "5") in rows
+    assert ("Condition ID", "7") in rows
+    assert ("Assessment ID", "56") in rows
+    assert "Question ID 78" in text
+    assert "Intended Assessment Setting" not in str(rows)
+
+
 def test_docx_uses_one_metadata_table_sourced_from_first_question():
     content = build_assessment_docx(
         run_id=12,
@@ -52,7 +102,6 @@ def test_docx_uses_one_metadata_table_sourced_from_first_question():
                     "question_type": "long_answer",
                     "difficulty_level": "Medium",
                     "mse202_concepts": ["Gibbs Phase Rule"],
-                    "prompt_template_id": "template-1",
                 },
                 "body": "Explain the single-phase region.",
                 "options": [],
@@ -84,7 +133,6 @@ def test_docx_uses_one_metadata_table_sourced_from_first_question():
     assert ("Question Title", "Shared equilibrium assessment") in rows
     assert ("Difficulty Level", "Medium") in rows
     assert ("MSE202 Concept(s)", "Gibbs Phase Rule") in rows
-    assert ("Prompt Template ID", "template-1") in rows
     assert all("This title must not become metadata" not in value for row in rows for value in row)
     assert all(value != "Hard" for row in rows for value in row)
 
@@ -103,8 +151,11 @@ def test_docx_empty_assessment_keeps_run_metadata_table():
     document = Document(BytesIO(content))
     assert len(document.tables) == 1
     assert table_rows(document) == [
+        ("Experiment ID", "Not Assigned"),
+        ("Condition ID", "Not Assigned"),
         ("Run ID", "1"),
         ("Prompt ID", "2"),
+        ("Assessment ID", "Not Assigned"),
         ("Condition Code", "C100"),
         ("Run Number", "1"),
         ("Course", "ENGR 101"),
@@ -164,7 +215,7 @@ def test_docx_contains_rich_research_content_and_native_word_equation():
             ],
             "model_answer": "Chemical potentials are equal at equilibrium.",
             "equations": [{"label": "Equilibrium", "expression": "mu_alpha = mu_beta", "location": "solution"}],
-            "quality_check": [{"criterion": "Correctness", "rating": 5, "comment": "Thermodynamically correct."}],
+            "quality_checks": [{"criterion": "Correctness", "rating": 5, "comment": "Thermodynamically correct."}],
             "revision_options": ["Ask students to derive the equilibrium condition."],
         }],
     )

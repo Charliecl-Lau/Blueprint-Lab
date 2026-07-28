@@ -6,7 +6,7 @@ const experiment: Experiment = {
   id: 1,
   course: 'Statics',
   topic: 'Equilibrium',
-  learning_objectives: 'Resolve forces',
+  learning_objectives: ['Resolve forces'],
   assessment_type: 'mixed',
   difficulty: 'medium',
   number_of_questions: 4,

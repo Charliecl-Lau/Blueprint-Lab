@@ -85,3 +85,21 @@ Experiment creation uses multipart form data with JSON in `payload` and ordered 
 ## Attachment and source-document boundary
 
 Reference Content prompt PDFs are temporary generation attachments. They do not use or change the persistent source-document subsystem, and no object storage is introduced by this workflow. Existing source-document behavior remains unchanged.
+# Canonical generation evidence
+
+For runs created at schema version `20260727_02` or later:
+
+- `runs.execution_config` is the requested/effective settings snapshot used by
+  generation and copied unchanged to retries.
+- `prompts.actual_prompt` is the generated Actual Prompt.
+- `prompts.execution_system_prompt` and
+  `prompts.execution_user_message` are the exact strings passed to assessment
+  generation.
+- `assessments.raw_response_text` is immutable provider evidence.
+- `assessments.parsed_json` is the validated portable assessment enriched with
+  real relational traceability IDs.
+- `assessment_questions` remains authoritative for question IDs and versions.
+
+Legacy `runs.generated_json` values are copied into missing assessments only
+after equivalence and hash checks. A conflict aborts the migration rather than
+overwriting evidence.

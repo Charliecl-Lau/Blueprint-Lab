@@ -18,7 +18,18 @@ def get_generation(generation_id: int, db: Session = Depends(get_db)):
     if generation is None:
         raise HTTPException(status_code=404, detail="Generation not found")
     result = run_detail(generation)
-    result.update({"generation_id": generation.id, "prompt_text": generation.prompt.full_prompt if generation.prompt else None, "condition": generation.condition, "generated_json": generation.generated_json, "model_name": generation.model_name, "model_version": generation.model_version, "generation_time_ms": generation.generation_time_ms})
+    result.update({
+        "generation_id": generation.id,
+        "prompt_text": generation.prompt.full_prompt if generation.prompt else None,
+        "condition": generation.condition,
+        "generated_json": (
+            generation.assessment.parsed_json
+            if generation.assessment is not None else None
+        ),
+        "model_name": generation.model_name,
+        "model_version": generation.model_version,
+        "generation_time_ms": generation.generation_time_ms,
+    })
     return result
 
 

@@ -12,6 +12,7 @@ from backend.models import Assessment, Run
 from backend.models.experiment import utc_now
 from backend.services.assessment_evaluation import persist_assessment_questions
 from backend.services.assessment_recovery import RecoveryResult, recover_assessment_payload
+from backend.services.assessment_traceability import enrich_assessment_traceability
 from backend.services.llm_client import _parse_json
 from backend.services.reproducibility import canonical_json, sha256_text
 
@@ -112,6 +113,7 @@ def recover_saved_assessment(
     _set_candidate(assessment, result, source=source)
     if result.strictly_valid:
         persist_assessment_questions(db, assessment)
+        enrich_assessment_traceability(db, assessment)
         return "valid"
     if result.structurally_renderable:
         persist_assessment_questions(db, assessment)

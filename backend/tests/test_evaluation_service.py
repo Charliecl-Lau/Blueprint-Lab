@@ -41,7 +41,6 @@ def question_payload(ordinal=0):
             "question_title": f"Question {ordinal + 1}",
             "question_type": "long_answer",
             "difficulty_level": "advanced",
-            "intended_assessment_setting": "Homework",
             "mse202_concepts": ["Equilibrium"],
             "mse302_concepts": ["Chemical potential"],
             "concept_map_bridge": "Connects equilibrium to chemical potential.",
@@ -58,7 +57,7 @@ def evaluated_run(test_db, *, question_count=2, llm_scores=None):
     experiment = Experiment(
         course="MSE302",
         topic="Phase stability",
-        learning_objectives="Analyze phase stability.",
+        learning_objectives=["Analyze phase stability."],
         assessment_type="long_answer",
         difficulty="advanced",
         number_of_questions=question_count,

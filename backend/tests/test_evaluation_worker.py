@@ -24,7 +24,6 @@ QUESTION = {
         "question_title": "Phase stability",
         "question_type": "long_answer",
         "difficulty_level": "advanced",
-        "intended_assessment_setting": "Homework",
         "mse202_concepts": ["Equilibrium"],
         "mse302_concepts": ["Chemical potential"],
         "concept_map_bridge": "Connects equilibrium to chemical potential.",
@@ -81,7 +80,7 @@ def _saved_run(test_db, *, question_count=1):
     experiment = Experiment(
         course="MSE302",
         topic="Phase stability",
-        learning_objectives="Analyze phase stability.",
+        learning_objectives=["Analyze phase stability."],
         assessment_type="long_answer",
         difficulty="advanced",
         number_of_questions=question_count,

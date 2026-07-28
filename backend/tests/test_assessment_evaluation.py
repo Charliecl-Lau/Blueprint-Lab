@@ -21,7 +21,6 @@ ORIGINAL_QUESTION = {
         "question_title": "Chemical potential and phase stability",
         "question_type": "long_answer",
         "difficulty_level": "advanced",
-        "intended_assessment_setting": "Homework",
         "mse202_concepts": ["Equilibrium"],
         "mse302_concepts": ["Chemical potential"],
         "concept_map_bridge": "Connects equilibrium to equal chemical potentials.",
@@ -108,13 +107,10 @@ class FakeLLM:
 def generation_fixture(test_db):
     experiment = Experiment(
         name="MSE assessment quality",
-        description="Evaluate generated assessments.",
-        topic_area="Materials thermodynamics",
-        research_question="Are generated questions instructor-ready?",
         status="active",
         course="MSE302",
         topic="Phase stability",
-        learning_objectives="Analyze phase stability using chemical potential.",
+        learning_objectives=["Analyze phase stability using chemical potential."],
         assessment_type="long_answer",
         difficulty="advanced",
         number_of_questions=1,

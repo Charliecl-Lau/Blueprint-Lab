@@ -95,11 +95,25 @@ export interface PromptProvenance {
 export interface AssessmentOutput {
   id: number
   question_ids: number[]
-  parsed_json: { questions: Question[] } | null
+  parsed_json: {
+    traceability?: AssessmentTraceability
+    questions: Question[]
+  } | null
   output_hash: string
   schema_version: string
   raw_response_text?: string
   validation?: AssessmentValidation
+}
+
+export interface AssessmentTraceability {
+  experiment_id: number
+  condition_id: number
+  run_id: number
+  prompt_id: number | null
+  prompt_template_version: string
+  assessment_id: number
+  assessment_version: number
+  assessment_schema_version: string
 }
 
 export interface AssessmentValidationIssue {
@@ -147,7 +161,6 @@ export interface Run {
   model_name?: string | null
   model_version?: string | null
   generation_time_ms?: number | null
-  generated_json?: { questions: Question[] } | null
   condition?: Condition
   prompt_text?: string | null
   prompt?: PromptProvenance | null
@@ -166,7 +179,7 @@ export interface Experiment {
   id: number
   course: string
   topic: string
-  learning_objectives: string
+  learning_objectives: string[]
   assessment_type: AssessmentType
   difficulty: string
   number_of_questions: number
@@ -203,21 +216,20 @@ export interface Question {
   id?: number
   type: 'mcq' | 'long_answer' | 'short_answer'
   metadata?: {
-    prompt_template_id?: string
-    actual_prompt_id?: string
-    output_id?: string
-    final_question_id?: string
     question_title: string
     question_type: 'mcq' | 'long_answer' | 'short_answer'
     difficulty_level: string
-    intended_assessment_setting: string
     mse202_concepts: string[]
     mse302_concepts: string[]
-    concept_map_bridge: string
+    concept_map_bridge: string | null
     materials_science_context: string
-    estimated_time?: string
+    estimated_time_minutes: number
     learning_objectives?: string[]
-    id_requirements?: string
+  }
+  traceability?: {
+    assessment_question_id: number
+    ordinal: number
+    assessment_version: number
   }
   body: string
   body_segments?: ContentSegment[]
@@ -392,7 +404,7 @@ export interface ValidationErrorResponse {
 export interface CreateExperimentPayload {
   course: string
   topic: string
-  learning_objectives: string
+  learning_objectives: string[]
   assessment_type: AssessmentType
   difficulty: string
   number_of_questions: number

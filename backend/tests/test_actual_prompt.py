@@ -96,7 +96,7 @@ def test_structure_input_contains_details_and_enabled_factor_values_only():
     text = build_structure_input(
         course="MSE202",
         topic="Gibbs Phase Rule",
-        learning_objectives="Apply the phase rule.",
+        learning_objectives=["Apply the phase rule."],
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
@@ -124,7 +124,7 @@ def test_structure_input_omits_blank_additional_instruction():
     text = build_structure_input(
         course="MSE202",
         topic="Gibbs Phase Rule",
-        learning_objectives="Apply the phase rule.",
+        learning_objectives=["Apply the phase rule."],
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
@@ -143,7 +143,7 @@ def test_structure_input_describes_pdfs_without_embedding_content():
     text = build_structure_input(
         course="MSE202",
         topic="Gibbs Phase Rule",
-        learning_objectives="Apply the phase rule.",
+        learning_objectives=["Apply the phase rule."],
         assessment_type="short_answer",
         difficulty="medium",
         number_of_questions=1,
@@ -171,7 +171,7 @@ def render_openai(**overrides):
     values = {
         "course": "MSE202",
         "topic": "Gibbs Phase Rule",
-        "learning_objectives": "Apply the phase rule to alloy systems.",
+        "learning_objectives": ["Apply the phase rule to alloy systems."],
         "assessment_type": "short_answer",
         "difficulty": "medium",
         "number_of_questions": 2,
@@ -196,6 +196,25 @@ def test_openai_template_rendering_is_stable_and_preserves_json():
     assert "Cognitive Demand:\nApply/Analyze" in first
     assert "Estimated Time:\n30 minutes" in first
     assert '"type": "short_answer"' in first
+
+
+def test_openai_prompt_omits_all_concept_bridge_guidance_when_disabled():
+    prompt = render_openai()
+
+    assert "concept bridge" not in prompt.casefold()
+    assert "concept_map_bridge" in prompt
+    assert '"concept_map_bridge": null' in prompt
+
+
+def test_openai_prompt_includes_only_supplied_concept_bridge_when_enabled():
+    supplied = "Connect equilibrium to chemical potential."
+    prompt = render_openai(
+        factors=PromptFactors(concept_bridge=True),
+        factor_inputs={"concept_bridge": supplied},
+    )
+
+    assert prompt.count(supplied) == 2
+    assert '"concept_map_bridge": "Connect equilibrium to chemical potential."' in prompt
 
 
 def test_openai_template_demonstrates_required_equation_references():
@@ -274,10 +293,7 @@ def test_openai_template_formats_enabled_factors_in_stable_order():
     ]
     positions = [prompt.index(block) for block in blocks]
     assert positions == sorted(positions)
-    assert (
-        "Concept Map Bridge:\nConnect chemical potential to phase stability."
-        in prompt
-    )
+    assert "Connect chemical potential to phase stability." in prompt
 
 
 def test_openai_template_handles_disabled_factors_and_optional_instruction():
@@ -286,7 +302,7 @@ def test_openai_template_handles_disabled_factors_and_optional_instruction():
         additional_instruction="  Use one laboratory scenario.  "
     )
     assert "Selected Prompt Design Factors:\nNone Selected" in prompt
-    assert "Concept Map Bridge:\nNot Provided" in prompt
+    assert "concept bridge" not in prompt.casefold()
     assert "must not appear" not in prompt
     assert "Additional Instruction:" not in prompt
     assert (
