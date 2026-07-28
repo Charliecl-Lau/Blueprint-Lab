@@ -369,9 +369,9 @@ def _gemini_provider_schema() -> dict:
 
     The application contract intentionally keeps recursive AST fields required.
     Gemini rejects a JSON Schema ref loop when every edge in the loop is
-    required, so the provider-only schema permits null at recursive object
-    edges and permits empty recursive arrays. Pydantic validation still
-    enforces the canonical contract after the response is received.
+    required, so the provider-only schema makes recursive object edges optional
+    and permits empty recursive arrays. Pydantic validation still enforces the
+    canonical contract after the response is received.
     """
     schema = deepcopy(AssessmentGenerationResponse.model_json_schema())
     recursive_fields = {
@@ -383,13 +383,9 @@ def _gemini_provider_schema() -> dict:
     }
 
     for definition_name, field_names in recursive_fields.items():
-        properties = schema["$defs"][definition_name]["properties"]
+        definition = schema["$defs"][definition_name]
         for field_name in field_names:
-            field_schema = properties[field_name]
-            properties[field_name] = {
-                "anyOf": [field_schema, {"type": "null"}],
-                "title": field_schema.get("title", field_name),
-            }
+            definition["required"].remove(field_name)
 
     recursive_arrays = {
         "SequenceMathNode": "items",

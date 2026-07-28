@@ -419,7 +419,7 @@ def test_provider_schema_is_generated_from_the_canonical_pydantic_contract():
     assert "segments" in option["properties"]
 
 
-def test_provider_schema_terminates_recursive_math_refs_for_gemini():
+def test_provider_schema_makes_recursive_math_fields_optional_for_gemini():
     recursive_defs = {
         "EquationMathNode": ("left", "right"),
         "FractionMathNode": ("numerator", "denominator"),
@@ -431,9 +431,10 @@ def test_provider_schema_terminates_recursive_math_refs_for_gemini():
     for definition_name, field_names in recursive_defs.items():
         definition = ASSESSMENT_PROVIDER_SCHEMA["$defs"][definition_name]
         for field_name in field_names:
-            field_schema = definition["properties"][field_name]
-            assert {"type": "null"} in field_schema["anyOf"]
+            assert field_name not in definition["required"]
 
+
+def test_provider_schema_allows_empty_recursive_math_arrays_for_gemini():
     recursive_arrays = {
         "SequenceMathNode": "items",
         "ProductMathNode": "terms",
