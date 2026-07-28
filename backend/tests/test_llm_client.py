@@ -61,6 +61,15 @@ def test_llm_client_installs_event_loop_when_worker_thread_has_none():
     mock_client.assert_called_once()
 
 
+def test_llm_client_configures_sixty_second_provider_timeout():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        LLMClient()
+
+    kwargs = mock_client.call_args.kwargs
+    assert kwargs["api_key"] == settings.google_api_key
+    assert kwargs["http_options"].timeout == 60_000
+
+
 def test_llm_client_calls_generate_content():
     with patch("backend.services.llm_client.genai.Client") as MockClient:
         mock_response = MagicMock()

@@ -104,7 +104,10 @@ class LLMClient:
             asyncio.get_event_loop()
         except RuntimeError:
             asyncio.set_event_loop(asyncio.new_event_loop())
-        self._client = genai.Client(api_key=settings.google_api_key)
+        self._client = genai.Client(
+            api_key=settings.google_api_key,
+            http_options=types.HttpOptions(timeout=60_000),
+        )
 
     def generate(
         self,
