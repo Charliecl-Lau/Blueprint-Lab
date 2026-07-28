@@ -417,3 +417,29 @@ def test_provider_schema_is_generated_from_the_canonical_pydantic_contract():
     assert "math" in equation["properties"]
     assert "expression" in equation["properties"]
     assert "segments" in option["properties"]
+
+
+def test_provider_schema_terminates_recursive_math_refs_for_gemini():
+    recursive_defs = {
+        "EquationMathNode": ("left", "right"),
+        "FractionMathNode": ("numerator", "denominator"),
+        "SubscriptMathNode": ("base", "subscript"),
+        "SuperscriptMathNode": ("base", "superscript"),
+        "RadicalMathNode": ("radicand",),
+    }
+
+    for definition_name, field_names in recursive_defs.items():
+        definition = ASSESSMENT_PROVIDER_SCHEMA["$defs"][definition_name]
+        for field_name in field_names:
+            field_schema = definition["properties"][field_name]
+            assert {"type": "null"} in field_schema["anyOf"]
+
+    recursive_arrays = {
+        "SequenceMathNode": "items",
+        "ProductMathNode": "terms",
+    }
+    for definition_name, field_name in recursive_arrays.items():
+        items_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"][definition_name][
+            "properties"
+        ][field_name]
+        assert "minItems" not in items_schema

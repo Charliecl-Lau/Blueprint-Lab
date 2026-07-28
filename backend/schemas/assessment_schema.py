@@ -1,4 +1,5 @@
 import re
+from copy import deepcopy
 from typing import Annotated, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
@@ -363,4 +364,43 @@ class StoredAssessmentPayload(BaseModel):
     questions: List[StoredQuestionResponse]
 
 
-ASSESSMENT_PROVIDER_SCHEMA = AssessmentGenerationResponse.model_json_schema()
+def _gemini_provider_schema() -> dict:
+    """Adapt recursive AST edges to Gemini's structured-output constraints.
+
+    The application contract intentionally keeps recursive AST fields required.
+    Gemini rejects a JSON Schema ref loop when every edge in the loop is
+    required, so the provider-only schema permits null at recursive object
+    edges and permits empty recursive arrays. Pydantic validation still
+    enforces the canonical contract after the response is received.
+    """
+    schema = deepcopy(AssessmentGenerationResponse.model_json_schema())
+    recursive_fields = {
+        "EquationMathNode": ("left", "right"),
+        "FractionMathNode": ("numerator", "denominator"),
+        "SubscriptMathNode": ("base", "subscript"),
+        "SuperscriptMathNode": ("base", "superscript"),
+        "RadicalMathNode": ("radicand",),
+    }
+
+    for definition_name, field_names in recursive_fields.items():
+        properties = schema["$defs"][definition_name]["properties"]
+        for field_name in field_names:
+            field_schema = properties[field_name]
+            properties[field_name] = {
+                "anyOf": [field_schema, {"type": "null"}],
+                "title": field_schema.get("title", field_name),
+            }
+
+    recursive_arrays = {
+        "SequenceMathNode": "items",
+        "ProductMathNode": "terms",
+    }
+    for definition_name, field_name in recursive_arrays.items():
+        schema["$defs"][definition_name]["properties"][field_name].pop(
+            "minItems", None
+        )
+
+    return schema
+
+
+ASSESSMENT_PROVIDER_SCHEMA = _gemini_provider_schema()
