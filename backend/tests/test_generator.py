@@ -1,55 +1,94 @@
+import json
+
+import pytest
+
 from backend.services.generator import generate_questions
 
 
-def test_generate_questions_uses_full_prompt_and_rich_schema_directly():
-    raw_text = """{
+def complete_flat_payload(expression: str) -> dict:
+    return {
         "questions": [{
-            "type": "mcq",
-                "metadata": {
-                    "question_title": "Stress definition",
-                    "question_type": "mcq",
-                    "difficulty_level": "introductory",
-                    "mse202_concepts": ["stress"],
-                "mse302_concepts": ["mechanical work"],
-                "concept_map_bridge": "Relate force intensity to mechanical work.",
-                "materials_science_context": "Mechanics of materials.",
+            "type": "short_answer",
+            "metadata": {
+                "question_title": "Equation rendering",
+                "question_type": "short_answer",
+                "difficulty_level": "introductory",
+                "mse202_concepts": ["composition"],
+                "mse302_concepts": ["thermodynamics"],
+                "concept_map_bridge": (
+                    "Relate composition notation to thermodynamics."
+                ),
+                "materials_science_context": "Binary alloy composition.",
                 "estimated_time_minutes": 10,
-                "learning_objectives": ["Define engineering stress."]
+                "learning_objectives": [
+                    "Interpret a materials-science equation."
+                ],
             },
-            "body": "Which expression defines stress as force per area?",
-            "body_segments": [
-                {"type": "text", "text": "Which expression defines "},
-                {"type": "math", "math": {"type": "symbol", "name": "sigma"}},
-                {"type": "text", "text": " as force per area?"}
-            ],
-            "options": [
-                {"body": "Force per area", "is_correct": true},
-                {"body": "Force times area", "is_correct": false},
-                {"body": "Mass per volume", "is_correct": false},
-                {"body": "Velocity over time", "is_correct": false}
-            ],
-            "model_answer": null,
+            "body": "Interpret [[EQ:relation]].",
+            "options": [],
+            "model_answer": "The expression defines the relation.",
             "equations": [{
-                "label": "Stress",
-                "math": {
-                    "type": "equation",
-                    "left": {"type": "symbol", "name": "sigma"},
-                    "right": {
-                        "type": "fraction",
-                        "numerator": {"type": "symbol", "name": "F"},
-                        "denominator": {"type": "symbol", "name": "A"}
-                    }
-                },
-                "location": "solution"
+                "label": "relation",
+                "expression": expression,
+                "location": "question",
             }],
-            "quality_checks": [{"criterion": "Correctness", "rating": 5, "comment": "Correct."}],
-            "revision_options": ["Make it computational.", "Ask for a units check."]
+            "quality_checks": [{
+                "criterion": "Correctness",
+                "rating": 5,
+                "comment": "The notation is preserved.",
+            }],
+            "revision_options": [
+                "Add numerical values.",
+                "Ask for physical interpretation.",
+            ],
         }]
-    }"""
+    }
 
-    result = generate_questions(raw_text)
 
-    assert result.questions[0].metadata.question_title == "Stress definition"
-    assert result.questions[0].equations[0].math.type == "equation"
-    assert result.questions[0].equations[0].math.right.type == "fraction"
-    assert result.questions[0].body_segments[1].math.name == "sigma"
+@pytest.mark.parametrize(
+    "expression,expected_type",
+    [
+        ("x_A", "subscript"),
+        ("x_B", "subscript"),
+        ("x_A^2", "superscript"),
+        ("DeltaH/(T DeltaS)", "fraction"),
+        ("sqrt(x_A)", "radical"),
+        ("K^-1", "superscript"),
+    ],
+)
+def test_generate_questions_normalizes_linear_equations(
+    expression,
+    expected_type,
+):
+    result = generate_questions(
+        json.dumps(complete_flat_payload(expression))
+    )
+    equation = result.questions[0].equations[0]
+
+    assert equation.expression == expression
+    assert equation.math.type == expected_type
+
+
+def test_generate_questions_preserves_combined_subscript_and_superscript():
+    result = generate_questions(
+        json.dumps(complete_flat_payload("x_A^2"))
+    )
+
+    math = result.questions[0].equations[0].math
+    assert math.type == "superscript"
+    assert math.base.type == "subscript"
+    assert math.base.subscript.name == "A"
+    assert math.superscript.value == "2"
+
+
+def test_generate_questions_preserves_signed_superscript():
+    result = generate_questions(
+        json.dumps(complete_flat_payload("K^-1"))
+    )
+
+    superscript = result.questions[0].equations[0].math.superscript
+    assert superscript.type == "sequence"
+    assert superscript.items[0].type == "operator"
+    assert superscript.items[0].value == "-"
+    assert superscript.items[1].type == "number"
+    assert superscript.items[1].value == "1"

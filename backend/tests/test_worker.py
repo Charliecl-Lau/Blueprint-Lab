@@ -374,18 +374,24 @@ def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test
         assert generation_fixture.status == "complete"
         assert llm.generate.call_count == 1
         assert llm.generate.call_args.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
-        question_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionResponse"]
+        question_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"][
+            "ProviderQuestionResponse"
+        ]
         assert set(question_schema["required"]) >= {
             "type", "body", "metadata", "revision_options"
         }
         assert "quality_checks" in question_schema["properties"]
         assert "metadata" in question_schema["properties"]
         assert "$defs" in ASSESSMENT_PROVIDER_SCHEMA
-        assert "body_segments" in question_schema["properties"]
-        equation_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["EquationSchema"]
-        assert {"label", "location"}.issubset(equation_schema["required"])
-        assert "math" in equation_schema["properties"]
-        assert "model_answer_segments" in question_schema["properties"]
+        assert "body_segments" not in question_schema["properties"]
+        equation_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"][
+            "ProviderEquationSchema"
+        ]
+        assert {"label", "expression", "location"}.issubset(
+            equation_schema["required"]
+        )
+        assert "math" not in equation_schema["properties"]
+        assert "model_answer_segments" not in question_schema["properties"]
         usage_calls = (
             test_db.query(ModelCallUsage)
             .filter_by(run_id=generation_fixture.id)
