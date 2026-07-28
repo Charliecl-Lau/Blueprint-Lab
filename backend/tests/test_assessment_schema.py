@@ -105,7 +105,9 @@ def test_revision_options_require_two_or_three_items(complete_payload, count):
 
 
 def test_provider_schema_requires_complete_assessment_contract():
-    question = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionResponse"]
+    question = ASSESSMENT_PROVIDER_SCHEMA["$defs"][
+        "ProviderQuestionResponse"
+    ]
     assert set(question["required"]) >= {
         "type", "body", "metadata", "equations", "revision_options"
     }
@@ -405,10 +407,11 @@ def test_malformed_structured_fraction_is_rejected(complete_payload):
         AssessmentGenerationResponse.model_validate(complete_payload)
 
 
-def test_provider_schema_is_generated_from_the_canonical_pydantic_contract():
-    question = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionResponse"]
-    equation = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["EquationSchema"]
-    option = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["MCQOptionSchema"]
+def test_canonical_schema_retains_structured_math_contract():
+    canonical_schema = AssessmentGenerationResponse.model_json_schema()
+    question = canonical_schema["$defs"]["QuestionResponse"]
+    equation = canonical_schema["$defs"]["EquationSchema"]
+    option = canonical_schema["$defs"]["MCQOptionSchema"]
 
     assert "body_segments" in question["properties"]
     assert "model_answer_segments" in question["properties"]
@@ -419,28 +422,21 @@ def test_provider_schema_is_generated_from_the_canonical_pydantic_contract():
     assert "segments" in option["properties"]
 
 
-def test_provider_schema_makes_recursive_math_fields_optional_for_gemini():
-    recursive_defs = {
-        "EquationMathNode": ("left", "right"),
-        "FractionMathNode": ("numerator", "denominator"),
-        "SubscriptMathNode": ("base", "subscript"),
-        "SuperscriptMathNode": ("base", "superscript"),
-        "RadicalMathNode": ("radicand",),
-    }
+def test_provider_schema_uses_flat_equations_without_recursive_math_defs():
+    definitions = ASSESSMENT_PROVIDER_SCHEMA["$defs"]
+    question = definitions["ProviderQuestionResponse"]
+    equation = definitions["ProviderEquationSchema"]
+    option = definitions["ProviderMCQOptionSchema"]
 
-    for definition_name, field_names in recursive_defs.items():
-        definition = ASSESSMENT_PROVIDER_SCHEMA["$defs"][definition_name]
-        for field_name in field_names:
-            assert field_name not in definition["required"]
-
-
-def test_provider_schema_allows_empty_recursive_math_arrays_for_gemini():
-    recursive_arrays = {
-        "SequenceMathNode": "items",
-        "ProductMathNode": "terms",
-    }
-    for definition_name, field_name in recursive_arrays.items():
-        items_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"][definition_name][
-            "properties"
-        ][field_name]
-        assert "minItems" not in items_schema
+    assert {
+        "MathNode",
+        "EquationMathNode",
+        "FractionMathNode",
+        "SequenceMathNode",
+    }.isdisjoint(definitions)
+    assert "body_segments" not in question["properties"]
+    assert "model_answer_segments" not in question["properties"]
+    assert "segments" not in option["properties"]
+    assert "math" not in equation["properties"]
+    assert {"label", "expression", "location"} <= set(equation["required"])
+    assert equation["properties"]["expression"]["minLength"] == 1
