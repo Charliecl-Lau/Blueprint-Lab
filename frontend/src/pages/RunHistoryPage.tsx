@@ -16,9 +16,8 @@ export function RunHistoryPage() {
   const [state, setState] = useState<'loading' | 'ready' | 'error'>(validId ? 'loading' : 'error')
   const [downloadError, setDownloadError] = useState(false)
 
-  const load = useCallback(() => {
+  const requestHistory = useCallback(() => {
     if (!validId) return
-    setState('loading')
     runsApi.historyDetail(id).then(
       (detail) => {
         setHistory(detail)
@@ -28,7 +27,12 @@ export function RunHistoryPage() {
     )
   }, [id, validId])
 
-  useEffect(() => { load() }, [load])
+  const load = () => {
+    setState('loading')
+    requestHistory()
+  }
+
+  useEffect(() => { requestHistory() }, [requestHistory])
 
   if (!validId) return <main className="experiment-page history-page">
     <AppHeader subtitle="Run history" />

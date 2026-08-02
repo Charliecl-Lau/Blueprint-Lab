@@ -13,8 +13,7 @@ export function RecentRunsDrawer({ open, onClose }: Props) {
   const drawerRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
 
-  const load = useCallback(() => {
-    setState('loading')
+  const requestRuns = useCallback(() => {
     runsApi.historyRecent(10).then(
       (items) => {
         setRuns(items.filter((item) => (
@@ -28,11 +27,16 @@ export function RecentRunsDrawer({ open, onClose }: Props) {
     )
   }, [])
 
+  const load = () => {
+    setState('loading')
+    requestRuns()
+  }
+
   useEffect(() => {
     if (!open) return
-    load()
+    requestRuns()
     requestAnimationFrame(() => closeRef.current?.focus())
-  }, [load, open])
+  }, [open, requestRuns])
 
   useEffect(() => {
     if (!open) return
