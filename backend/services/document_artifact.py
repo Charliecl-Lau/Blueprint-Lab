@@ -32,6 +32,7 @@ def save_assessment_artifact(db: Session, run: Run) -> DocumentArtifact:
     )
     artifact = DocumentArtifact(
         run_id=run.id,
+        assessment=assessment,
         filename=f"blueprint-lab-run-{run.id}.docx",
         media_type=DOCX_MEDIA_TYPE,
         content=docx_bytes,

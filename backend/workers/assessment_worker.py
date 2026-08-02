@@ -446,13 +446,15 @@ def run_generation_pipeline(
 
         assessment = Assessment(
             run_id=run.id,
+            version=1,
+            kind="original_generation",
             raw_response_text=result.raw_text,
             parsed_json=None,
             output_hash=sha256_text(result.raw_text),
             schema_version=_ASSESSMENT_SCHEMA_VERSION,
             validation_status="invalid",
         )
-        db.add(assessment)
+        run.assessment = assessment
         run.request_id = result.provider_request_id
         run.model = result.model_name
         run.version = result.model_version
