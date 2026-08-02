@@ -5,6 +5,7 @@ import type {
   EvaluationAccessDetail,
   EvaluationComparison,
   GradingContext,
+  HistoryEvaluationContext,
   HumanEvaluationPatch,
   Run,
 } from '../types'
@@ -19,6 +20,9 @@ export const evaluationsApi = {
   ),
   gradingContext: (questionId: number): Promise<GradingContext> => (
     api.get(`/assessment-questions/${questionId}/grading-context`)
+  ),
+  historyContext: (questionId: number): Promise<HistoryEvaluationContext> => (
+    api.get(`/assessment-questions/${questionId}/history-context`)
   ),
   createHuman: (questionId: number): Promise<Evaluation> => (
     api.post(`/assessment-questions/${questionId}/evaluations/human`, {})

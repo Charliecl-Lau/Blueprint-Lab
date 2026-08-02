@@ -395,6 +395,20 @@ export interface GradingContext {
   viewer_path: string
 }
 
+export interface HistoryEvaluationContext {
+  run_id: number
+  assessment_id: number
+  question_id: number
+  question: Question
+  rubric: RubricSnapshot
+  llm_evaluation: Evaluation
+  human_evaluation: Evaluation | null
+  comparison: EvaluationComparison | null
+  previous_question_id: number | null
+  next_question_id: number | null
+  history_path: string
+}
+
 export type ComparisonIndicator =
   | 'agreement'
   | 'minor_difference'
