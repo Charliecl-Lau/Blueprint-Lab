@@ -45,6 +45,17 @@ class TruncatedResponseError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ModelCapabilities:
+    supports_sampling_controls: bool
+
+
+def capabilities_for(model: str) -> ModelCapabilities:
+    if model.startswith("gemini-3"):
+        return ModelCapabilities(supports_sampling_controls=False)
+    return ModelCapabilities(supports_sampling_controls=True)
+
+
+@dataclass(frozen=True)
 class TokenUsage:
     input_tokens: Optional[int]
     output_tokens: Optional[int]
@@ -120,15 +131,18 @@ class LLMClient:
         overrides = model_settings or {}
         config_kwargs = {
             "system_instruction": system_prompt,
-            "temperature": overrides.get("temperature", settings.llm_temperature),
-            "top_p": overrides.get("top_p", settings.llm_top_p),
             "max_output_tokens": overrides.get(
                 "max_output_tokens", settings.llm_max_output_tokens
             ),
         }
-        seed = overrides.get("seed", settings.llm_seed)
-        if seed is not None:
-            config_kwargs["seed"] = seed
+        if capabilities_for(self.model).supports_sampling_controls:
+            config_kwargs["temperature"] = overrides.get(
+                "temperature", settings.llm_temperature
+            )
+            config_kwargs["top_p"] = overrides.get("top_p", settings.llm_top_p)
+            seed = overrides.get("seed", settings.llm_seed)
+            if seed is not None:
+                config_kwargs["seed"] = seed
         if response_schema is not None:
             config_kwargs["response_mime_type"] = "application/json"
             schema = (

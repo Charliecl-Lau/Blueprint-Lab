@@ -16,6 +16,7 @@ from backend.models.run import Assessment, Run, RunReferencePdf
 from backend.models.source_document import RunSourceDocument, SourceDocument
 from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.services.assessment_recovery_service import assessment_is_accepted_or_valid
+from backend.services.llm_client import capabilities_for
 from backend.schemas.run_schema import ModelSettings, SourceBinding
 
 
@@ -71,10 +72,23 @@ def resolve_execution_config(
         ),
         "provider_settings": dict(requested_model.provider_settings),
     }
+    effective_provider_request = {
+        "provider": effective["provider"],
+        "model": effective["model"],
+        "max_output_tokens": effective["max_output_tokens"],
+    }
+    if capabilities_for(effective["model"]).supports_sampling_controls:
+        effective_provider_request.update(
+            temperature=effective["temperature"],
+            top_p=effective["top_p"],
+        )
+        if effective["seed"] is not None:
+            effective_provider_request["seed"] = effective["seed"]
     return {
         "schema_version": "1",
         "requested": requested,
         "effective": effective,
+        "effective_provider_request": effective_provider_request,
     }
 
 
