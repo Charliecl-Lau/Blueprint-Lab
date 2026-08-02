@@ -58,6 +58,39 @@ def test_grading_context_returns_409_before_llm_completion(client, test_db):
     assert "unavailable" in response.json()["detail"].lower()
 
 
+def test_history_context_returns_finalized_llm_and_null_human(client, test_db):
+    run = evaluated_run(test_db, question_count=1)
+    question = run.assessment.questions[0]
+
+    response = client.get(
+        f"/assessment-questions/{question.id}/history-context"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["llm_evaluation"]["status"] == "finalized"
+    assert body["human_evaluation"] is None
+    assert body["comparison"] is None
+
+
+def test_history_context_api_rejects_failed_run(client, test_db):
+    run = evaluated_run(test_db, question_count=1)
+    run.status = "error"
+    test_db.commit()
+
+    response = client.get(
+        f"/assessment-questions/{run.assessment.questions[0].id}/history-context"
+    )
+
+    assert response.status_code == 409
+
+
+def test_history_context_api_returns_404_for_missing_question(client):
+    response = client.get("/assessment-questions/999999/history-context")
+
+    assert response.status_code == 404
+
+
 def test_human_draft_patch_finalize_reopen_and_comparison_routes(client, test_db):
     run = evaluated_run(test_db, question_count=1)
     question = run.assessment.questions[0]

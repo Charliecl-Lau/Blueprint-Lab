@@ -98,6 +98,23 @@ def _human_evaluation(
     return max(candidates, key=lambda item: (item.attempt, item.id or 0), default=None)
 
 
+def _finalized_human_evaluation(
+    question: AssessmentQuestion, reviewer_id: str
+) -> Optional[Evaluation]:
+    candidates = [
+        item
+        for item in question.evaluations
+        if item.evaluation_type == "human"
+        and item.evaluator_identity == reviewer_id
+        and item.status == "finalized"
+    ]
+    return max(
+        candidates,
+        key=lambda item: (item.attempt, item.id or 0),
+        default=None,
+    )
+
+
 def _score_map(evaluation: Evaluation) -> Optional[dict[str, int]]:
     values = {
         item.criterion_key: item.score
@@ -435,6 +452,53 @@ def build_grading_context(
             else None
         ),
         "viewer_path": f"/experiments/{run.experiment_id}/viewer/{run.id}",
+    }
+
+
+def build_history_evaluation_context(
+    db: Session, question_id: int, reviewer_id: str
+) -> dict:
+    question = _question(db, question_id)
+    run = question.assessment.run
+    if run.status not in {"complete", "complete_with_warnings"}:
+        raise EvaluationConflictError(
+            "Evaluation history is available only for completed runs"
+        )
+
+    llm = _current_llm_evaluation(question)
+    if llm is None:
+        raise EvaluationConflictError("Completed LLM evaluation is unavailable")
+    human = _finalized_human_evaluation(question, reviewer_id)
+
+    ordered = sorted(
+        question.assessment.questions,
+        key=lambda item: (item.ordinal, item.id),
+    )
+    index = next(
+        value for value, item in enumerate(ordered) if item.id == question.id
+    )
+    payload = question.assessment.parsed_json["questions"][question.ordinal]
+
+    return {
+        "run_id": run.id,
+        "assessment_id": question.assessment_id,
+        "question_id": question.id,
+        "question": deepcopy(payload),
+        "rubric": deepcopy(llm.rubric_snapshot),
+        "llm_evaluation": llm,
+        "human_evaluation": human,
+        "comparison": (
+            build_comparison(db, question.id, reviewer_id)
+            if human is not None
+            else None
+        ),
+        "previous_question_id": (
+            ordered[index - 1].id if index > 0 else None
+        ),
+        "next_question_id": (
+            ordered[index + 1].id if index + 1 < len(ordered) else None
+        ),
+        "history_path": f"/runs/{run.id}/history",
     }
 
 

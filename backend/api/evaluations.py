@@ -9,6 +9,7 @@ from backend.schemas.evaluation_schema import (
     EvaluationComparison,
     EvaluationDetail,
     GradingContext,
+    HistoryEvaluationContext,
     HumanEvaluationCreate,
     HumanEvaluationPatch,
 )
@@ -17,6 +18,7 @@ from backend.services.assessment_rubric import CRITERION_KEYS
 from backend.services.evaluation_service import (
     build_comparison,
     build_grading_context,
+    build_history_evaluation_context,
     create_human_draft,
     finalize_evaluation,
     list_assessment_evaluations,
@@ -66,6 +68,27 @@ def get_grading_context(
         **context,
         "llm_evaluation": _detail(context["llm_evaluation"]),
         "human_evaluation": _detail(context["human_evaluation"]),
+    }
+
+
+@router.get(
+    "/assessment-questions/{question_id}/history-context",
+    response_model=HistoryEvaluationContext,
+)
+def get_history_evaluation_context(
+    question_id: int,
+    db: Session = Depends(get_db),
+    reviewer_id: str = Depends(reviewer_identity),
+):
+    context = build_history_evaluation_context(db, question_id, reviewer_id)
+    return {
+        **context,
+        "llm_evaluation": _detail(context["llm_evaluation"]),
+        "human_evaluation": (
+            _detail(context["human_evaluation"])
+            if context["human_evaluation"] is not None
+            else None
+        ),
     }
 
 

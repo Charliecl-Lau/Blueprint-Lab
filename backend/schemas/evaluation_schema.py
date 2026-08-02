@@ -157,3 +157,17 @@ class GradingContext(BaseModel):
     previous_question_id: Optional[int]
     next_question_id: Optional[int]
     viewer_path: str
+
+
+class HistoryEvaluationContext(BaseModel):
+    run_id: int
+    assessment_id: int
+    question_id: int
+    question: dict
+    rubric: dict
+    llm_evaluation: EvaluationDetail
+    human_evaluation: Optional[EvaluationDetail]
+    comparison: Optional[EvaluationComparison]
+    previous_question_id: Optional[int]
+    next_question_id: Optional[int]
+    history_path: str
