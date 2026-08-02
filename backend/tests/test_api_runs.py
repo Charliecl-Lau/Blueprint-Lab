@@ -145,6 +145,34 @@ def recent_runs(test_db):
     return SimpleNamespace(oldest=oldest, newest=newest)
 
 
+@pytest.fixture
+def history_runs(test_db):
+    now = utc_now()
+    records = []
+    for index, (status, topic) in enumerate([
+        ("complete", "Completed topic"),
+        ("complete_with_warnings", "Warning topic"),
+        ("error", "Failed topic"),
+        ("generating", "Generating topic"),
+        ("pending", "Pending topic"),
+    ]):
+        experiment, condition = _experiment_and_condition(test_db, topic=topic)
+        run = Run(
+            experiment=experiment,
+            condition=condition,
+            run_number=1,
+            status=status,
+            model_settings={},
+            created_at=now + timedelta(minutes=index),
+            completed_at=(now + timedelta(minutes=index))
+            if status.startswith("complete") else None,
+        )
+        test_db.add(run)
+        records.append(run)
+    test_db.commit()
+    return records
+
+
 def test_unknown_run_and_condition_return_404(client):
     assert client.get("/runs/999999").status_code == 404
     assert client.post("/runs/999999/retry").status_code == 404
@@ -471,6 +499,33 @@ def test_recent_runs_returns_active_and_completed_in_reverse_order(
 def test_recent_runs_limit_is_bounded(client):
     assert client.get("/runs/recent?limit=0").status_code == 422
     assert client.get("/runs/recent?limit=51").status_code == 422
+
+
+def test_history_recent_returns_terminal_runs_newest_first(client, history_runs):
+    response = client.get("/runs/history/recent?limit=10")
+
+    assert response.status_code == 200
+    assert [item["topic"] for item in response.json()] == [
+        "Failed topic",
+        "Warning topic",
+        "Completed topic",
+    ]
+    assert [item["display_status"] for item in response.json()] == [
+        "failed",
+        "completed",
+        "completed",
+    ]
+
+
+def test_history_recent_filters_before_applying_limit(client, history_runs):
+    body = client.get("/runs/history/recent?limit=2").json()
+
+    assert [item["topic"] for item in body] == ["Failed topic", "Warning topic"]
+
+
+@pytest.mark.parametrize("limit", [0, 51])
+def test_history_recent_rejects_invalid_limit(client, limit):
+    assert client.get(f"/runs/history/recent?limit={limit}").status_code == 422
 
 
 def _recoverable_payload(body: str):

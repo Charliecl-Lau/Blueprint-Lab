@@ -116,6 +116,20 @@ class RecentRun(BaseModel):
     reference_pdf_filenames: list[str] = Field(default_factory=list)
 
 
+TerminalRunStatus = Literal["complete", "complete_with_warnings", "error"]
+
+
+class TerminalRunSummary(BaseModel):
+    id: int
+    experiment_id: int
+    condition_id: int
+    run_number: int
+    status: TerminalRunStatus
+    display_status: Literal["completed", "failed"]
+    topic: str
+    display_at: datetime
+
+
 def _reported_sum(items, attribute: str) -> Optional[int]:
     values = [getattr(item, attribute) for item in items]
     reported = [value for value in values if value is not None]

@@ -25,8 +25,10 @@ from backend.schemas.run_schema import (
     RecentRun,
     RunCreate,
     RunSummary,
+    TerminalRunSummary,
     token_usage_detail,
 )
+from backend.services.run_history import list_terminal_run_summaries
 from backend.services.run_service import (
     create_run,
     mark_generation_dispatch_failed,
@@ -322,6 +324,14 @@ def get_recent_runs(
         }
         for run in runs
     ]
+
+
+@router.get("/runs/history/recent", response_model=list[TerminalRunSummary])
+def get_terminal_run_history(
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    return list_terminal_run_summaries(db, limit)
 
 
 @router.get("/runs/{run_id}/progress")
