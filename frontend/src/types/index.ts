@@ -206,6 +206,48 @@ export interface RecentRun {
   reference_pdf_filenames?: string[]
 }
 
+export interface TerminalRunSummary {
+  id: number
+  experiment_id: number
+  condition_id: number
+  run_number: number
+  status: 'complete' | 'complete_with_warnings' | 'error'
+  display_status: 'completed' | 'failed'
+  topic: string
+  display_at: string
+}
+
+export interface HistoryAssessmentDetails {
+  course: string
+  topic: string
+  learning_objectives: string[]
+  assessment_type: AssessmentType
+  difficulty: string
+  number_of_questions: number
+  estimated_time_minutes: number
+  cognitive_demand: CognitiveDemand
+  additional_instruction: string | null
+  prompt_structure: PromptStructure
+  factor_configuration: Record<string, boolean>
+  factor_inputs: PromptFactorInputs
+  reference_pdf_filenames: string[]
+}
+
+export interface RunHistoryDetail {
+  id: number
+  experiment_id: number
+  condition_id: number
+  run_number: number
+  status: 'complete' | 'complete_with_warnings' | 'error'
+  display_status: 'completed' | 'failed'
+  assessment_details: HistoryAssessmentDetails
+  actual_prompt: string | null
+  questions: Question[] | null
+  question_ids: number[] | null
+  artifact: { available: true; filename: string } | null
+  evaluation_available: boolean
+}
+
 export interface MCQOption {
   id?: number
   body: string
@@ -351,6 +393,20 @@ export interface GradingContext {
   previous_question_id: number | null
   next_question_id: number | null
   viewer_path: string
+}
+
+export interface HistoryEvaluationContext {
+  run_id: number
+  assessment_id: number
+  question_id: number
+  question: Question
+  rubric: RubricSnapshot
+  llm_evaluation: Evaluation
+  human_evaluation: Evaluation | null
+  comparison: EvaluationComparison | null
+  previous_question_id: number | null
+  next_question_id: number | null
+  history_path: string
 }
 
 export type ComparisonIndicator =

@@ -24,8 +24,15 @@ from backend.services.assessment_rubric import RUBRIC_VERSION
 from backend.schemas.run_schema import (
     RecentRun,
     RunCreate,
+    RunHistoryDetail,
     RunSummary,
+    TerminalRunSummary,
     token_usage_detail,
+)
+from backend.services.run_history import (
+    RunHistoryError,
+    get_run_history,
+    list_terminal_run_summaries,
 )
 from backend.services.run_service import (
     create_run,
@@ -322,6 +329,22 @@ def get_recent_runs(
         }
         for run in runs
     ]
+
+
+@router.get("/runs/history/recent", response_model=list[TerminalRunSummary])
+def get_terminal_run_history(
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    return list_terminal_run_summaries(db, limit)
+
+
+@router.get("/runs/{run_id}/history", response_model=RunHistoryDetail)
+def get_run_history_detail(run_id: int, db: Session = Depends(get_db)):
+    try:
+        return get_run_history(db, run_id)
+    except RunHistoryError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.get("/runs/{run_id}/progress")

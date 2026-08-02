@@ -7,7 +7,9 @@ from backend.models import (
     Condition,
     DocumentArtifact,
     Evaluation,
+    EvaluationAccessEvent,
     EvaluationCriterion,
+    EvaluationRevision,
     Experiment,
     Run,
 )
@@ -26,6 +28,7 @@ from backend.services.evaluation_service import (
     StaleEvaluationError,
     build_comparison,
     build_grading_context,
+    build_history_evaluation_context,
     create_human_draft,
     finalize_evaluation,
     record_llm_access,
@@ -254,6 +257,112 @@ def test_grading_context_uses_experiment_order_and_current_reviewer(test_db):
     assert context["llm_evaluation"].status == "finalized"
     assert context["question"] == run.assessment.parsed_json["questions"][1]
     assert context["viewer_path"] == f"/experiments/{run.experiment_id}/viewer/{run.id}"
+
+
+def test_history_context_does_not_mutate_evaluation_state(test_db):
+    run = evaluated_run(test_db, question_count=1)
+    question = run.assessment.questions[0]
+    human = create_human_draft(test_db, question.id, settings.local_reviewer_id)
+    human = update_human_draft(
+        test_db,
+        human.id,
+        settings.local_reviewer_id,
+        HumanEvaluationPatch(
+            revision=human.revision,
+            criteria=[
+                HumanCriterionPatch(criterion_key=key, score=4)
+                for key in CRITERION_KEYS
+            ],
+        ),
+    )
+    finalize_evaluation(test_db, human.id, settings.local_reviewer_id)
+
+    before = {
+        "evaluations": test_db.query(Evaluation).count(),
+        "revisions": test_db.query(EvaluationRevision).count(),
+        "access_events": test_db.query(EvaluationAccessEvent).count(),
+        "timestamps": [
+            item.updated_at
+            for item in test_db.query(Evaluation).order_by(Evaluation.id)
+        ],
+    }
+
+    context = build_history_evaluation_context(
+        test_db, question.id, settings.local_reviewer_id
+    )
+
+    after = {
+        "evaluations": test_db.query(Evaluation).count(),
+        "revisions": test_db.query(EvaluationRevision).count(),
+        "access_events": test_db.query(EvaluationAccessEvent).count(),
+        "timestamps": [
+            item.updated_at
+            for item in test_db.query(Evaluation).order_by(Evaluation.id)
+        ],
+    }
+    assert context["llm_evaluation"].status == "finalized"
+    assert context["human_evaluation"].status == "finalized"
+    assert before == after
+
+
+def test_history_context_ignores_unfinalized_human(test_db):
+    run = evaluated_run(test_db, question_count=1)
+    question = run.assessment.questions[0]
+    create_human_draft(test_db, question.id, settings.local_reviewer_id)
+
+    context = build_history_evaluation_context(
+        test_db, question.id, settings.local_reviewer_id
+    )
+
+    assert context["human_evaluation"] is None
+    assert context["comparison"] is None
+
+
+def test_history_context_ignores_reopened_human(test_db):
+    run = evaluated_run(test_db, question_count=1)
+    question = run.assessment.questions[0]
+    human = score_draft(
+        test_db,
+        create_human_draft(test_db, question.id, settings.local_reviewer_id),
+    )
+    human = finalize_evaluation(
+        test_db, human.id, settings.local_reviewer_id
+    )
+    reopen_evaluation(test_db, human.id, settings.local_reviewer_id)
+
+    context = build_history_evaluation_context(
+        test_db, question.id, settings.local_reviewer_id
+    )
+
+    assert context["human_evaluation"] is None
+    assert context["comparison"] is None
+
+
+def test_history_navigation_stays_inside_run(test_db):
+    run = evaluated_run(test_db, question_count=2)
+    other = evaluated_run(test_db, question_count=1)
+    first, second = sorted(run.assessment.questions, key=lambda item: item.ordinal)
+
+    context = build_history_evaluation_context(
+        test_db, first.id, settings.local_reviewer_id
+    )
+
+    assert context["previous_question_id"] is None
+    assert context["next_question_id"] == second.id
+    assert context["next_question_id"] != other.assessment.questions[0].id
+
+
+def test_history_context_rejects_failed_run(test_db):
+    run = evaluated_run(test_db, question_count=1)
+    run.status = "error"
+    test_db.commit()
+
+    with pytest.raises(EvaluationConflictError):
+        build_history_evaluation_context(
+            test_db,
+            run.assessment.questions[0].id,
+            settings.local_reviewer_id,
+        )
 
 
 def test_comparison_requires_finalized_human_and_calculates_neutral_metrics(test_db):

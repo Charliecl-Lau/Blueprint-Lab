@@ -45,6 +45,172 @@ beforeEach(() => {
   }))
 })
 
+function terminalRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 8,
+    experiment_id: 42,
+    condition_id: 3,
+    run_number: 1,
+    status: 'complete',
+    display_status: 'completed',
+    topic: 'Phase stability',
+    display_at: '2026-08-02T14:30:00Z',
+    ...overrides,
+  }
+}
+
+function mockTerminalHistory(items: ReturnType<typeof terminalRun>[]) {
+  vi.mocked(fetch).mockImplementation(async (input) => ({
+    ok: true,
+    json: async () => String(input).includes('/api/runs/history/recent') ? items : [],
+  } as Response))
+}
+
+test('drawer preserves unfinished assessment input and shows terminal history', async () => {
+  mockTerminalHistory([
+    terminalRun(),
+    terminalRun({ id: 9, status: 'error', display_status: 'failed', topic: 'Failed run' }),
+  ])
+  const user = userEvent.setup()
+  render(<App />)
+  await user.type(screen.getByLabelText('Topic'), 'Unsaved topic')
+  await user.click(screen.getByRole('button', { name: 'Recent Runs' }))
+
+  const drawer = screen.getByRole('dialog', { name: 'Recent Runs' })
+  expect(within(drawer).getByText('Phase stability')).toBeVisible()
+  expect(within(drawer).getByText('Completed')).toBeVisible()
+  expect(within(drawer).getByText('Failed')).toBeVisible()
+
+  await user.click(within(drawer).getByRole('button', { name: 'Close Recent Runs' }))
+  expect(screen.getByLabelText('Topic')).toHaveValue('Unsaved topic')
+})
+
+test('drawer retries a loading error and shows empty state', async () => {
+  let historyRequests = 0
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    if (!String(input).includes('/api/runs/history/recent')) {
+      return { ok: true, json: async () => [] } as Response
+    }
+    historyRequests += 1
+    return historyRequests === 1
+      ? { ok: false, status: 503, json: async () => ({}) } as Response
+      : { ok: true, json: async () => [] } as Response
+  })
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: 'Recent Runs' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Recent runs could not be loaded.')
+  await user.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(await screen.findByText('No completed or failed runs yet.')).toBeVisible()
+})
+
+test('Escape closes the drawer and restores trigger focus', async () => {
+  mockTerminalHistory([])
+  const user = userEvent.setup()
+  render(<App />)
+  const trigger = screen.getByRole('button', { name: 'Recent Runs' })
+  await user.click(trigger)
+  await user.keyboard('{Escape}')
+  expect(trigger).toHaveFocus()
+})
+
+function completedRunHistory(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 8,
+    experiment_id: 42,
+    condition_id: 3,
+    run_number: 1,
+    status: 'complete',
+    display_status: 'completed',
+    assessment_details: {
+      course: 'Materials Science',
+      topic: 'Phase stability',
+      learning_objectives: ['Compare stable phases', 'Explain Gibbs energy'],
+      assessment_type: 'mixed',
+      difficulty: 'medium',
+      number_of_questions: 1,
+      estimated_time_minutes: 30,
+      cognitive_demand: 'apply_analyze',
+      additional_instruction: 'Use a phase diagram.',
+      prompt_structure: 'openai',
+      factor_configuration: {
+        concept_bridge: true,
+        few_shot: false,
+        reference_content: false,
+        reasoning_guidance: false,
+      },
+      factor_inputs: { concept_bridge: 'Connect energy minima to stable phases.' },
+      reference_pdf_filenames: ['phase-reference.pdf'],
+    },
+    actual_prompt: 'Exact prompt\nSecond line',
+    questions: [{
+      id: 11,
+      type: 'short_answer',
+      body: 'Which phase is stable?',
+      model_answer: 'The phase with minimum Gibbs energy.',
+    }],
+    question_ids: [11],
+    artifact: { available: true, filename: 'phase-stability.docx' },
+    evaluation_available: true,
+    ...overrides,
+  }
+}
+
+function failedRunHistory(overrides: Record<string, unknown> = {}) {
+  return completedRunHistory({
+    id: 9,
+    status: 'error',
+    display_status: 'failed',
+    actual_prompt: 'Prompt survived',
+    questions: null,
+    question_ids: null,
+    artifact: null,
+    evaluation_available: false,
+    ...overrides,
+  })
+}
+
+function mockRunHistory(history: ReturnType<typeof completedRunHistory>) {
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => history } as Response)
+}
+
+test('completed history uses approved accordion defaults', async () => {
+  window.history.replaceState({}, '', '/runs/8/history')
+  mockRunHistory(completedRunHistory())
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Phase stability' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Assessment Details' })).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByRole('button', { name: 'Actual Prompt' })).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByRole('button', { name: 'Questions and Solutions' })).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByRole('button', { name: 'Download Word DOCX' })).toBeEnabled()
+  expect(screen.getByRole('link', { name: 'Next' })).toHaveAttribute(
+    'href', '/runs/8/history/questions/11/evaluation',
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Assessment Details' }))
+  const factorGrid = screen.getByRole('heading', { name: 'Prompt design factors' }).closest('section')!
+  expect(within(factorGrid).queryByText('Connect energy minima to stable phases.')).not.toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Concept Bridge input' }).parentElement)
+    .toHaveTextContent('Connect energy minima to stable phases.')
+})
+
+test('failed history omits completed-only controls', async () => {
+  window.history.replaceState({}, '', '/runs/9/history')
+  mockRunHistory(failedRunHistory({ actual_prompt: null }))
+  render(<App />)
+  expect(await screen.findByRole('button', { name: 'Assessment Details' })).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByText('No actual prompt')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Questions and Solutions' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Download Word DOCX' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Next' })).not.toBeInTheDocument()
+})
+
+test('completed legacy history reports Word document unavailable', async () => {
+  window.history.replaceState({}, '', '/runs/8/history')
+  mockRunHistory(completedRunHistory({ artifact: null }))
+  render(<App />)
+  expect(await screen.findByRole('button', { name: 'Word document unavailable' })).toBeDisabled()
+})
+
 test('shows the streamlined research inputs and removes production controls', () => {
   render(<App />)
   expect(screen.getByRole('heading', { name: 'New Experiment' })).toBeInTheDocument()

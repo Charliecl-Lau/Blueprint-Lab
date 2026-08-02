@@ -60,3 +60,16 @@ test('evaluation retry targets the saved assessment without regeneration', async
     headers: { 'Content-Type': 'application/json' },
   })
 })
+
+
+test('evaluation history uses a mutation-free GET', async () => {
+  const fetchMock = successfulFetch()
+
+  await evaluationsApi.historyContext(44)
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/assessment-questions/44/history-context',
+    { headers: { 'Content-Type': 'application/json' } },
+  )
+  expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined()
+})
