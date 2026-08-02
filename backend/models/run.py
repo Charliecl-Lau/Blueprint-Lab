@@ -127,6 +127,12 @@ class Run(Base):
     model_call_usages: Mapped[list["ModelCallUsage"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
+    docx_authoring_attempts: Mapped[list["DocxAuthoringAttempt"]] = relationship(
+        back_populates="run",
+        foreign_keys="DocxAuthoringAttempt.run_id",
+        cascade="all, delete-orphan",
+        overlaps="source_assessment,docx_authoring_attempts",
+    )
     reference_pdfs: Mapped[list["RunReferencePdf"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
@@ -307,6 +313,11 @@ class Assessment(Base):
         cascade="all, delete-orphan",
         overlaps="document_artifacts,run",
     )
+    docx_authoring_attempts: Mapped[list["DocxAuthoringAttempt"]] = relationship(
+        back_populates="source_assessment",
+        foreign_keys="[DocxAuthoringAttempt.source_assessment_id, DocxAuthoringAttempt.run_id]",
+        overlaps="run,docx_authoring_attempts",
+    )
 
 
 class DocumentArtifact(Base):
@@ -361,3 +372,4 @@ PromptRecord = Prompt
 
 from backend.models.source_document import RunSourceDocument  # noqa: E402,F401
 from backend.models.model_call_usage import ModelCallUsage  # noqa: E402,F401
+from backend.models.docx_authoring import DocxAuthoringAttempt  # noqa: E402,F401
