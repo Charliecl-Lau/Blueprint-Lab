@@ -130,6 +130,42 @@ class TerminalRunSummary(BaseModel):
     display_at: datetime
 
 
+class HistoryAssessmentDetails(BaseModel):
+    course: str
+    topic: str
+    learning_objectives: list[str]
+    assessment_type: str
+    difficulty: str
+    number_of_questions: int
+    estimated_time_minutes: int
+    cognitive_demand: str
+    additional_instruction: Optional[str]
+    prompt_structure: str
+    factor_configuration: dict[str, bool]
+    factor_inputs: dict[str, object]
+    reference_pdf_filenames: list[str]
+
+
+class HistoryArtifact(BaseModel):
+    available: Literal[True]
+    filename: str
+
+
+class RunHistoryDetail(BaseModel):
+    id: int
+    experiment_id: int
+    condition_id: int
+    run_number: int
+    status: TerminalRunStatus
+    display_status: Literal["completed", "failed"]
+    assessment_details: HistoryAssessmentDetails
+    actual_prompt: Optional[str]
+    questions: Optional[list[dict]]
+    question_ids: Optional[list[int]]
+    artifact: Optional[HistoryArtifact]
+    evaluation_available: bool
+
+
 def _reported_sum(items, attribute: str) -> Optional[int]:
     values = [getattr(item, attribute) for item in items]
     reported = [value for value in values if value is not None]

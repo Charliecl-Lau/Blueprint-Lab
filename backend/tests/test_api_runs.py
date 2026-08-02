@@ -5,7 +5,7 @@ from unittest.mock import call, patch
 
 import pytest
 
-from backend.models import ModelCallUsage
+from backend.models import AssessmentQuestion, ModelCallUsage
 from backend.models.experiment import Condition, Experiment
 from backend.models.experiment import utc_now
 from backend.models.run import (
@@ -171,6 +171,112 @@ def history_runs(test_db):
         records.append(run)
     test_db.commit()
     return records
+
+
+@pytest.fixture
+def completed_history_run(test_db):
+    experiment = Experiment(
+        course="MSE 202",
+        topic="Phase stability",
+        learning_objectives=[
+            "Compare stable phases.",
+            "Explain Gibbs energy.",
+        ],
+        assessment_type="short_answer",
+        difficulty="intermediate",
+        number_of_questions=1,
+        estimated_time_minutes=20,
+        cognitive_demand="apply_analyze",
+        additional_instruction="Use phase diagrams.",
+    )
+    condition = Condition(
+        experiment=experiment,
+        condition_code="C100",
+        prompt_structure="openai",
+        concept_bridge_enabled=True,
+        few_shot_enabled=False,
+        reference_content_enabled=False,
+        reasoning_guidance_enabled=False,
+        factor_inputs={"concept_bridge": {"source": "phase map"}},
+        condition_label="Concept bridge",
+    )
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="complete",
+        model_settings={},
+        completed_at=utc_now(),
+    )
+    run.reference_pdfs = [
+        RunReferencePdf(ordinal=0, original_filename="phase-reference.pdf")
+    ]
+    run.prompt = Prompt(
+        prompt_structure="openai",
+        actual_prompt="Exact prompt\nSecond line",
+    )
+    run.assessment = Assessment(
+        raw_response_text='{"questions": [{"model_answer": "Minimum Gibbs energy."}]}',
+        parsed_json={
+            "questions": [
+                {
+                    "body": "Which phase is stable?",
+                    "model_answer": "Minimum Gibbs energy.",
+                }
+            ]
+        },
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    run.assessment.questions = [
+        AssessmentQuestion(
+            ordinal=0,
+            assessment_version=1,
+            content_hash="b" * 64,
+        )
+    ]
+    run.document_artifact = DocumentArtifact(
+        filename="phase-stability.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=b"PK-exact-history-docx",
+    )
+    test_db.add(run)
+    test_db.commit()
+    return run
+
+
+@pytest.fixture
+def failed_history_run(test_db):
+    experiment, condition = _experiment_and_condition(test_db, topic="Failed history")
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="error",
+        model_settings={},
+    )
+    run.prompt = Prompt(prompt_structure="openai", actual_prompt="Prompt survived")
+    test_db.add(run)
+    test_db.commit()
+    return run
+
+
+@pytest.fixture
+def failed_without_prompt(test_db):
+    experiment, condition = _experiment_and_condition(test_db, topic="No prompt")
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="error",
+        model_settings={},
+    )
+    test_db.add(run)
+    test_db.commit()
+    return run
 
 
 def test_unknown_run_and_condition_return_404(client):
@@ -526,6 +632,71 @@ def test_history_recent_filters_before_applying_limit(client, history_runs):
 @pytest.mark.parametrize("limit", [0, 51])
 def test_history_recent_rejects_invalid_limit(client, limit):
     assert client.get(f"/runs/history/recent?limit={limit}").status_code == 422
+
+
+def test_completed_history_returns_saved_evidence(client, completed_history_run):
+    response = client.get(f"/runs/{completed_history_run.id}/history")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["display_status"] == "completed"
+    assert body["assessment_details"]["topic"] == "Phase stability"
+    assert body["assessment_details"]["learning_objectives"] == [
+        "Compare stable phases.",
+        "Explain Gibbs energy.",
+    ]
+    assert body["assessment_details"]["factor_configuration"] == {
+        "concept_bridge": True,
+        "few_shot": False,
+        "reference_content": False,
+        "reasoning_guidance": False,
+    }
+    assert body["assessment_details"]["reference_pdf_filenames"] == [
+        "phase-reference.pdf"
+    ]
+    assert body["actual_prompt"] == "Exact prompt\nSecond line"
+    assert body["questions"][0]["model_answer"] == "Minimum Gibbs energy."
+    assert body["question_ids"] == [
+        completed_history_run.assessment.questions[0].id
+    ]
+    assert body["artifact"] == {
+        "available": True,
+        "filename": "phase-stability.docx",
+    }
+    assert body["evaluation_available"] is True
+
+    download = client.get(f"/runs/{completed_history_run.id}/export-docx")
+    assert download.content == b"PK-exact-history-docx"
+    assert download.headers["content-disposition"] == (
+        'attachment; filename="phase-stability.docx"'
+    )
+
+
+def test_failed_history_omits_completed_only_evidence(client, failed_history_run):
+    response = client.get(f"/runs/{failed_history_run.id}/history")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["display_status"] == "failed"
+    assert body["actual_prompt"] == "Prompt survived"
+    assert body["questions"] is None
+    assert body["question_ids"] is None
+    assert body["artifact"] is None
+    assert body["evaluation_available"] is False
+
+
+def test_failed_history_allows_missing_prompt(client, failed_without_prompt):
+    body = client.get(f"/runs/{failed_without_prompt.id}/history").json()
+
+    assert body["actual_prompt"] is None
+
+
+def test_active_run_history_returns_409(client, recent_runs):
+    assert client.get(f"/runs/{recent_runs.newest.id}/history").status_code == 409
+
+
+def test_missing_run_history_returns_404(client):
+    assert client.get("/runs/999999/history").status_code == 404
 
 
 def _recoverable_payload(body: str):
