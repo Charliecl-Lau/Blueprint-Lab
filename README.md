@@ -142,8 +142,11 @@ GET  /runs/recent
 GET  /runs/{run_id}/progress
 POST /runs/{run_id}/retry
 GET  /runs/{run_id}/export-docx
+GET  /runs/history/recent
+GET  /runs/{run_id}/history
 POST /assessments/{assessment_id}/evaluations/llm/retry
 GET  /assessment-questions/{question_id}/grading-context
+GET  /assessment-questions/{question_id}/history-context
 GET  /assessments/{assessment_id}/evaluations
 POST /assessment-questions/{question_id}/evaluations/human
 PATCH /evaluations/{evaluation_id}
@@ -152,6 +155,8 @@ POST /evaluations/{evaluation_id}/reopen
 POST /evaluations/{evaluation_id}/llm-access
 GET  /assessment-questions/{question_id}/evaluation-comparison
 ```
+
+The history endpoints are read-only and mutation-free: opening saved LLM, human, or comparison panels never saves, finalizes, reopens, retries, or records LLM access. Terminal run history includes completed and failed runs; failed detail responses expose only saved assessment details and prompt state. Completed history returns persisted questions and evaluation evidence and downloads the exact stored DOCX bytes using the artifact's stored filename.
 
 `POST /experiments` uses multipart fields `payload` and repeated `reference_pdfs`. `POST /runs/{run_id}/retry` accepts repeated `reference_pdfs` only when the original run is PDF-backed; omitting them for such a run returns `409` with code `reference_pdfs_required`.
 
