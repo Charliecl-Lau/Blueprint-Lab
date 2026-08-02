@@ -114,6 +114,98 @@ test('Escape closes the drawer and restores trigger focus', async () => {
   expect(trigger).toHaveFocus()
 })
 
+function completedRunHistory(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 8,
+    experiment_id: 42,
+    condition_id: 3,
+    run_number: 1,
+    status: 'complete',
+    display_status: 'completed',
+    assessment_details: {
+      course: 'Materials Science',
+      topic: 'Phase stability',
+      learning_objectives: ['Compare stable phases', 'Explain Gibbs energy'],
+      assessment_type: 'mixed',
+      difficulty: 'medium',
+      number_of_questions: 1,
+      estimated_time_minutes: 30,
+      cognitive_demand: 'apply_analyze',
+      additional_instruction: 'Use a phase diagram.',
+      prompt_structure: 'openai',
+      factor_configuration: {
+        concept_bridge: true,
+        few_shot: false,
+        reference_content: false,
+        reasoning_guidance: false,
+      },
+      factor_inputs: { concept_bridge: 'Connect energy minima to stable phases.' },
+      reference_pdf_filenames: ['phase-reference.pdf'],
+    },
+    actual_prompt: 'Exact prompt\nSecond line',
+    questions: [{
+      id: 11,
+      type: 'short_answer',
+      body: 'Which phase is stable?',
+      model_answer: 'The phase with minimum Gibbs energy.',
+    }],
+    question_ids: [11],
+    artifact: { available: true, filename: 'phase-stability.docx' },
+    evaluation_available: true,
+    ...overrides,
+  }
+}
+
+function failedRunHistory(overrides: Record<string, unknown> = {}) {
+  return completedRunHistory({
+    id: 9,
+    status: 'error',
+    display_status: 'failed',
+    actual_prompt: 'Prompt survived',
+    questions: null,
+    question_ids: null,
+    artifact: null,
+    evaluation_available: false,
+    ...overrides,
+  })
+}
+
+function mockRunHistory(history: ReturnType<typeof completedRunHistory>) {
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => history } as Response)
+}
+
+test('completed history uses approved accordion defaults', async () => {
+  window.history.replaceState({}, '', '/runs/8/history')
+  mockRunHistory(completedRunHistory())
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Phase stability' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Assessment Details' })).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByRole('button', { name: 'Actual Prompt' })).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByRole('button', { name: 'Questions and Solutions' })).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByRole('button', { name: 'Download Word DOCX' })).toBeEnabled()
+  expect(screen.getByRole('link', { name: 'Next' })).toHaveAttribute(
+    'href', '/runs/8/history/questions/11/evaluation',
+  )
+})
+
+test('failed history omits completed-only controls', async () => {
+  window.history.replaceState({}, '', '/runs/9/history')
+  mockRunHistory(failedRunHistory({ actual_prompt: null }))
+  render(<App />)
+  expect(await screen.findByRole('button', { name: 'Assessment Details' })).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByText('No actual prompt')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Questions and Solutions' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Download Word DOCX' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Next' })).not.toBeInTheDocument()
+})
+
+test('completed legacy history reports Word document unavailable', async () => {
+  window.history.replaceState({}, '', '/runs/8/history')
+  mockRunHistory(completedRunHistory({ artifact: null }))
+  render(<App />)
+  expect(await screen.findByRole('button', { name: 'Word document unavailable' })).toBeDisabled()
+})
+
 test('shows the streamlined research inputs and removes production controls', () => {
   render(<App />)
   expect(screen.getByRole('heading', { name: 'New Experiment' })).toBeInTheDocument()

@@ -4,10 +4,9 @@ import { evaluationsApi } from '../api/evaluations'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
 import { AppHeader } from '../components/AppHeader'
-import { MathContent, StandaloneEquations } from '../components/MathContent'
+import { QuestionsSolutionsPanel } from '../components/history/QuestionsSolutionsPanel'
 import { TokenUsage } from '../components/TokenUsage'
 import { useSSE } from '../hooks/useSSE'
-import { referencedEquationLabels } from '../math/equationReferences'
 import { useRunStore } from '../store/runStore'
 import type { CognitiveDemand } from '../types'
 import { referencePdfValidationMessages } from '../validation/experimentValidation'
@@ -236,23 +235,7 @@ export function AssessmentViewerPage() {
           </section>
           <section>
             <h2>Generated Questions</h2>
-            {questions.map((question, index) => {
-              const equations = question.equations ?? []
-              const referencedLabels = referencedEquationLabels(
-                question.body,
-                ...question.options?.map((option) => option.body) ?? [],
-                question.model_answer,
-              )
-              return <div className="question" key={question.id ?? index}>
-                <strong>{index + 1}. <MathContent text={question.body} segments={question.body_segments} equations={equations} location="question" /></strong>
-                {question.options?.map((option, optionIndex) => (
-                  <p key={option.id ?? optionIndex}><MathContent text={option.body} segments={option.segments} equations={equations} location="question" />{option.is_correct ? ' ✓' : ''}</p>
-                ))}
-                <StandaloneEquations equations={equations} location="question" referencedLabels={referencedLabels} />
-                {question.model_answer && <p><strong>Solution:</strong> <MathContent text={question.model_answer} segments={question.model_answer_segments} equations={equations} location="solution" /></p>}
-                <StandaloneEquations equations={equations} location="solution" referencedLabels={referencedLabels} />
-              </div>
-            })}
+            <QuestionsSolutionsPanel questions={questions} />
             {!questions.length && <p>Select a validated run to inspect its questions.</p>}
           </section>
         </article>
