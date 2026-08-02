@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 
 revision = "20260802_01"
@@ -13,6 +13,13 @@ depends_on = None
 
 
 def _drop_single_column_unique(table: str, column: str) -> None:
+    if context.is_offline_mode():
+        known_names = {
+            ("assessments", "run_id"): "assessments_run_id_key",
+            ("document_artifacts", "run_id"): "uq_document_artifacts_run_id",
+        }
+        op.drop_constraint(known_names[(table, column)], table, type_="unique")
+        return
     connection = op.get_bind()
     for constraint in sa.inspect(connection).get_unique_constraints(table):
         if constraint.get("column_names") == [column]:
@@ -98,15 +105,16 @@ def upgrade() -> None:
             """
         )
     )
-    orphan_count = connection.scalar(
-        sa.text(
-            "SELECT count(*) FROM document_artifacts WHERE assessment_id IS NULL"
+    if not context.is_offline_mode():
+        orphan_count = connection.scalar(
+            sa.text(
+                "SELECT count(*) FROM document_artifacts WHERE assessment_id IS NULL"
+            )
         )
-    )
-    if orphan_count:
-        raise RuntimeError(
-            f"cannot version {orphan_count} document artifacts without assessments"
-        )
+        if orphan_count:
+            raise RuntimeError(
+                f"cannot version {orphan_count} document artifacts without assessments"
+            )
     op.alter_column("document_artifacts", "assessment_id", nullable=False)
     _drop_single_column_unique("document_artifacts", "run_id")
     op.create_unique_constraint(
@@ -125,7 +133,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     connection = op.get_bind()
-    if connection.scalar(sa.text("SELECT count(*) FROM assessments WHERE version <> 1")):
+    if (
+        not context.is_offline_mode()
+        and connection.scalar(
+            sa.text("SELECT count(*) FROM assessments WHERE version <> 1")
+        )
+    ):
         raise RuntimeError("cannot losslessly downgrade databases with rewrite versions")
 
     op.drop_constraint(
