@@ -45,6 +45,75 @@ beforeEach(() => {
   }))
 })
 
+function terminalRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 8,
+    experiment_id: 42,
+    condition_id: 3,
+    run_number: 1,
+    status: 'complete',
+    display_status: 'completed',
+    topic: 'Phase stability',
+    display_at: '2026-08-02T14:30:00Z',
+    ...overrides,
+  }
+}
+
+function mockTerminalHistory(items: ReturnType<typeof terminalRun>[]) {
+  vi.mocked(fetch).mockImplementation(async (input) => ({
+    ok: true,
+    json: async () => String(input).includes('/api/runs/history/recent') ? items : [],
+  } as Response))
+}
+
+test('drawer preserves unfinished assessment input and shows terminal history', async () => {
+  mockTerminalHistory([
+    terminalRun(),
+    terminalRun({ id: 9, status: 'error', display_status: 'failed', topic: 'Failed run' }),
+  ])
+  const user = userEvent.setup()
+  render(<App />)
+  await user.type(screen.getByLabelText('Topic'), 'Unsaved topic')
+  await user.click(screen.getByRole('button', { name: 'Recent Runs' }))
+
+  const drawer = screen.getByRole('dialog', { name: 'Recent Runs' })
+  expect(within(drawer).getByText('Phase stability')).toBeVisible()
+  expect(within(drawer).getByText('Completed')).toBeVisible()
+  expect(within(drawer).getByText('Failed')).toBeVisible()
+
+  await user.click(within(drawer).getByRole('button', { name: 'Close Recent Runs' }))
+  expect(screen.getByLabelText('Topic')).toHaveValue('Unsaved topic')
+})
+
+test('drawer retries a loading error and shows empty state', async () => {
+  let historyRequests = 0
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    if (!String(input).includes('/api/runs/history/recent')) {
+      return { ok: true, json: async () => [] } as Response
+    }
+    historyRequests += 1
+    return historyRequests === 1
+      ? { ok: false, status: 503, json: async () => ({}) } as Response
+      : { ok: true, json: async () => [] } as Response
+  })
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(screen.getByRole('button', { name: 'Recent Runs' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Recent runs could not be loaded.')
+  await user.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(await screen.findByText('No completed or failed runs yet.')).toBeVisible()
+})
+
+test('Escape closes the drawer and restores trigger focus', async () => {
+  mockTerminalHistory([])
+  const user = userEvent.setup()
+  render(<App />)
+  const trigger = screen.getByRole('button', { name: 'Recent Runs' })
+  await user.click(trigger)
+  await user.keyboard('{Escape}')
+  expect(trigger).toHaveFocus()
+})
+
 test('shows the streamlined research inputs and removes production controls', () => {
   render(<App />)
   expect(screen.getByRole('heading', { name: 'New Experiment' })).toBeInTheDocument()

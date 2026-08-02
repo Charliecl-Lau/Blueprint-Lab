@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { experimentsApi } from '../api/experiments'
 import { AppHeader } from '../components/AppHeader'
+import { RecentRunsDrawer } from '../components/history/RecentRunsDrawer'
 import { PromptFactorFields } from '../components/PromptFactorFields'
 import { RunProgressShortcut } from '../components/RunProgressShortcut'
 import { useRunStore } from '../store/runStore'
@@ -83,6 +84,13 @@ export function InputPanelPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const historyTrigger = useRef<HTMLButtonElement>(null)
+
+  const closeHistory = () => {
+    setHistoryOpen(false)
+    requestAnimationFrame(() => historyTrigger.current?.focus())
+  }
 
   const values = (overrides: Partial<ExperimentFormValues> = {}): ExperimentFormValues => ({
     course,
@@ -189,7 +197,13 @@ export function InputPanelPage() {
   }
 
   return <main className="experiment-page wizard-page">
-    <AppHeader subtitle="Controlled assessment research" action={<RunProgressShortcut />} />
+    <AppHeader subtitle="Controlled assessment research" action={<div className="history-header-actions">
+      <button ref={historyTrigger} className="secondary" onClick={() => setHistoryOpen(true)}>
+        Recent Runs
+      </button>
+      <RunProgressShortcut />
+    </div>} />
+    <RecentRunsDrawer open={historyOpen} onClose={closeHistory} />
     <div className="wizard-layout">
       <nav aria-label="Experiment sections" className="wizard-nav">
         <h1 className="nav-eyebrow">New Experiment</h1>
