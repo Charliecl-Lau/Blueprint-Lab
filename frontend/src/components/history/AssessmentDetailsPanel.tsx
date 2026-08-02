@@ -26,6 +26,12 @@ const factorKeys = [
   'reasoning_guidance',
 ]
 
+const textFactorKeys = [
+  'concept_bridge',
+  'few_shot',
+  'reasoning_guidance',
+]
+
 export function AssessmentDetailsPanel({ details }: { details: HistoryAssessmentDetails }) {
   return <div className="history-details">
     <dl>
@@ -52,13 +58,18 @@ export function AssessmentDetailsPanel({ details }: { details: HistoryAssessment
       <dl className="history-factor-list">
         {factorKeys.map((key) => <div key={key}>
           <dt>{factorLabels[key]}</dt>
-          <dd>
-            <strong>{details.factor_configuration[key] ? 'On' : 'Off'}</strong>
-            <span>{details.factor_inputs[key as keyof typeof details.factor_inputs] || 'No saved input'}</span>
-          </dd>
+          <dd><strong>{details.factor_configuration[key] ? 'On' : 'Off'}</strong></dd>
         </div>)}
       </dl>
     </section>
+
+    {textFactorKeys.filter((key) => details.factor_configuration[key]).map((key) => <section
+      className="history-saved-factor-input"
+      key={key}
+    >
+      <h3>{factorLabels[key]} input</h3>
+      <p>{details.factor_inputs[key as keyof typeof details.factor_inputs] || 'No saved input'}</p>
+    </section>)}
 
     <section>
       <h3>Reference PDFs</h3>

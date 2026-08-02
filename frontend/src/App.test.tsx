@@ -186,6 +186,11 @@ test('completed history uses approved accordion defaults', async () => {
   expect(screen.getByRole('link', { name: 'Next' })).toHaveAttribute(
     'href', '/runs/8/history/questions/11/evaluation',
   )
+  fireEvent.click(screen.getByRole('button', { name: 'Assessment Details' }))
+  const factorGrid = screen.getByRole('heading', { name: 'Prompt design factors' }).closest('section')!
+  expect(within(factorGrid).queryByText('Connect energy minima to stable phases.')).not.toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Concept Bridge input' }).parentElement)
+    .toHaveTextContent('Connect energy minima to stable phases.')
 })
 
 test('failed history omits completed-only controls', async () => {
