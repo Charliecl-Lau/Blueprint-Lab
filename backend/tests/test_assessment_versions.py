@@ -6,7 +6,13 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.models.experiment import Condition, Experiment
 from backend.models.docx_authoring import DocxAuthoringAttempt
+from backend.models.evaluation import Evaluation
 from backend.models.run import Assessment, DocumentArtifact, Run
+from backend.services.assessment_version_service import (
+    AssessmentVersionConflict,
+    persist_original_version,
+    persist_rewrite_and_canonicalize,
+)
 
 
 def saved_run(db, *, run_number=1):
@@ -172,3 +178,120 @@ def test_docx_authoring_attempt_cycle_and_idempotency_are_unique(test_db):
 
     with pytest.raises(IntegrityError):
         test_db.commit()
+
+
+def rewrite_artifact(content=b"rewrite-docx"):
+    return DocumentArtifact(
+        filename="rewrite.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        content=content,
+    )
+
+
+def test_persist_original_version_creates_version_one_and_canonicalizes(test_db):
+    run = saved_run(test_db)
+    manifest = {"questions": [{"body": "Original"}]}
+
+    original = persist_original_version(test_db, run=run, manifest=manifest)
+
+    assert original.version == 1
+    assert original.kind == "original_generation"
+    assert original.parsed_json == manifest
+    assert original.parsed_json_hash is not None
+    assert run.canonical_assessment_id == original.id
+    assert original.canonicalized_at is not None
+
+
+def test_rewrite_persists_questions_artifact_and_pointer_atomically(test_db):
+    run = saved_run(test_db)
+    original = persist_original_version(
+        test_db, run=run, manifest={"questions": [{"body": "Original"}]}
+    )
+    original_evaluation = Evaluation(
+        experiment_id=run.experiment_id,
+        condition_id=run.condition_id,
+        run_id=run.id,
+        assessment_id=original.id,
+        question_id=original.questions[0].id,
+        assessment_version=1,
+        assessment_content_hash=original.questions[0].content_hash,
+        evaluation_type="human",
+        evaluator_identity="reviewer",
+        attempt=1,
+        rubric_version="1",
+        rubric_snapshot={},
+        prompt_design_factors={},
+        major_strengths=[],
+        major_weaknesses=[],
+        status="finalized",
+        revision=1,
+    )
+    test_db.add(original_evaluation)
+    test_db.commit()
+    rewrite = persist_rewrite_and_canonicalize(
+        test_db,
+        run=run,
+        manifest={"questions": [{"body": "Rewritten"}]},
+        artifact=rewrite_artifact(),
+    )
+
+    assert rewrite.version == 2
+    assert rewrite.kind == "full_rewrite"
+    assert rewrite.source_assessment_id == original.id
+    assert rewrite.questions[0].assessment_version == 2
+    assert rewrite.document_artifact.assessment_id == rewrite.id
+    assert rewrite.document_artifact.run_id == run.id
+    assert run.canonical_assessment_id == rewrite.id
+    assert original.questions[0].assessment_id == original.id
+    assert original_evaluation.assessment_id == original.id
+    assert original_evaluation.assessment_version == 1
+
+
+def test_failed_rewrite_artifact_rolls_back_version_and_pointer(test_db):
+    run = saved_run(test_db)
+    original = persist_original_version(
+        test_db, run=run, manifest={"questions": [{"body": "Original"}]}
+    )
+
+    with pytest.raises(IntegrityError):
+        persist_rewrite_and_canonicalize(
+            test_db,
+            run=run,
+            manifest={"questions": [{"body": "Rewritten"}]},
+            artifact=DocumentArtifact(
+                filename=None,
+                media_type="application/octet-stream",
+                content=b"invalid",
+            ),
+        )
+
+    test_db.refresh(run)
+    assert run.canonical_assessment_id == original.id
+    assert [item.version for item in run.assessment_versions] == [1]
+
+
+def test_rewrite_canonicalization_is_hash_idempotent_or_conflicts(test_db):
+    run = saved_run(test_db)
+    persist_original_version(
+        test_db, run=run, manifest={"questions": [{"body": "Original"}]}
+    )
+    manifest = {"questions": [{"body": "Rewritten"}]}
+    first = persist_rewrite_and_canonicalize(
+        test_db, run=run, manifest=manifest, artifact=rewrite_artifact()
+    )
+
+    repeated = persist_rewrite_and_canonicalize(
+        test_db, run=run, manifest=manifest, artifact=rewrite_artifact()
+    )
+    assert repeated.id == first.id
+
+    with pytest.raises(AssessmentVersionConflict):
+        persist_rewrite_and_canonicalize(
+            test_db,
+            run=run,
+            manifest={"questions": [{"body": "Different"}]},
+            artifact=rewrite_artifact(),
+        )
