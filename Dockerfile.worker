@@ -18,5 +18,6 @@ COPY alembic.ini alembic.ini
 COPY backend backend
 COPY docx_sandbox docx_sandbox
 COPY docs/actual_prompt_template.md docs/actual_prompt_template.md
+COPY docs/docx-design-contract docs/docx-design-contract
 
 CMD ["python", "-m", "celery", "-A", "backend.celery_app", "worker", "--loglevel=info", "--concurrency=2"]

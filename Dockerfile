@@ -14,5 +14,6 @@ COPY alembic.ini alembic.ini
 COPY backend backend
 COPY docx_sandbox docx_sandbox
 COPY docs/actual_prompt_template.md docs/actual_prompt_template.md
+COPY docs/docx-design-contract docs/docx-design-contract
 
 CMD ["sh", "-c", "exec python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
