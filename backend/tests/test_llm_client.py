@@ -186,6 +186,28 @@ def test_llm_client_uses_json_schema_for_canonical_assessment_contract():
         assert config.response_schema is None
 
 
+def test_llm_client_uses_json_schema_for_pydantic_contract_without_defs():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        response = MagicMock()
+        response.text = '{"schema_version": "docx-program-envelope/1"}'
+        response.candidates = []
+        mock_client.return_value.models.generate_content.return_value = response
+
+        from backend.schemas.docx_authoring_schema import DocxProgramEnvelope
+        from backend.services.llm_client import LLMClient
+
+        LLMClient().generate(
+            "system",
+            "user",
+            response_schema=DocxProgramEnvelope,
+        )
+
+        config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
+        assert config.response_schema is None
+        assert "additionalProperties" not in config.response_json_schema
+        assert "program" in config.response_json_schema["properties"]
+
+
 def test_llm_client_uses_configured_model_defaults_without_thinking_override():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         response = MagicMock()

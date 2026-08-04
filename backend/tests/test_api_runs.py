@@ -5,7 +5,7 @@ from unittest.mock import call, patch
 
 import pytest
 
-from backend.models import ModelCallUsage
+from backend.models import DocxAuthoringAttempt, ModelCallUsage
 from backend.models.experiment import Condition, Experiment
 from backend.models.experiment import utc_now
 from backend.models.run import (
@@ -153,6 +153,152 @@ def test_unknown_run_and_condition_return_404(client):
         client.post("/assessments/999999/evaluations/llm/retry").status_code
         == 404
     )
+
+
+def test_run_detail_exposes_explicit_canonical_rewrite_state(client, test_db):
+    experiment, condition = _experiment_and_condition(test_db)
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="complete",
+        model_settings={},
+        input_tokens=20,
+        output_tokens=10,
+        total_tokens=30,
+        model_call_count=1,
+    )
+    original = Assessment(
+        version=1,
+        kind="original_generation",
+        raw_response_text="original",
+        parsed_json={"questions": [{"body": "Original"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    rewrite = Assessment(
+        version=2,
+        kind="full_rewrite",
+        source_assessment=original,
+        raw_response_text="rewrite",
+        parsed_json={"questions": [{"body": "Rewrite"}]},
+        output_hash="b" * 64,
+        schema_version="rewritten-assessment/1",
+    )
+    run.assessment_versions.extend([original, rewrite])
+    run.canonical_assessment = rewrite
+    rewrite.document_artifact = DocumentArtifact(
+        run=run,
+        filename="rewrite.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        content=b"PK-rewrite",
+    )
+    run.model_call_usages.append(ModelCallUsage(
+        call_id="docx-generation",
+        stage="docx_code_generation",
+        attempt=1,
+        status="response",
+        input_tokens=20,
+        output_tokens=10,
+        total_tokens=30,
+        extra_token_counts={},
+    ))
+    test_db.add(run)
+    test_db.flush()
+    run.docx_authoring_attempts.append(DocxAuthoringAttempt(
+        source_assessment_id=original.id,
+        cycle_number=1,
+        attempt_number=1,
+        status="succeeded",
+        provider="google",
+        model="gemini-3.5-flash-lite",
+        prompt_hash="c" * 64,
+        grounding_hash="d" * 64,
+        envelope={},
+        execution_report={},
+        validation_report={"valid": True, "issues": []},
+    ))
+    test_db.commit()
+
+    body = client.get(f"/runs/{run.id}").json()
+
+    assert body["assessment"]["id"] == rewrite.id
+    assert body["rewrite"] == {
+        "backend": "self_hosted_code",
+        "status": "succeeded",
+        "attempt_count": 1,
+        "repair_available": False,
+        "original_assessment_id": original.id,
+        "original_version": 1,
+        "canonical_assessment_id": rewrite.id,
+        "canonical_version": 2,
+        "source_version": 1,
+        "displaying": "canonical_rewrite",
+        "artifact_available": True,
+        "iteration": None,
+        "maximum_revisions": None,
+        "workspace_revision": None,
+        "failure": None,
+    }
+    assert body["token_usage"]["stages"][0]["stage"] == "docx_code_generation"
+
+
+def test_rewrite_failure_returns_original_and_only_safe_issue_codes(client, test_db):
+    experiment, condition = _experiment_and_condition(test_db)
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="rewrite_failed",
+        model_settings={},
+        error_type="docx_rewrite_failed",
+        error_message="policy_rejected",
+        input_tokens=12,
+        output_tokens=3,
+        total_tokens=15,
+        model_call_count=1,
+    )
+    original = Assessment(
+        version=1,
+        kind="original_generation",
+        raw_response_text="original",
+        parsed_json={"questions": [{"body": "Original"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    run.assessment = original
+    test_db.add(run)
+    test_db.flush()
+    run.docx_authoring_attempts.append(DocxAuthoringAttempt(
+        source_assessment_id=original.id,
+        cycle_number=1,
+        attempt_number=1,
+        status="failed",
+        provider="google",
+        model="gemini-3.5-flash-lite",
+        prompt_hash="c" * 64,
+        grounding_hash="d" * 64,
+        envelope={"program": "SECRET SOURCE CODE"},
+        execution_report={"logs": "SECRET LOG"},
+        validation_report={
+            "valid": False,
+            "issues": [{"code": "policy_rejected", "evidence": "SECRET LOG"}],
+        },
+        failure_category="policy_rejected",
+        repairable=False,
+    ))
+    test_db.commit()
+
+    body = client.get(f"/runs/{run.id}").json()
+
+    assert body["assessment"]["id"] == original.id
+    assert body["rewrite"]["displaying"] == "original_recovery"
+    assert body["rewrite"]["canonical_version"] == 1
+    assert body["rewrite"]["artifact_available"] is False
+    assert body["rewrite"]["failure"] == {"issue_codes": ["policy_rejected"]}
+    assert body["rewrite"]["repair_available"] is True
+    assert body["token_usage"]["recording_state"] == "recorded"
+    assert "SECRET" not in str(body)
 
 
 def test_evaluation_retry_endpoint_reuses_viewer_ready_run(client, test_db):

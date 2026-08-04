@@ -44,6 +44,9 @@ from backend.services.assessment_traceability import enrich_assessment_traceabil
 from backend.services.generation_context import build_generation_context
 from backend.services.generator import generate_questions
 from backend.services.document_artifact import save_assessment_artifact
+from backend.services.document_generators import document_generator_registry
+from backend.services.docx_authoring_pipeline import DocxAuthoringPipeline
+from backend.services.docx_sandbox_client import SandboxTransportError
 from backend.services.llm_client import LLMClient, TruncatedResponseError
 from backend.services.reference_pdfs import (
     ProviderFileAttachment,
@@ -206,6 +209,119 @@ def _is_reference_pdf_unavailable(exc: Exception) -> bool:
     return mentions_file and unavailable
 
 
+def _dispatch_evaluation(run_id: int) -> None:
+    try:
+        run_llm_evaluation_pipeline.delay(run_id)
+    except Exception as exc:
+        logger.warning(
+            "Completed assessment evaluation dispatch failed",
+            extra={"run_id": run_id, "error_type": type(exc).__name__},
+        )
+
+
+def _create_document(
+    db: Session,
+    run: Run,
+    attachments: list[ProviderFileAttachment],
+) -> bool:
+    """Create the configured artifact and return whether version 2 is canonical."""
+    messages = {
+        "documenting": "Creating assessment document",
+        "docx_authoring": "Gemini is designing the Word document" if settings.docx_generation_backend == "agentic_tools" else "Authoring assessment document",
+        "docx_executing": "Applying document operations" if settings.docx_generation_backend == "agentic_tools" else "Executing DOCX program",
+        "docx_validating": "Rendering and verifying the Word document" if settings.docx_generation_backend == "agentic_tools" else "Validating assessment document",
+        "docx_repairing": "Gemini is revising the rendered document" if settings.docx_generation_backend == "agentic_tools" else "Repairing assessment document",
+    }
+
+    def progress(stage: str) -> None:
+        run.status = stage
+        run.progress_message = messages[stage]
+        db.commit()
+        _publish_progress(run.experiment_id, run.id, run.condition_id, stage)
+
+    generator = document_generator_registry.get(settings.docx_generation_backend)
+    result = generator.generate(db=db, run=run, attachments=attachments, progress=progress)
+    if result.succeeded:
+        return True
+    run.status = "rewrite_failed"
+    run.progress_message = "Assessment rewrite failed; original remains available"
+    run.error_type = "docx_rewrite_failed"
+    run.error_message = ", ".join(result.safe_issue_codes)[:1000]
+    run.viewer_ready_at = run.viewer_ready_at or utc_now()
+    run.completed_at = utc_now()
+    db.commit()
+    _publish_progress(run.experiment_id, run.id, run.condition_id, "rewrite_failed")
+    return False
+
+
+@celery_app.task(bind=True, max_retries=3)
+def run_docx_rewrite_pipeline(
+    self,
+    run_id: int,
+    idempotency_key: str,
+) -> None:
+    """Execute only a newly reserved DOCX cycle for an existing failed run."""
+    db = SessionLocal()
+    try:
+        run = db.get(Run, run_id)
+        if run is None:
+            return
+        reserved = next(
+            (
+                item
+                for item in run.docx_authoring_attempts
+                if item.idempotency_key == idempotency_key
+            ),
+            None,
+        )
+        if reserved is None:
+            return
+        if run.status == "complete" and run.canonical_assessment is not None:
+            return
+
+        agentic = settings.docx_generation_backend == "agentic_tools"
+        messages = {
+            "documenting": "Creating assessment document",
+            "docx_authoring": "Gemini is designing the Word document" if agentic else "Authoring Word document",
+            "docx_executing": "Applying document operations" if agentic else "Building Word document in sandbox",
+            "docx_validating": "Rendering and verifying the Word document" if agentic else "Verifying Word document",
+            "docx_repairing": "Gemini is revising the rendered document" if agentic else "Repairing Word document",
+        }
+
+        def progress(stage: str) -> None:
+            run.status = stage
+            run.progress_message = messages[stage]
+            db.commit()
+            _publish_progress(run.experiment_id, run.id, run.condition_id, stage)
+
+        generator = document_generator_registry.get(settings.docx_generation_backend)
+        result = generator.generate(db=db, run=run, attachments=(), progress=progress)
+        if result.succeeded:
+            run.status = "complete"
+            run.progress_message = "Complete"
+            run.viewer_ready_at = utc_now()
+            run.completed_at = utc_now()
+            run.error_type = None
+            run.error_message = None
+            db.commit()
+            _publish_progress(run.experiment_id, run.id, run.condition_id, "complete")
+            _dispatch_evaluation(run.id)
+            return
+
+        run.status = "rewrite_failed"
+        run.progress_message = "Word rewrite failed; original remains available"
+        run.error_type = "docx_rewrite_failed"
+        run.error_message = ", ".join(result.safe_issue_codes)[:1000]
+        run.viewer_ready_at = run.viewer_ready_at or utc_now()
+        run.completed_at = utc_now()
+        db.commit()
+        _publish_progress(run.experiment_id, run.id, run.condition_id, "rewrite_failed")
+    except SandboxTransportError as exc:
+        raise self.retry(exc=exc, countdown=2 ** self.request.retries)
+    finally:
+        db.close()
+
+
 @celery_app.task(bind=True, max_retries=3)
 def run_generation_pipeline(
     self,
@@ -229,7 +345,7 @@ def run_generation_pipeline(
             and run.assessment.parsed_json is not None
             and run.document_artifact is not None
         ):
-            run_llm_evaluation_pipeline.delay(run.id)
+            _dispatch_evaluation(run.id)
             return
 
         experiment = run.experiment
@@ -382,13 +498,8 @@ def run_generation_pipeline(
             try:
                 persist_assessment_questions(db, run.assessment)
                 enrich_assessment_traceability(db, run.assessment)
-                run.status = "documenting"
-                run.progress_message = "Creating assessment document"
-                db.commit()
-                _publish_progress(
-                    experiment.id, run.id, condition.id, "documenting"
-                )
-                save_assessment_artifact(db, run)
+                if not _create_document(db, run, attachments):
+                    return
                 run.viewer_ready_at = run.viewer_ready_at or utc_now()
                 run.status = "complete"
                 run.progress_message = "Complete"
@@ -397,11 +508,15 @@ def run_generation_pipeline(
                 _publish_progress(
                     experiment.id, run.id, condition.id, "complete"
                 )
+            except SandboxTransportError as exc:
+                _retry_provider_failure(
+                    self, db, run, "docx_sandbox_transport_error", exc
+                )
             except Exception as exc:
                 _record_error(db, run, "document_generation_error", exc)
                 _publish_progress(experiment.id, run.id, condition.id, "error")
                 return
-            run_llm_evaluation_pipeline.delay(run.id)
+            _dispatch_evaluation(run.id)
             return
         if (
             run.assessment is not None
@@ -549,22 +664,27 @@ def run_generation_pipeline(
                 mark_strictly_valid(assessment, generated.model_dump())
             persist_assessment_questions(db, assessment)
             enrich_assessment_traceability(db, assessment)
-            run.status = "documenting"
-            run.progress_message = "Creating assessment document"
-            db.commit()
-            _publish_progress(
-                experiment.id, run.id, condition.id, "documenting"
-            )
-            save_assessment_artifact(db, run)
+            if not _create_document(db, run, attachments):
+                return
             run.viewer_ready_at = utc_now()
             run.status = "complete"
             run.progress_message = "Complete"
             run.completed_at = utc_now()
             db.commit()
+        except SandboxTransportError as exc:
+            _retry_provider_failure(
+                self, db, run, "docx_sandbox_transport_error", exc
+            )
         except (ValueError, ValidationError, EvaluationValidationError) as exc:
             error_type = (
                 "document_generation_error"
-                if run.status == "documenting"
+                if run.status in {
+                    "documenting",
+                    "docx_authoring",
+                    "docx_executing",
+                    "docx_validating",
+                    "docx_repairing",
+                }
                 else "assessment_parse_error"
             )
             _record_error(db, run, error_type, exc)
@@ -579,7 +699,7 @@ def run_generation_pipeline(
         _publish_progress(
             experiment.id, run.id, condition.id, "complete"
         )
-        run_llm_evaluation_pipeline.delay(run.id)
+        _dispatch_evaluation(run.id)
     except Retry:
         preserve_provider_files = True
         raise

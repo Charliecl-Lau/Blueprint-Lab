@@ -88,8 +88,20 @@ def test_openai_template_and_versions_require_location_specific_labels():
         in prompt
     )
     assert "two equation entries with distinct labels" in prompt
-    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "11"
-    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "4"
+    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "13"
+    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "6"
+
+
+def test_generation_and_actual_prompts_require_guided_solution_derivations():
+    generation_prompt = build_generation_system_prompt(render_openai())
+    actual = render_openai()
+    for prompt in (generation_prompt, actual):
+        assert "continuous guided mathematical derivation" in prompt
+        assert "Do not use labels such as 'Step 1'" in prompt or "Do not use labels such as \"Step 1\"" in prompt
+        assert "Each paragraph must perform exactly one logical operation" in prompt
+        assert "Using the quotient rule" in prompt
+        assert "Why the other choices are incorrect" in prompt
+        assert "one separate line for every distractor" in prompt
 
 
 def test_structure_input_contains_details_and_enabled_factor_values_only():

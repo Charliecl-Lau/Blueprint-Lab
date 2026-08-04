@@ -2,7 +2,7 @@ import json
 from typing import Optional
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -32,6 +32,10 @@ from backend.services.run_service import (
     mark_generation_dispatch_failed,
     retry_run,
 )
+from backend.services.docx_rewrite_retry_service import (
+    DocxRewriteRetryConflict,
+    request_docx_rewrite,
+)
 from backend.services.llm_client import LLMClient
 from backend.services.reference_pdfs import (
     ProviderFileAttachment,
@@ -40,11 +44,14 @@ from backend.services.reference_pdfs import (
     read_reference_pdfs,
     upload_provider_attachments,
 )
-from backend.workers.assessment_worker import run_generation_pipeline
+from backend.workers.assessment_worker import (
+    run_docx_rewrite_pipeline,
+    run_generation_pipeline,
+)
 from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
 
 router = APIRouter(tags=["runs"])
-_TERMINAL_RUN_STATES = {"complete", "complete_with_warnings", "error"}
+_TERMINAL_RUN_STATES = {"complete", "complete_with_warnings", "rewrite_failed", "error"}
 
 
 def _locked_run(db: Session, run_id: int) -> Optional[Run]:
@@ -125,6 +132,89 @@ def _grading_question_id(run: Run, reviewer_id: str):
             return question.id
     return questions[0].id
 
+
+def _rewrite_state(run: Run) -> dict:
+    original = next(
+        (
+            assessment
+            for assessment in run.assessment_versions
+            if assessment.kind == "original_generation"
+        ),
+        None,
+    )
+    canonical = run.canonical_assessment
+    attempts = list(run.docx_authoring_attempts)
+    tool_sessions = list(run.docx_tool_sessions)
+    latest_tool_session = max(tool_sessions, key=lambda item: (item.cycle_number, item.id or 0), default=None)
+    backend = "agentic_tools" if latest_tool_session is not None else ("self_hosted_code" if attempts else "legacy")
+    latest_cycle = max((item.cycle_number for item in attempts), default=None)
+    cycle_attempts = [
+        item for item in attempts if item.cycle_number == latest_cycle
+    ]
+    latest = max(
+        cycle_attempts,
+        key=lambda item: (item.attempt_number, item.id or 0),
+        default=None,
+    )
+    if canonical is not None and canonical.kind == "full_rewrite":
+        status = "succeeded"
+        displaying = "canonical_rewrite"
+    elif run.status == "rewrite_failed":
+        status = "failed"
+        displaying = "original_recovery"
+    elif run.status in {"docx_authoring", "docx_executing", "docx_validating", "docx_repairing"}:
+        status = "in_progress"
+        displaying = "original"
+    else:
+        status = "not_started"
+        displaying = "original"
+
+    issue_codes: list[str] = []
+    if latest is not None:
+        for issue in (latest.validation_report or {}).get("issues", []):
+            code = issue.get("code") if isinstance(issue, dict) else None
+            if isinstance(code, str) and code not in issue_codes:
+                issue_codes.append(code)
+        if not issue_codes and latest.failure_category:
+            issue_codes.append(latest.failure_category)
+    if latest_tool_session is not None and not issue_codes and latest_tool_session.status == "failed":
+        issue_codes.append(latest_tool_session.final_decision or "agentic_docx_failed")
+
+    artifact_available = bool(
+        canonical is not None
+        and canonical.kind == "full_rewrite"
+        and canonical.document_artifact is not None
+    )
+    return {
+        "backend": backend,
+        "status": status,
+        "attempt_count": len(cycle_attempts),
+        "repair_available": bool(
+            status == "failed"
+            and original is not None
+            and original.parsed_json is not None
+            and not run.reference_pdfs
+        ),
+        "original_assessment_id": original.id if original else None,
+        "original_version": original.version if original else None,
+        "canonical_assessment_id": canonical.id if canonical else None,
+        "canonical_version": canonical.version if canonical else None,
+        "source_version": (
+            canonical.source_assessment.version
+            if canonical is not None and canonical.source_assessment is not None
+            else (original.version if original else None)
+        ),
+        "displaying": displaying,
+        "artifact_available": artifact_available,
+        "iteration": (
+            max((item.iteration_number for item in latest_tool_session.iterations), default=0)
+            if latest_tool_session is not None else None
+        ),
+        "maximum_revisions": latest_tool_session.maximum_revisions if latest_tool_session is not None else None,
+        "workspace_revision": latest_tool_session.workspace_revision if latest_tool_session is not None else None,
+        "failure": {"issue_codes": issue_codes} if status == "failed" else None,
+    }
+
 def run_detail(run: Run, include_raw_response: bool = False):
     questions = _ordered_questions(run)
     grading_available = bool(questions) and assessment_is_accepted_or_valid(run) and all(
@@ -179,13 +269,13 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "viewer_available": bool(
             run.assessment
             and run.assessment.parsed_json is not None
-            and run.status in {"complete", "complete_with_warnings"}
+            and run.status in {"complete", "complete_with_warnings", "rewrite_failed"}
         ),
         "evaluation_status": _evaluation_status(questions),
-        "grading_available": grading_available,
+        "grading_available": grading_available and run.status != "rewrite_failed",
         "grading_question_id": (
             _grading_question_id(run, settings.local_reviewer_id)
-            if grading_available
+            if grading_available and run.status != "rewrite_failed"
             else None
         ),
         "model_settings": run.model_settings,
@@ -231,6 +321,7 @@ def run_detail(run: Run, include_raw_response: bool = False):
             "message": run.error_message,
         },
         "artifact_available": run.document_artifact is not None,
+        "rewrite": _rewrite_state(run),
         "token_usage": token_usage_detail(run),
     }
 
@@ -480,6 +571,39 @@ async def post_retry(
             },
         ) from exc
     return run
+
+
+@router.post("/runs/{run_id}/docx-rewrite/retry")
+def post_docx_rewrite_retry(
+    run_id: int,
+    idempotency_key: str = Header(min_length=1, max_length=128),
+    db: Session = Depends(get_db),
+):
+    try:
+        run, should_enqueue = request_docx_rewrite(
+            db, run_id, idempotency_key
+        )
+    except DocxRewriteRetryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if should_enqueue:
+        try:
+            run_docx_rewrite_pipeline.delay(run.id, idempotency_key)
+        except Exception as exc:
+            run.status = "rewrite_failed"
+            run.progress_message = "Word rewrite retry could not be queued"
+            run.error_type = "docx_rewrite_dispatch_failed"
+            run.error_message = "The rewrite retry could not be queued."
+            db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "docx_rewrite_dispatch_failed",
+                    "message": "The rewrite retry could not be queued.",
+                },
+            ) from exc
+    return run_detail(run)
 
 
 @router.get("/runs/{run_id}/export-docx")

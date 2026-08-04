@@ -2,6 +2,11 @@ export type Stage =
   | 'pending'
   | 'prompting'
   | 'generating'
+  | 'docx_authoring'
+  | 'docx_executing'
+  | 'docx_validating'
+  | 'docx_repairing'
+  | 'rewrite_failed'
   | 'documenting'
   | 'complete'
   | 'complete_with_warnings'
@@ -105,6 +110,24 @@ export interface AssessmentOutput {
   validation?: AssessmentValidation
 }
 
+export interface RewriteState {
+  backend?: 'legacy' | 'self_hosted_code' | 'agentic_tools'
+  status: 'not_started' | 'in_progress' | 'succeeded' | 'failed'
+  attempt_count: number
+  repair_available: boolean
+  original_assessment_id: number | null
+  original_version: number | null
+  canonical_assessment_id: number | null
+  canonical_version: number | null
+  source_version: number | null
+  displaying: 'original' | 'original_recovery' | 'canonical_rewrite'
+  artifact_available: boolean
+  iteration?: number | null
+  maximum_revisions?: number | null
+  workspace_revision?: number | null
+  failure: { issue_codes: string[] } | null
+}
+
 export interface AssessmentTraceability {
   experiment_id: number
   condition_id: number
@@ -167,6 +190,7 @@ export interface Run {
   assessment?: AssessmentOutput | null
   sources?: RunSource[]
   artifact_available?: boolean
+  rewrite?: RewriteState
   token_usage?: TokenUsage
   error?: { type?: string | null; message?: string | null } | null
   reference_pdf_filenames?: string[]
@@ -207,14 +231,14 @@ export interface RecentRun {
 }
 
 export interface MCQOption {
-  id?: number
+  id?: number | string
   body: string
   is_correct: boolean
   segments?: ContentSegment[]
 }
 export interface Question {
   id?: number
-  type: 'mcq' | 'long_answer' | 'short_answer'
+  type?: 'mcq' | 'long_answer' | 'short_answer'
   metadata?: {
     question_title: string
     question_type: 'mcq' | 'long_answer' | 'short_answer'
@@ -239,6 +263,35 @@ export interface Question {
   model_answer_segments?: ContentSegment[]
   equations?: EquationEntry[]
   revision_options?: string[]
+  title?: string
+  source_question_id?: string
+  source_ordinal?: number
+  solution?: ComputationalSolution | ConceptualSolution
+}
+
+export interface DistractorAnalysis {
+  option_id: string
+  explanation: string
+}
+
+export interface ComputationalSolution {
+  kind: 'computational'
+  knowns_and_target: string[]
+  governing_equation: string
+  substitution: string
+  calculation_steps: string[]
+  final_answer: string
+  units: string
+  physical_meaning: string
+  distractor_analysis: DistractorAnalysis[]
+}
+
+export interface ConceptualSolution {
+  kind: 'conceptual'
+  governing_concept: string
+  application_steps: string[]
+  option_elimination: DistractorAnalysis[]
+  conclusion: string
 }
 
 export type CriterionKey =

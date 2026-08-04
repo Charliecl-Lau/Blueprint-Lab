@@ -8,6 +8,10 @@ const ACTIVE = new Set([
   'prompting',
   'generating',
   'documenting',
+  'docx_authoring',
+  'docx_executing',
+  'docx_validating',
+  'docx_repairing',
 ])
 
 export function RecentRuns() {

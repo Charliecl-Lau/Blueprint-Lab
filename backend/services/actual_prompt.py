@@ -6,8 +6,8 @@ from typing import Optional, Sequence
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
-ACTUAL_PROMPT_GENERATOR_VERSION = "11"
-OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "4"
+ACTUAL_PROMPT_GENERATOR_VERSION = "13"
+OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "6"
 OPENAI_TEMPLATE_PROVENANCE = "local-template:docs/actual_prompt_template.md"
 _OPENAI_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[2] / "docs" / "actual_prompt_template.md"
@@ -43,6 +43,32 @@ EQUATION_GENERATION_INSTRUCTION = (
     "A question containing mathematical "
     "content with equations = [] is invalid. Do not return equations as images, screenshots, "
     "raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics."
+)
+GUIDED_SOLUTION_INSTRUCTION = (
+    "Write the instructor solution as a continuous guided mathematical derivation, "
+    "not as isolated numbered or titled steps. Do not use labels such as 'Step 1', "
+    "'Step 2', or 'Step 3'. Begin with the correct answer or final objective. Each "
+    "paragraph must perform exactly one logical operation: introduce the governing "
+    "principle or equation, define variables, state assumptions, substitute known "
+    "values, differentiate, rearrange, simplify, calculate, check, or interpret. "
+    "Separate major operations with a blank line. Place every major equation, "
+    "rearrangement, derivative, substitution, intermediate calculation, and final "
+    "calculation on its own line using one complete [[EQ:label]] reference. Use "
+    "short natural transition phrases such as 'The governing relation is...', "
+    "'For this system...', 'At constant temperature and pressure...', "
+    "'Differentiating...', 'Using the quotient rule...', 'Substituting...', "
+    "'Therefore...', 'Hence...', 'Finally...', 'Check by reconstruction...', and "
+    "'Physically...' so that each paragraph leads naturally into the displayed "
+    "equation or the next operation. Define every variable before using it, state "
+    "all assumptions explicitly, and retain units throughout substitutions and "
+    "calculations. End with the final answer and units, a brief physical "
+    "interpretation, and, when applicable, a connection to the relevant MSE202 and "
+    "MSE302 concepts. For multiple-choice questions, add a separate line titled "
+    "'Why the other choices are incorrect' after the derivation, followed by one "
+    "separate line for every distractor, beginning with its option letter and "
+    "explaining the specific misconception, incorrect assumption, sign error, unit "
+    "error, or algebraic error. The result should read like an instructor-written "
+    "worked solution in a university thermodynamics textbook."
 )
 ASSESSMENT_REPAIR_INSTRUCTION = (
     "The previous assessment response failed schema validation. Return the complete "
@@ -134,7 +160,11 @@ class ActualPromptValidationError(ValueError):
 
 
 def build_generation_system_prompt(actual_prompt: str) -> str:
-    return f"{EQUATION_GENERATION_INSTRUCTION}\n\n{actual_prompt}"
+    return (
+        f"{EQUATION_GENERATION_INSTRUCTION}\n\n"
+        f"{GUIDED_SOLUTION_INSTRUCTION}\n\n"
+        f"{actual_prompt}"
+    )
 
 
 def build_assessment_repair_system_prompt(actual_prompt: str) -> str:
