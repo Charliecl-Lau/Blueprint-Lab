@@ -102,8 +102,22 @@ def test_llm_client_configures_sixty_second_provider_timeout():
     assert kwargs["http_options"].timeout == 60_000
 
 
+def test_llm_client_accepts_a_longer_provider_timeout():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        LLMClient(timeout_ms=120_000)
+
+    kwargs = mock_client.call_args.kwargs
+    assert kwargs["http_options"].timeout == 120_000
+
+
+def test_llm_client_rejects_nonpositive_provider_timeout():
+    with pytest.raises(ValueError, match="provider timeout must be positive"):
+        LLMClient(timeout_ms=0)
+
+
 def test_gemini_35_is_the_default_model():
     assert Settings(_env_file=None).llm_model == "gemini-3.5-flash-lite"
+    assert Settings(_env_file=None).docx_tool_provider_timeout_seconds == 120
 
 
 def test_gemini_35_omits_legacy_sampling_fields():

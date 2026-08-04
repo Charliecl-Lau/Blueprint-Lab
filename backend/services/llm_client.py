@@ -154,7 +154,14 @@ def _usage_from_response(response) -> Optional[TokenUsage]:
 
 
 class LLMClient:
-    def __init__(self, model: Optional[str] = None):
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        *,
+        timeout_ms: int = 60_000,
+    ):
+        if timeout_ms <= 0:
+            raise ValueError("provider timeout must be positive")
         self.model = model or settings.llm_model
         try:
             asyncio.get_event_loop()
@@ -162,7 +169,7 @@ class LLMClient:
             asyncio.set_event_loop(asyncio.new_event_loop())
         self._client = genai.Client(
             api_key=settings.google_api_key,
-            http_options=types.HttpOptions(timeout=60_000),
+            http_options=types.HttpOptions(timeout=timeout_ms),
         )
 
     def generate(

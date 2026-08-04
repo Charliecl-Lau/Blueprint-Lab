@@ -1,9 +1,24 @@
 import pytest
 from pydantic import ValidationError
+from unittest.mock import patch
 
 from backend.schemas.docx_tool_schema import DocxDesignTurn, DocxReviewTurn, DocxToolCall
 from backend.services.docx_content_catalog import DocxContentCatalog
-from backend.services.gemini_docx_tool_agent import GeminiDocxToolAgent
+from backend.services.gemini_docx_tool_agent import DOCX_TOOL_MODEL, GeminiDocxToolAgent
+
+
+def test_agentic_docx_client_uses_extended_provider_timeout():
+    with patch(
+        "backend.services.gemini_docx_tool_agent.LLMClient"
+    ) as client_class:
+        client_class.return_value.model = DOCX_TOOL_MODEL
+
+        GeminiDocxToolAgent()
+
+    client_class.assert_called_once_with(
+        model=DOCX_TOOL_MODEL,
+        timeout_ms=120_000,
+    )
 
 
 def test_valid_equation_call_uses_registry_ids():

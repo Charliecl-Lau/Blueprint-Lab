@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     docx_tool_max_review_pages: int = 25
     docx_tool_max_review_image_bytes: int = 20 * 1024 * 1024
     docx_tool_max_total_seconds: int = 180
+    docx_tool_provider_timeout_seconds: int = 120
     docx_sandbox_url: str = "http://localhost:8090"
     docx_sandbox_service_token: str = ""
     docx_sandbox_connect_timeout_seconds: float = 5.0

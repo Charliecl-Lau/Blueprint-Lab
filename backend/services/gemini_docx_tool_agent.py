@@ -11,6 +11,7 @@ from typing import Optional, Type
 
 from pydantic import BaseModel, ValidationError
 
+from backend.config import settings
 from backend.schemas.docx_tool_schema import DocxDesignTurn, DocxReviewTurn
 from backend.services.docx_content_catalog import DocxContentCatalog
 from backend.services.docx_tool_workspace import DocxWorkspace
@@ -34,7 +35,10 @@ class AgentTurnResult:
 
 class GeminiDocxToolAgent:
     def __init__(self, client: Optional[LLMClient] = None, *, max_operations: int = 100, max_pages: int = 25):
-        self.client = client or LLMClient(model=DOCX_TOOL_MODEL)
+        self.client = client or LLMClient(
+            model=DOCX_TOOL_MODEL,
+            timeout_ms=settings.docx_tool_provider_timeout_seconds * 1000,
+        )
         if self.client.model != DOCX_TOOL_MODEL:
             raise ValueError(f"agentic DOCX requires {DOCX_TOOL_MODEL}")
         self.max_operations = max_operations; self.max_pages = max_pages
