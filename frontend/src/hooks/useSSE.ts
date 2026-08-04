@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { RunSnapshot } from '../types'
+import { isTerminalRunStatus } from '../store/runStore'
 
 export function useSSE(
   runId: number | null,
@@ -12,7 +13,7 @@ export function useSSE(
     es.onmessage = (e) => {
       const snapshot: RunSnapshot = JSON.parse(e.data)
       onSnapshot(snapshot)
-      if (snapshot.status === 'complete' || snapshot.status === 'complete_with_warnings' || snapshot.status === 'error') es.close()
+      if (isTerminalRunStatus(snapshot.status)) es.close()
     }
 
     es.onerror = () => {

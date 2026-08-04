@@ -1,6 +1,17 @@
 import { create } from 'zustand'
 import type { Experiment, Run, SSEEvent } from '../types'
 
+export const TERMINAL_RUN_STATUSES = new Set<Run['status']>([
+  'complete',
+  'complete_with_warnings',
+  'rewrite_failed',
+  'error',
+])
+
+export function isTerminalRunStatus(status: Run['status']) {
+  return TERMINAL_RUN_STATUSES.has(status)
+}
+
 interface ExperimentStore {
   experiments: Record<number, Experiment>
   runs: Record<number, Run>

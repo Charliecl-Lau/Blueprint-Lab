@@ -1,0 +1,12 @@
+{
+  "schema_version": "docx-design-contract/1",
+  "page": {"size": "Letter", "orientation": "portrait", "margins_inches": {"top": 0.7, "right": 0.7, "bottom": 0.7, "left": 0.7}},
+  "typography": {"body": "Aptos", "headings": "Aptos Display"},
+  "palette": {"primary": "#17365D", "accent": "#2F75B5", "alternate_row": "#D9EAF7"},
+  "header": {"bottom_rule": true},
+  "footer": {"text": "Page X of Y", "dynamic_fields": true},
+  "tables": {"required": ["metadata", "answer_key", "quality_check"], "quality_columns": 5, "alternating_rows": true},
+  "equations": {"native_word_math_preferred": true},
+  "charts": {"format": "PNG", "embedded_only": true, "alt_text_required": true},
+  "sections": ["Assessment Metadata", "Questions", "Answer Key and Step-by-Step Solutions", "Assessment Quality Check", "Suggested Revision Options"]
+}

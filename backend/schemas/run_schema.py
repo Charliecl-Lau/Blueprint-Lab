@@ -45,6 +45,11 @@ class RunSummary(BaseModel):
         "prompting",
         "generating",
         "documenting",
+        "docx_authoring",
+        "docx_executing",
+        "docx_validating",
+        "docx_repairing",
+        "rewrite_failed",
         "complete",
         "complete_with_warnings",
         "error",
@@ -55,6 +60,28 @@ class RunSummary(BaseModel):
 
 
 RecordingState = Literal["not_recorded", "in_progress", "recorded"]
+
+
+class RewriteFailure(BaseModel):
+    issue_codes: list[str] = Field(default_factory=list)
+
+
+class RewriteState(BaseModel):
+    backend: Literal["legacy", "self_hosted_code", "agentic_tools"] = "legacy"
+    status: Literal["not_started", "in_progress", "succeeded", "failed"]
+    attempt_count: int
+    repair_available: bool
+    original_assessment_id: Optional[int] = None
+    original_version: Optional[int] = None
+    canonical_assessment_id: Optional[int] = None
+    canonical_version: Optional[int] = None
+    source_version: Optional[int] = None
+    displaying: Literal["original", "original_recovery", "canonical_rewrite"]
+    artifact_available: bool
+    iteration: Optional[int] = None
+    maximum_revisions: Optional[int] = None
+    workspace_revision: Optional[int] = None
+    failure: Optional[RewriteFailure] = None
 
 
 class StageUsage(BaseModel):
@@ -98,6 +125,7 @@ class RunDetail(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     error: Optional[dict] = None
     artifact_available: bool
+    rewrite: RewriteState
     reference_pdf_filenames: list[str] = Field(default_factory=list)
     model_config = {"protected_namespaces": ()}
 
@@ -181,7 +209,7 @@ def token_usage_detail(run) -> dict:
     )
     if all(value is None for value in aggregates):
         recording_state: RecordingState = "not_recorded"
-    elif run.status in {"complete", "complete_with_warnings", "error"}:
+    elif run.status in {"complete", "complete_with_warnings", "rewrite_failed", "error"}:
         recording_state = "recorded"
     else:
         recording_state = "in_progress"

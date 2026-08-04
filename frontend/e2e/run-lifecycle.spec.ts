@@ -45,6 +45,10 @@ async function mockResearchApi(page: Page) {
     const request = route.request()
     const url = new URL(request.url())
     const path = url.pathname
+    if (!path.startsWith('/api/')) {
+      await route.continue()
+      return
+    }
 
     if (request.method() === 'GET' && path === '/api/runs/history/recent') {
       await route.fulfill({ json: [
@@ -399,6 +403,8 @@ test('two runs remain independently reopenable with isolated status', async ({ p
   await expect(page).toHaveURL(/\/runs\/101\/progress$/)
   await expect(page.getByText('Complete', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Statics' })).toBeVisible()
+  await page.getByRole('link', { name: 'View Assessment' }).click()
+  await expect(page.getByRole('region', { name: 'Token usage' }).getByText('42', { exact: true })).toBeVisible()
 })
 
 test('invalid form shows every missing field and sends no experiment request', async ({ page }) => {
@@ -477,4 +483,174 @@ test('failed history exposes only details and prompt state', async ({ page }) =>
   await expect(page.getByRole('button', { name: 'Questions and Solutions' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Download Word DOCX' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Next' })).toHaveCount(0)
+})
+
+type RewriteScenario = 'success' | 'repair_success' | 'failed' | 'validating' | 'agentic_success' | 'agentic_revision' | 'agentic_fatal' | 'agentic_exhausted'
+
+async function mockRewriteLifecycle(page: Page, scenario: RewriteScenario) {
+  const agentic = scenario.startsWith('agentic_')
+  const failed = scenario === 'failed' || scenario === 'agentic_fatal' || scenario === 'agentic_exhausted'
+  const status = failed ? 'rewrite_failed' : scenario === 'validating' ? 'docx_validating' : 'complete'
+  const canonical = scenario === 'success' || scenario === 'repair_success' || scenario === 'agentic_success' || scenario === 'agentic_revision'
+  const repair = scenario === 'repair_success' || scenario === 'agentic_revision'
+  const run = {
+    id: 501, run_id: 501, experiment_id: 51, condition_id: 61, run_number: 1,
+    status,
+    viewer_available: status !== 'docx_validating',
+    progress_message: scenario === 'validating' ? 'Verifying Word document' : status === 'rewrite_failed' ? 'Word rewrite failed; original remains available' : 'Complete',
+    evaluation_status: canonical ? 'complete' : 'not_started',
+    grading_available: canonical,
+    grading_question_id: canonical ? 801 : null,
+    artifact_available: canonical,
+    rewrite: {
+      backend: agentic ? 'agentic_tools' : 'self_hosted_code',
+      status: canonical ? 'succeeded' : status === 'rewrite_failed' ? 'failed' : 'in_progress',
+      attempt_count: repair ? 2 : 1,
+      repair_available: status === 'rewrite_failed' && !agentic,
+      original_assessment_id: 701,
+      original_version: 1,
+      canonical_assessment_id: canonical ? 702 : 701,
+      canonical_version: canonical ? 2 : 1,
+      source_version: 1,
+      displaying: canonical ? 'canonical_rewrite' : status === 'rewrite_failed' ? 'original_recovery' : 'original',
+      artifact_available: canonical,
+      iteration: agentic ? (repair ? 1 : 0) : null,
+      maximum_revisions: agentic ? 2 : null,
+      workspace_revision: agentic ? (repair ? 9 : 7) : null,
+      failure: status === 'rewrite_failed' ? { issue_codes: [scenario === 'agentic_exhausted' ? 'revision_budget_exhausted' : scenario === 'agentic_fatal' ? 'machine_failed' : 'render_failed'] } : null,
+    },
+    token_usage: {
+      input_tokens: repair ? 75 : 50,
+      output_tokens: repair ? 35 : 20,
+      total_tokens: repair ? 110 : 70,
+      model_calls: repair ? 3 : 2,
+      recording_state: status === 'docx_validating' ? 'in_progress' : 'recorded',
+      stages: [
+        { stage: 'assessment', input_tokens: 20, output_tokens: 10, total_tokens: 30, model_calls: 1 },
+        { stage: agentic ? 'docx_tool_design' : 'docx_code_generation', input_tokens: 30, output_tokens: 10, total_tokens: 40, model_calls: 1 },
+        ...(repair ? [{ stage: agentic ? 'docx_visual_review' : 'docx_code_repair', input_tokens: 25, output_tokens: 15, total_tokens: 40, model_calls: 1 }] : []),
+      ],
+    },
+    assessment: {
+      id: canonical ? 702 : 701,
+      question_ids: canonical ? [801] : [],
+      output_hash: 'hash',
+      schema_version: canonical ? 'rewritten-assessment/1' : '1',
+      parsed_json: { questions: [{
+        id: canonical ? 801 : undefined,
+        body: canonical ? 'Calculate diffusion flux.' : 'Original diffusion question.',
+        options: canonical ? [
+          { id: 'A', body: '1', is_correct: true }, { id: 'B', body: '2', is_correct: false },
+          { id: 'C', body: '3', is_correct: false }, { id: 'D', body: '4', is_correct: false },
+          { id: 'E', body: '5', is_correct: false },
+        ] : undefined,
+        solution: canonical ? {
+          kind: 'computational', knowns_and_target: ['D and dc/dx'], governing_equation: 'J = -D dc/dx',
+          substitution: 'Insert known values', calculation_steps: ['Multiply'], final_answer: 'J = 1', units: 'mol/m2/s',
+          physical_meaning: 'Flux follows the gradient', distractor_analysis: [
+            { option_id: 'B', explanation: 'sign' }, { option_id: 'C', explanation: 'units' },
+            { option_id: 'D', explanation: 'value' }, { option_id: 'E', explanation: 'law' },
+          ],
+        } : undefined,
+      }] },
+    },
+  }
+  const experiment = {
+    id: 51, course: 'MSE', topic: 'Diffusion', learning_objectives: ['Solve'],
+    assessment_type: 'mcq', difficulty: 'medium', number_of_questions: 1,
+    estimated_time_minutes: 20, cognitive_demand: 'apply_analyze', additional_instruction: null,
+    conditions: [{ id: 61, condition_code: 'C1', prompt_structure: 'openai', condition_label: 'Baseline',
+      concept_bridge_enabled: false, few_shot_enabled: false, reference_content_enabled: false,
+      reasoning_guidance_enabled: false, factor_inputs: {} }],
+    runs: [run],
+  }
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (!path.startsWith('/api/')) {
+      await route.continue()
+      return
+    }
+    if (path === '/api/runs/501/progress') {
+      await route.fulfill({ contentType: 'text/event-stream', body: `data: ${JSON.stringify(run)}\n\n` })
+    } else if (path === '/api/runs/501') {
+      await route.fulfill({ json: run })
+    } else if (path === '/api/experiments/51') {
+      await route.fulfill({ json: experiment })
+    } else if (path === '/api/runs/501/export-docx' && canonical) {
+      await route.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', body: 'PK-verified' })
+    } else {
+      await route.fulfill({ status: 404, json: { detail: 'Not available' } })
+    }
+  })
+}
+
+test('authoring success exposes the canonical rewrite and verified download', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'success')
+  await page.goto('/runs/501/progress')
+  await expect(page.getByText('Complete', { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'View Assessment' }).click()
+  await expect(page.getByRole('heading', { name: 'Canonical LLM rewrite' })).toBeVisible()
+  await expect(page.getByText(/Version 2, rewritten from source version 1/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Export Word document' })).toBeEnabled()
+  await expect(page.getByRole('link', { name: 'Grade Assessment' })).toHaveAttribute('href', '/assessments/702/questions/801/grade')
+})
+
+test('repair success exposes repair-stage tokens', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'repair_success')
+  await page.goto('/experiments/51/viewer/501')
+  await page.getByText('Usage by stage').click()
+  await expect(page.getByText('docx code generation')).toBeVisible()
+  await expect(page.getByText('docx code repair')).toBeVisible()
+  await expect(page.getByText('110', { exact: true })).toBeVisible()
+})
+
+test('terminal rewrite failure preserves the original and locks rewrite actions', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'failed')
+  await page.goto('/runs/501/progress')
+  await expect(page.getByText('Word rewrite failed', { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'View original assessment' }).click()
+  await expect(page.getByRole('heading', { name: 'Original assessment — DOCX rewrite failed' })).toBeVisible()
+  await expect(page.getByText('Original diffusion question.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Word export unavailable' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Retry Word rewrite' })).toBeEnabled()
+  await expect(page.getByRole('link', { name: 'Grade Assessment' })).toHaveCount(0)
+})
+
+test('no artifact or grading access exists before canonicalization', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'validating')
+  await page.goto('/experiments/51/viewer/501')
+  await expect(page.getByRole('button', { name: 'Word export unavailable' })).toBeDisabled()
+  await expect(page.getByRole('link', { name: 'Grade Assessment' })).toHaveCount(0)
+})
+
+test('agentic design approval exposes the canonical LLM-designed document', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'agentic_success')
+  await page.goto('/experiments/51/viewer/501')
+  await expect(page.getByRole('heading', { name: 'Canonical LLM-designed document' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Export Word document' })).toBeEnabled()
+})
+
+test('agentic visual revision reports separate design and review usage', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'agentic_revision')
+  await page.goto('/experiments/51/viewer/501')
+  await page.getByText('Usage by stage').click()
+  await expect(page.getByText('docx tool design')).toBeVisible()
+  await expect(page.getByText('docx visual review')).toBeVisible()
+})
+
+test('machine-fatal agentic output preserves original recovery and hides internals', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'agentic_fatal')
+  await page.goto('/experiments/51/viewer/501')
+  await expect(page.getByRole('heading', { name: 'Original recovery document' })).toBeVisible()
+  await expect(page.getByText(/machine_failed/)).toBeVisible()
+  const response = await page.evaluate(async () => (await fetch('/api/runs/501')).json())
+  expect(JSON.stringify(response)).not.toContain('temporary_handle')
+  expect(JSON.stringify(response)).not.toContain('validated_arguments')
+})
+
+test('agentic revision-budget exhaustion preserves the original', async ({ page }) => {
+  await mockRewriteLifecycle(page, 'agentic_exhausted')
+  await page.goto('/experiments/51/viewer/501')
+  await expect(page.getByText(/revision_budget_exhausted/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Word export unavailable' })).toBeDisabled()
 })

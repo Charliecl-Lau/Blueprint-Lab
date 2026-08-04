@@ -27,6 +27,40 @@ def _without_defaults(value):
     return value
 
 
+def _gemini_response_schema(value):
+    """Reduce JSON Schema to Gemini's supported structured-output subset.
+
+    Application-side Pydantic validation remains authoritative for all bounds,
+    extra-field rejection, and cross-field invariants.
+    """
+    if isinstance(value, dict):
+        any_of = value.get("anyOf")
+        if isinstance(any_of, list):
+            non_null = [item for item in any_of if item.get("type") != "null"]
+            if len(non_null) == 1:
+                return _gemini_response_schema(non_null[0])
+        unsupported = {
+            "default",
+            "title",
+            "description",
+            "additionalProperties",
+            "maxLength",
+            "minLength",
+            "maxItems",
+            "minItems",
+            "minimum",
+            "maximum",
+        }
+        return {
+            key: _gemini_response_schema(item)
+            for key, item in value.items()
+            if key not in unsupported
+        }
+    if isinstance(value, list):
+        return [_gemini_response_schema(item) for item in value]
+    return value
+
+
 class TruncatedResponseError(RuntimeError):
     """Raised when the provider stopped before completing the response.
 
@@ -42,6 +76,17 @@ class TruncatedResponseError(RuntimeError):
             "Provider stopped with finish_reason=MAX_TOKENS; response is "
             f"truncated and cannot be parsed. Model={result.model_name}."
         )
+
+
+@dataclass(frozen=True)
+class ModelCapabilities:
+    supports_sampling_controls: bool
+
+
+def capabilities_for(model: str) -> ModelCapabilities:
+    if model.startswith("gemini-3"):
+        return ModelCapabilities(supports_sampling_controls=False)
+    return ModelCapabilities(supports_sampling_controls=True)
 
 
 @dataclass(frozen=True)
@@ -120,15 +165,18 @@ class LLMClient:
         overrides = model_settings or {}
         config_kwargs = {
             "system_instruction": system_prompt,
-            "temperature": overrides.get("temperature", settings.llm_temperature),
-            "top_p": overrides.get("top_p", settings.llm_top_p),
             "max_output_tokens": overrides.get(
                 "max_output_tokens", settings.llm_max_output_tokens
             ),
         }
-        seed = overrides.get("seed", settings.llm_seed)
-        if seed is not None:
-            config_kwargs["seed"] = seed
+        if capabilities_for(self.model).supports_sampling_controls:
+            config_kwargs["temperature"] = overrides.get(
+                "temperature", settings.llm_temperature
+            )
+            config_kwargs["top_p"] = overrides.get("top_p", settings.llm_top_p)
+            seed = overrides.get("seed", settings.llm_seed)
+            if seed is not None:
+                config_kwargs["seed"] = seed
         if response_schema is not None:
             config_kwargs["response_mime_type"] = "application/json"
             schema = (
@@ -136,8 +184,8 @@ class LLMClient:
                 if hasattr(response_schema, "model_json_schema")
                 else response_schema
             )
-            schema = _without_defaults(schema)
-            if isinstance(schema, dict) and "$defs" in schema:
+            schema = _gemini_response_schema(schema)
+            if isinstance(schema, dict):
                 config_kwargs["response_json_schema"] = schema
             else:
                 config_kwargs["response_schema"] = schema
@@ -195,6 +243,43 @@ class LLMClient:
     def generate_json(self, system_prompt: str, user_message: str) -> dict:
         result = self.generate(system_prompt, user_message)
         return _parse_json(result.raw_text)
+
+    def generate_multimodal(
+        self,
+        system_prompt: str,
+        user_message: str,
+        inline_images: Sequence[dict],
+        *,
+        response_schema: type,
+        model_settings: Optional[dict] = None,
+    ) -> LLMResult:
+        """Generate one structured response from bounded in-memory images."""
+        overrides = model_settings or {}
+        parts = [types.Part.from_text(text=user_message)]
+        for image in inline_images:
+            data = image.get("data")
+            if not isinstance(data, bytes) or image.get("mime_type") != "image/png":
+                raise ValueError("only in-memory PNG review parts are supported")
+            parts.append(types.Part.from_bytes(data=data, mime_type="image/png"))
+        schema = _gemini_response_schema(response_schema.model_json_schema())
+        config_kwargs = {
+            "system_instruction": system_prompt,
+            "max_output_tokens": overrides.get("max_output_tokens", settings.llm_max_output_tokens),
+            "response_mime_type": "application/json",
+            "response_json_schema": schema,
+        }
+        response = self._client.models.generate_content(
+            model=self.model,
+            config=types.GenerateContentConfig(**config_kwargs),
+            contents=parts,
+        )
+        finish_reason = None
+        if getattr(response, "candidates", None):
+            finish_reason = getattr(response.candidates[0], "finish_reason", None)
+            finish_reason = getattr(finish_reason, "value", finish_reason)
+        result = LLMResult(response.text, getattr(response, "response_id", None), self.model, getattr(response, "model_version", None), finish_reason, _usage_from_response(response))
+        if finish_reason in ("MAX_TOKENS", 2): raise TruncatedResponseError(result)
+        return result
 
 
 def _parse_json(text: str) -> dict:

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from backend.config import settings
+from backend.config import Settings, settings
 from backend.services.llm_client import (
     LLMClient,
     LLMResult,
@@ -68,6 +68,28 @@ def test_llm_client_configures_sixty_second_provider_timeout():
     kwargs = mock_client.call_args.kwargs
     assert kwargs["api_key"] == settings.google_api_key
     assert kwargs["http_options"].timeout == 60_000
+
+
+def test_gemini_35_is_the_default_model():
+    assert Settings(_env_file=None).llm_model == "gemini-3.5-flash-lite"
+
+
+def test_gemini_35_omits_legacy_sampling_fields():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        mock_client.return_value.models.generate_content.return_value = gemini_response()
+
+        LLMClient(model="gemini-3.5-flash-lite").generate(
+            "system",
+            "user",
+            model_settings={"temperature": 0.7, "top_p": 0.8, "seed": 42},
+        )
+
+    config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
+    dumped = config.model_dump(exclude_none=True)
+    assert "temperature" not in dumped
+    assert "top_p" not in dumped
+    assert "seed" not in dumped
+    assert dumped["max_output_tokens"] == settings.llm_max_output_tokens
 
 
 def test_llm_client_calls_generate_content():
@@ -164,6 +186,28 @@ def test_llm_client_uses_json_schema_for_canonical_assessment_contract():
         assert config.response_schema is None
 
 
+def test_llm_client_uses_json_schema_for_pydantic_contract_without_defs():
+    with patch("backend.services.llm_client.genai.Client") as mock_client:
+        response = MagicMock()
+        response.text = '{"schema_version": "docx-program-envelope/1"}'
+        response.candidates = []
+        mock_client.return_value.models.generate_content.return_value = response
+
+        from backend.schemas.docx_authoring_schema import DocxProgramEnvelope
+        from backend.services.llm_client import LLMClient
+
+        LLMClient().generate(
+            "system",
+            "user",
+            response_schema=DocxProgramEnvelope,
+        )
+
+        config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
+        assert config.response_schema is None
+        assert "additionalProperties" not in config.response_json_schema
+        assert "program" in config.response_json_schema["properties"]
+
+
 def test_llm_client_uses_configured_model_defaults_without_thinking_override():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         response = MagicMock()
@@ -212,7 +256,7 @@ def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
 
         from backend.services.llm_client import LLMClient
 
-        result = LLMClient().generate("system", "user")
+        result = LLMClient(model="gemma-4-31b-it").generate("system", "user")
 
         config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
         assert config.temperature == 0.2
@@ -221,7 +265,7 @@ def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
         assert config.max_output_tokens == settings.llm_max_output_tokens
         assert result.raw_text == " untouched \n"
         assert result.provider_request_id == "request-123"
-        assert result.model_name == settings.llm_model
+        assert result.model_name == "gemma-4-31b-it"
         assert result.model_version == "gemma-version-1"
         assert result.finish_reason == "STOP"
         assert result.usage is None

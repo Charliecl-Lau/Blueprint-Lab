@@ -32,6 +32,7 @@ def save_assessment_artifact(db: Session, run: Run) -> DocumentArtifact:
     )
     artifact = DocumentArtifact(
         run_id=run.id,
+        assessment=assessment,
         filename=f"blueprint-lab-run-{run.id}.docx",
         media_type=DOCX_MEDIA_TYPE,
         content=docx_bytes,
@@ -39,3 +40,14 @@ def save_assessment_artifact(db: Session, run: Run) -> DocumentArtifact:
     )
     db.add(artifact)
     return artifact
+
+
+def generated_docx_artifact(*, run_id: int, content: bytes) -> DocumentArtifact:
+    """Build persistence input for a verified LLM-authored DOCX without laying it out."""
+    return DocumentArtifact(
+        run_id=run_id,
+        filename=f"blueprint-lab-run-{run_id}-rewrite.docx",
+        media_type=DOCX_MEDIA_TYPE,
+        content=content,
+        content_hash=sha256_bytes(content),
+    )

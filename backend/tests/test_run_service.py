@@ -75,6 +75,13 @@ def test_run_without_overrides_persists_effective_environment_settings(
             "max_output_tokens": 4096,
             "provider_settings": {},
         },
+        "effective_provider_request": {
+            "provider": "google",
+            "model": "gemini-environment",
+            "temperature": 0.31,
+            "top_p": 0.82,
+            "max_output_tokens": 4096,
+        },
     }
     assert run.provider == "google"
     assert run.model == "gemini-environment"

@@ -4,11 +4,12 @@ import { evaluationsApi } from '../api/evaluations'
 import { experimentsApi } from '../api/experiments'
 import { runsApi } from '../api/runs'
 import { AppHeader } from '../components/AppHeader'
-import { QuestionsSolutionsPanel } from '../components/history/QuestionsSolutionsPanel'
+import { MathContent, StandaloneEquations } from '../components/MathContent'
 import { TokenUsage } from '../components/TokenUsage'
 import { useSSE } from '../hooks/useSSE'
+import { referencedEquationLabels } from '../math/equationReferences'
 import { useRunStore } from '../store/runStore'
-import type { CognitiveDemand } from '../types'
+import type { CognitiveDemand, Question } from '../types'
 import { referencePdfValidationMessages } from '../validation/experimentValidation'
 
 const cognitiveDemandLabels: Record<CognitiveDemand, string> = {
@@ -35,6 +36,7 @@ export function AssessmentViewerPage() {
   const [retryingEvaluation, setRetryingEvaluation] = useState(false)
   const [acceptingDefects, setAcceptingDefects] = useState(false)
   const [retryPdfs, setRetryPdfs] = useState<File[]>([])
+  const [retryingRewrite, setRetryingRewrite] = useState(false)
 
   useEffect(() => {
     if (id) experimentsApi.get(id).then(mergeExperiment)
@@ -48,7 +50,7 @@ export function AssessmentViewerPage() {
     (item) => item.experiment_id === id || experimentRunIds.has(item.id),
   )
   const viewerReady = experimentRuns.filter(
-    (item) => item.viewer_available || item.viewer_ready_at || item.status === 'complete' || item.status === 'complete_with_warnings',
+    (item) => item.viewer_available || item.viewer_ready_at || item.status === 'complete' || item.status === 'complete_with_warnings' || item.status === 'rewrite_failed',
   )
   const selectedId = routeRunId ?? selectedRunId ?? viewerReady[0]?.id
   const selected = selectedId ? runs[selectedId] : undefined
@@ -126,6 +128,50 @@ export function AssessmentViewerPage() {
     }
   }
 
+  const retryDocxRewrite = async () => {
+    if (!selectedId || !selected?.rewrite?.repair_available) return
+    setRetryingRewrite(true)
+    try {
+      mergeRun(await runsApi.retryDocxRewrite(selectedId, crypto.randomUUID()))
+      navigate(`/runs/${selectedId}/progress`)
+    } finally {
+      setRetryingRewrite(false)
+    }
+  }
+
+  const solutionMath = (text: string) => (
+    <MathContent text={text} location="solution" />
+  )
+
+  const typedSolution = (question: Question) => {
+    const solution = question.solution
+    if (!solution) return null
+    if (solution.kind === 'computational') return (
+      <section className="typed-solution" aria-label="Step-by-step solution">
+        <h4>Knowns and target</h4>
+        <ul>{solution.knowns_and_target.map((item) => <li key={item}>{solutionMath(item)}</li>)}</ul>
+        <h4>Governing equation</h4>{solutionMath(solution.governing_equation)}
+        <h4>Substitution</h4>{solutionMath(solution.substitution)}
+        <h4>Calculation steps</h4>
+        <ol>{solution.calculation_steps.map((item) => <li key={item}>{solutionMath(item)}</li>)}</ol>
+        <h4>Final answer</h4>{solutionMath(`${solution.final_answer} ${solution.units}`)}
+        <h4>Physical meaning</h4>{solutionMath(solution.physical_meaning)}
+        <h4>Distractor analysis</h4>
+        <ul>{solution.distractor_analysis.map((item) => <li key={item.option_id}><strong>{item.option_id}:</strong> {solutionMath(item.explanation)}</li>)}</ul>
+      </section>
+    )
+    return (
+      <section className="typed-solution" aria-label="Conceptual solution">
+        <h4>Governing concept</h4>{solutionMath(solution.governing_concept)}
+        <h4>Application</h4>
+        <ol>{solution.application_steps.map((item) => <li key={item}>{solutionMath(item)}</li>)}</ol>
+        <h4>Option elimination</h4>
+        <ul>{solution.option_elimination.map((item) => <li key={item.option_id}><strong>{item.option_id}:</strong> {solutionMath(item.explanation)}</li>)}</ul>
+        <h4>Conclusion</h4>{solutionMath(solution.conclusion)}
+      </section>
+    )
+  }
+
   return (
     <main className="experiment-page">
       <AppHeader subtitle="Run viewer" />
@@ -169,7 +215,7 @@ export function AssessmentViewerPage() {
                   >
                     Grade Assessment
                   </Link>
-                ) : !validation?.acceptance_required && selected?.assessment?.id && (
+                ) : selected?.status !== 'rewrite_failed' && !validation?.acceptance_required && selected?.assessment?.id && (
                   selected.evaluation_status === 'failed'
                   || selected.evaluation_status === 'not_started'
                 ) ? (
@@ -185,15 +231,35 @@ export function AssessmentViewerPage() {
                 )}
                 <button
                   className="secondary"
-                  disabled={!selected?.artifact_available}
-                  onClick={() => selected?.artifact_available && runsApi.exportDocx(selectedId)}
+                  disabled={!selected?.rewrite?.artifact_available && !selected?.artifact_available}
+                  onClick={() => (selected?.rewrite?.artifact_available || selected?.artifact_available) && runsApi.exportDocx(selectedId)}
                 >
-                  {selected?.artifact_available ? 'Export Word document' : 'Preparing document'}
+                  {(selected?.rewrite?.artifact_available || selected?.artifact_available) ? 'Export Word document' : 'Word export unavailable'}
                 </button>
                 <button className="retry-run-button" onClick={() => { setRetryPdfs([]); setRetryDialogOpen(true) }}>Retry run</button>
               </div>
             )}
           </div>
+          {selected?.rewrite?.displaying === 'canonical_rewrite' && (
+            <section className="rewrite-provenance" aria-label="Assessment provenance">
+              <h2>{selected.rewrite.backend === 'agentic_tools' ? 'Canonical LLM-designed document' : 'Canonical LLM rewrite'}</h2>
+              <p>Version {selected.rewrite.canonical_version}, rewritten from source version {selected.rewrite.source_version}.</p>
+            </section>
+          )}
+          {selected?.rewrite?.displaying === 'original_recovery' && (
+            <section className="assessment-warning" role="alert">
+              <h2>{selected.rewrite.backend === 'agentic_tools' ? 'Original recovery document' : 'Original assessment — DOCX rewrite failed'}</h2>
+              <p>Version {selected.rewrite.original_version} is preserved. Word export and rewrite grading are unavailable.</p>
+              {selected.rewrite.failure?.issue_codes.length ? (
+                <p>Failure codes: {selected.rewrite.failure.issue_codes.join(', ')}</p>
+              ) : null}
+              {selected.rewrite.repair_available && (
+                <button className="primary" disabled={retryingRewrite} onClick={retryDocxRewrite}>
+                  {retryingRewrite ? 'Retrying Word rewrite...' : 'Retry Word rewrite'}
+                </button>
+              )}
+            </section>
+          )}
           {validation?.status === 'warning' && (
             <section className="assessment-warning" role="alert">
               <h2>Assessment completed with warnings</h2>
@@ -235,7 +301,24 @@ export function AssessmentViewerPage() {
           </section>
           <section>
             <h2>Generated Questions</h2>
-            <QuestionsSolutionsPanel questions={questions} />
+            {questions.map((question, index) => {
+              const equations = question.equations ?? []
+              const referencedLabels = referencedEquationLabels(
+                question.body,
+                ...question.options?.map((option) => option.body) ?? [],
+                question.model_answer,
+              )
+              return <div className="question" key={question.id ?? index}>
+                <strong>{index + 1}. <MathContent text={question.body} segments={question.body_segments} equations={equations} location="question" /></strong>
+                {question.options?.map((option, optionIndex) => (
+                  <p key={option.id ?? optionIndex}><MathContent text={option.body} segments={option.segments} equations={equations} location="question" />{option.is_correct ? ' ✓' : ''}</p>
+                ))}
+                <StandaloneEquations equations={equations} location="question" referencedLabels={referencedLabels} />
+                {question.model_answer && <p><strong>Solution:</strong> <MathContent text={question.model_answer} segments={question.model_answer_segments} equations={equations} location="solution" /></p>}
+                {typedSolution(question)}
+                <StandaloneEquations equations={equations} location="solution" referencedLabels={referencedLabels} />
+              </div>
+            })}
             {!questions.length && <p>Select a validated run to inspect its questions.</p>}
           </section>
         </article>

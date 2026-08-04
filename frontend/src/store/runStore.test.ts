@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import type { Experiment } from '../types'
-import { useRunStore } from './runStore'
+import { isTerminalRunStatus, useRunStore } from './runStore'
 
 const experiment: Experiment = {
   id: 1,
@@ -68,5 +68,13 @@ describe('run store', () => {
 
     expect(useRunStore.getState().runs[runA.id].status).toBe('generating')
     expect(useRunStore.getState().runs[runB.id].status).toBe(runB.status)
+  })
+
+  test('keeps rewrite work active and treats rewrite failure as terminal', () => {
+    expect(isTerminalRunStatus('docx_authoring')).toBe(false)
+    expect(isTerminalRunStatus('docx_executing')).toBe(false)
+    expect(isTerminalRunStatus('docx_validating')).toBe(false)
+    expect(isTerminalRunStatus('docx_repairing')).toBe(false)
+    expect(isTerminalRunStatus('rewrite_failed')).toBe(true)
   })
 })

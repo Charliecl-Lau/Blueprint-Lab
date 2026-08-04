@@ -1,0 +1,45 @@
+services:
+  docx-sandbox:
+    image: ${DOCX_SANDBOX_SERVICE_IMAGE:?Set an immutable service image reference ending in @sha256}
+    restart: unless-stopped
+    environment:
+      DOCX_SANDBOX_SERVICE_TOKEN: ${DOCX_SANDBOX_SERVICE_TOKEN:?Set a strong private service token}
+      DOCX_SANDBOX_SERVICE_VERSION: ${DOCX_SANDBOX_SERVICE_VERSION:-1}
+      DOCX_SANDBOX_JOB_IMAGE_DIGEST: ${DOCX_SANDBOX_JOB_IMAGE_DIGEST:?Set the immutable job image sha256}
+      DOCX_SANDBOX_MAX_CONCURRENCY: ${DOCX_SANDBOX_MAX_CONCURRENCY:-2}
+      DOCX_SANDBOX_TIMEOUT_SECONDS: ${DOCX_SANDBOX_TIMEOUT_SECONDS:-45}
+      DOCX_SANDBOX_MEMORY_BYTES: ${DOCX_SANDBOX_MEMORY_BYTES:-536870912}
+      DOCX_SANDBOX_NANO_CPUS: ${DOCX_SANDBOX_NANO_CPUS:-1000000000}
+      DOCX_SANDBOX_PIDS_LIMIT: ${DOCX_SANDBOX_PIDS_LIMIT:-64}
+      DOCX_SANDBOX_MAX_OUTPUT_BYTES: ${DOCX_SANDBOX_MAX_OUTPUT_BYTES:-20971520}
+      DOCX_SANDBOX_COMPLETED_JOB_RETENTION_SECONDS: ${DOCX_SANDBOX_COMPLETED_JOB_RETENTION_SECONDS:-3600}
+      DOCX_SANDBOX_ASSETS_DIR: /assets
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+      - type: bind
+        source: ./approved-assets
+        target: /assets
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M

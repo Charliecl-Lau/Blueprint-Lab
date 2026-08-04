@@ -43,12 +43,11 @@ def make_generation(test_db):
     test_db.add(generation)
     test_db.flush()
     test_db.add(PromptRecord(generation_id=generation.id, prompt_structure="openai", full_prompt="Prompt"))
-    test_db.add(DocumentArtifact(
-        generation_id=generation.id,
+    generation.document_artifact = DocumentArtifact(
         filename="generation.docx",
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         content=b"docx-bytes",
-    ))
+    )
     test_db.commit()
     return generation
 

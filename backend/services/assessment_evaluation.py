@@ -80,7 +80,7 @@ def persist_assessment_questions(
             question = AssessmentQuestion(
                 assessment=assessment,
                 ordinal=ordinal,
-                assessment_version=1,
+                assessment_version=assessment.version,
                 content_hash=content_hash,
             )
             db.add(question)

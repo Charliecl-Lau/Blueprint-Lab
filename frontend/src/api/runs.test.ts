@@ -46,3 +46,19 @@ test('uses the stored filename when downloading DOCX', async () => {
   expect(anchor.download).toBe('phase-stability.docx')
   expect(anchor.click).toHaveBeenCalledOnce()
 })
+
+test('rewrite retry sends its idempotency key to the narrow endpoint', async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: vi.fn().mockResolvedValue({ id: 7 }),
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  await runsApi.retryDocxRewrite(7, 'retry-key')
+
+  expect(fetchMock).toHaveBeenCalledWith('/api/runs/7/docx-rewrite/retry', {
+    method: 'POST',
+    body: JSON.stringify({}),
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'retry-key' },
+  })
+})

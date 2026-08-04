@@ -7,6 +7,8 @@ from backend.models.evaluation import (
     EvaluationRevision,
 )
 from backend.models.model_call_usage import ModelCallUsage
+from backend.models.docx_authoring import DocxAuthoringAttempt
+from backend.models.docx_tool_session import DocxToolAction, DocxToolIteration, DocxToolSession
 from backend.models.run import (
     Assessment,
     DocumentArtifact,
@@ -36,4 +38,8 @@ __all__ = [
     "Generation",
     "PromptRecord",
     "ModelCallUsage",
+    "DocxAuthoringAttempt",
+    "DocxToolSession",
+    "DocxToolIteration",
+    "DocxToolAction",
 ]

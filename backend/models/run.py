@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
@@ -40,8 +41,9 @@ class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','prompting','generating','documenting','complete',"
-            "'complete_with_warnings','error')",
+            "status IN ('pending','prompting','generating','documenting','docx_authoring',"
+            "'docx_executing','docx_validating','docx_repairing','rewrite_failed',"
+            "'complete','complete_with_warnings','error')",
             name="ck_runs_status",
         ),
         UniqueConstraint("condition_id", "run_number"),
@@ -65,8 +67,16 @@ class Run(Base):
             "model_call_count IS NULL OR model_call_count >= 0",
             name="ck_runs_model_call_count_nonnegative",
         ),
+        ForeignKeyConstraint(
+            ["canonical_assessment_id", "id"],
+            ["assessments.id", "assessments.run_id"],
+            name="fk_runs_canonical_assessment_same_run",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
     )
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement="ignore_fk")
     experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
     condition_id: Mapped[int] = mapped_column(ForeignKey("conditions.id"), nullable=False)
     run_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -87,6 +97,7 @@ class Run(Base):
     output_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     total_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     model_call_count: Mapped[Optional[int]] = mapped_column(Integer)
+    canonical_assessment_id: Mapped[Optional[int]] = mapped_column(Integer)
     error_type: Mapped[Optional[str]] = mapped_column(String)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -97,12 +108,37 @@ class Run(Base):
     experiment: Mapped["Experiment"] = relationship(back_populates="runs")
     condition: Mapped["Condition"] = relationship(back_populates="runs")
     prompt: Mapped[Optional["Prompt"]] = relationship(back_populates="run", uselist=False, cascade="all, delete-orphan")
-    assessment: Mapped[Optional["Assessment"]] = relationship(back_populates="run", uselist=False, cascade="all, delete-orphan")
-    document_artifact: Mapped[Optional["DocumentArtifact"]] = relationship(back_populates="run", uselist=False)
+    assessment_versions: Mapped[list["Assessment"]] = relationship(
+        back_populates="run",
+        foreign_keys="Assessment.run_id",
+        order_by="Assessment.version",
+        cascade="all, delete-orphan",
+    )
+    canonical_assessment: Mapped[Optional["Assessment"]] = relationship(
+        foreign_keys=[canonical_assessment_id],
+        post_update=True,
+    )
+    document_artifacts: Mapped[list["DocumentArtifact"]] = relationship(
+        back_populates="run",
+        foreign_keys="DocumentArtifact.run_id",
+        overlaps="assessment,document_artifact",
+    )
     source_documents: Mapped[list["RunSourceDocument"]] = relationship(back_populates="run")
     rubric_results: Mapped[list["RubricResult"]] = relationship(back_populates="run")
     model_call_usages: Mapped[list["ModelCallUsage"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
+    )
+    docx_authoring_attempts: Mapped[list["DocxAuthoringAttempt"]] = relationship(
+        back_populates="run",
+        foreign_keys="DocxAuthoringAttempt.run_id",
+        cascade="all, delete-orphan",
+        overlaps="source_assessment,docx_authoring_attempts",
+    )
+    docx_tool_sessions: Mapped[list["DocxToolSession"]] = relationship(
+        back_populates="run",
+        foreign_keys="DocxToolSession.run_id",
+        cascade="all, delete-orphan",
+        overlaps="source_assessment,docx_tool_sessions",
     )
     reference_pdfs: Mapped[list["RunReferencePdf"]] = relationship(
         back_populates="run",
@@ -117,6 +153,34 @@ class Run(Base):
     @property
     def reference_pdf_filenames(self) -> list[str]:
         return [item.original_filename for item in self.reference_pdfs]
+
+    @property
+    def assessment(self) -> Optional["Assessment"]:
+        """Compatibility view of the explicitly selected canonical version."""
+        return self.canonical_assessment
+
+    @assessment.setter
+    def assessment(self, value: Optional["Assessment"]) -> None:
+        self.canonical_assessment = value
+        if value is not None and value not in self.assessment_versions:
+            self.assessment_versions.append(value)
+
+    @property
+    def document_artifact(self) -> Optional["DocumentArtifact"]:
+        assessment = self.canonical_assessment
+        return assessment.document_artifact if assessment is not None else None
+
+    @document_artifact.setter
+    def document_artifact(self, value: Optional["DocumentArtifact"]) -> None:
+        if value is None:
+            if self.canonical_assessment is not None:
+                self.canonical_assessment.document_artifact = None
+            return
+        if self.canonical_assessment is None:
+            raise ValueError("a canonical assessment is required before its artifact")
+        value.assessment = self.canonical_assessment
+        if value not in self.document_artifacts:
+            self.document_artifacts.append(value)
 
 class RunReferencePdf(Base):
     __tablename__ = "run_reference_pdfs"
@@ -206,9 +270,26 @@ class Assessment(Base):
             "defects_accepted_at IS NULL OR validation_status = 'warning'",
             name="ck_assessments_warning_acceptance",
         ),
+        UniqueConstraint("run_id", "version", name="uq_assessments_run_version"),
+        UniqueConstraint("id", "run_id", name="uq_assessments_id_run"),
+        CheckConstraint("version >= 1", name="ck_assessments_version_positive"),
+        CheckConstraint(
+            "kind IN ('original_generation','full_rewrite')",
+            name="ck_assessments_kind",
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
-    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=False)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    kind: Mapped[str] = mapped_column(
+        String, nullable=False, default="original_generation"
+    )
+    source_assessment_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("assessments.id")
+    )
+    canonicalized_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
     raw_response_text: Mapped[str] = mapped_column(Text, nullable=False)
     parsed_json: Mapped[Optional[dict]] = mapped_column(JSON)
     output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -224,17 +305,47 @@ class Assessment(Base):
     )
     defects_accepted_by: Mapped[Optional[str]] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    run: Mapped[Run] = relationship(back_populates="assessment")
+    run: Mapped[Run] = relationship(
+        back_populates="assessment_versions", foreign_keys=[run_id]
+    )
+    source_assessment: Mapped[Optional["Assessment"]] = relationship(
+        remote_side=[id], foreign_keys=[source_assessment_id]
+    )
     questions: Mapped[list["AssessmentQuestion"]] = relationship(
         back_populates="assessment", cascade="all, delete-orphan"
+    )
+    document_artifact: Mapped[Optional["DocumentArtifact"]] = relationship(
+        back_populates="assessment",
+        uselist=False,
+        cascade="all, delete-orphan",
+        overlaps="document_artifacts,run",
+    )
+    docx_authoring_attempts: Mapped[list["DocxAuthoringAttempt"]] = relationship(
+        back_populates="source_assessment",
+        foreign_keys="[DocxAuthoringAttempt.source_assessment_id, DocxAuthoringAttempt.run_id]",
+        overlaps="run,docx_authoring_attempts",
+    )
+    docx_tool_sessions: Mapped[list["DocxToolSession"]] = relationship(
+        back_populates="source_assessment",
+        foreign_keys="[DocxToolSession.source_assessment_id, DocxToolSession.run_id]",
+        overlaps="run,docx_tool_sessions",
     )
 
 
 class DocumentArtifact(Base):
     __tablename__ = "document_artifacts"
-    __table_args__ = (CheckConstraint("length(content_hash) = 64"),)
+    __table_args__ = (
+        CheckConstraint("length(content_hash) = 64"),
+        ForeignKeyConstraint(
+            ["assessment_id", "run_id"],
+            ["assessments.id", "assessments.run_id"],
+            name="fk_document_artifacts_assessment_same_run",
+        ),
+        UniqueConstraint("assessment_id", name="uq_document_artifacts_assessment"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
-    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), unique=True, nullable=False)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id"), nullable=False)
+    assessment_id: Mapped[int] = mapped_column(Integer, nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     media_type: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -242,7 +353,16 @@ class DocumentArtifact(Base):
         String(64), nullable=False, default=_hash_content_default
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    run: Mapped[Run] = relationship(back_populates="document_artifact")
+    run: Mapped[Run] = relationship(
+        back_populates="document_artifacts",
+        foreign_keys=[run_id],
+        overlaps="assessment,document_artifact",
+    )
+    assessment: Mapped[Assessment] = relationship(
+        back_populates="document_artifact",
+        foreign_keys=[assessment_id, run_id],
+        overlaps="document_artifacts,run",
+    )
     generation_id = synonym("run_id")
     generation = synonym("run")
 
@@ -264,3 +384,5 @@ PromptRecord = Prompt
 
 from backend.models.source_document import RunSourceDocument  # noqa: E402,F401
 from backend.models.model_call_usage import ModelCallUsage  # noqa: E402,F401
+from backend.models.docx_authoring import DocxAuthoringAttempt  # noqa: E402,F401
+from backend.models.docx_tool_session import DocxToolSession  # noqa: E402,F401
