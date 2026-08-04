@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r backend/requirements.runtime.txt
 
 COPY alembic.ini alembic.ini
 COPY backend backend
+COPY docx_sandbox docx_sandbox
 COPY docs/actual_prompt_template.md docs/actual_prompt_template.md
 
 CMD ["python", "-m", "celery", "-A", "backend.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
