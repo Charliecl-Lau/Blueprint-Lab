@@ -20,6 +20,13 @@ from backend.services.llm_client import LLMClient, LLMResult
 
 PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 DOCX_TOOL_MODEL = "gemini-3.5-flash-lite"
+REVIEW_REVISION_TOOLS = {
+    "move_block",
+    "update_block_style",
+    "remove_decorative_block",
+    "add_callout",
+    "add_page_break",
+}
 
 
 class DocxToolAgentError(ValueError): pass
@@ -165,6 +172,11 @@ class GeminiDocxToolAgent:
                 normalized.append(source)
                 continue
             operation = dict(source)
+            if operation.get("tool") not in REVIEW_REVISION_TOOLS:
+                # The design compiler owns assessed structure and equation
+                # placement. A visual review may only request mutations that
+                # the finalized workspace explicitly permits.
+                continue
             operation_id = operation.get("operation_id")
             if not isinstance(operation_id, str) or not operation_id or operation_id in seen_operation_ids:
                 operation_id = f"review-op-{len(normalized) + 1:03d}"
@@ -173,4 +185,7 @@ class GeminiDocxToolAgent:
             operation["expected_workspace_revision"] = base_revision + len(normalized)
             operation["arguments"] = dict(operation.get("arguments") or {})
             normalized.append(operation)
-        return {**value, "operations": normalized}
+        decision = value.get("decision")
+        if decision == "revise" and not normalized:
+            decision = "reject"
+        return {**value, "decision": decision, "operations": normalized}

@@ -93,3 +93,33 @@ def test_review_normalization_owns_optimistic_revisions():
         ],
     }, 40)
     assert [item["expected_workspace_revision"] for item in normalized["operations"]] == [40, 41]
+
+
+def test_review_normalization_discards_application_owned_equation_operations():
+    normalized = GeminiDocxToolAgent._normalize_review_turn({
+        "decision": "revise",
+        "observations": [{"page": 1, "code": "equation_layout", "message": "Adjust equations."}],
+        "operations": [
+            {"operation_id": "equation-1", "tool": "add_equation", "expected_workspace_revision": 3, "arguments": {"question_id": "7"}},
+            {"operation_id": "equation-2", "tool": "add_equation", "expected_workspace_revision": 4, "arguments": {"question_id": "7"}},
+        ],
+    }, 40)
+
+    assert normalized["operations"] == []
+    assert normalized["decision"] == "reject"
+    assert DocxReviewTurn.model_validate(normalized).decision == "reject"
+
+
+def test_review_normalization_keeps_only_finalized_workspace_revision_tools():
+    normalized = GeminiDocxToolAgent._normalize_review_turn({
+        "decision": "revise",
+        "observations": [],
+        "operations": [
+            {"operation_id": "heading", "tool": "add_heading", "expected_workspace_revision": 1, "arguments": {"literal_text": "Extra"}},
+            {"operation_id": "style", "tool": "update_block_style", "expected_workspace_revision": 1, "arguments": {"block_id": "question-7", "style": "compact"}},
+        ],
+    }, 12)
+
+    assert [item["tool"] for item in normalized["operations"]] == ["update_block_style"]
+    assert normalized["operations"][0]["expected_workspace_revision"] == 12
+    assert normalized["decision"] == "revise"
