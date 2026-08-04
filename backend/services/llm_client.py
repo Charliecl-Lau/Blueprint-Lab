@@ -6,7 +6,7 @@ from io import BytesIO
 from typing import Optional, Sequence
 
 from google import genai
-from google.genai import types
+from google.genai import errors as genai_errors, types
 
 from backend.config import settings
 from backend.services.reference_pdfs import (
@@ -76,6 +76,17 @@ class TruncatedResponseError(RuntimeError):
             "Provider stopped with finish_reason=MAX_TOKENS; response is "
             f"truncated and cannot be parsed. Model={result.model_name}."
         )
+
+
+def is_retryable_provider_error(exc: Exception) -> bool:
+    """Return whether a Gemini request failed for a transient HTTP reason."""
+    if isinstance(exc, genai_errors.ServerError):
+        return True
+    return isinstance(exc, genai_errors.ClientError) and exc.code in {
+        408,
+        409,
+        429,
+    }
 
 
 @dataclass(frozen=True)

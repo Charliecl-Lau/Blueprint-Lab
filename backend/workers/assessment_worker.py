@@ -47,7 +47,11 @@ from backend.services.document_artifact import save_assessment_artifact
 from backend.services.document_generators import document_generator_registry
 from backend.services.docx_authoring_pipeline import DocxAuthoringPipeline
 from backend.services.docx_sandbox_client import SandboxTransportError
-from backend.services.llm_client import LLMClient, TruncatedResponseError
+from backend.services.llm_client import (
+    LLMClient,
+    TruncatedResponseError,
+    is_retryable_provider_error,
+)
 from backend.services.reference_pdfs import (
     ProviderFileAttachment,
     delete_provider_attachments,
@@ -513,6 +517,10 @@ def run_generation_pipeline(
                     self, db, run, "docx_sandbox_transport_error", exc
                 )
             except Exception as exc:
+                if is_retryable_provider_error(exc):
+                    _retry_provider_failure(
+                        self, db, run, "document_generation_provider_error", exc
+                    )
                 _record_error(db, run, "document_generation_error", exc)
                 _publish_progress(experiment.id, run.id, condition.id, "error")
                 return
@@ -693,6 +701,10 @@ def run_generation_pipeline(
             )
             return
         except Exception as exc:
+            if is_retryable_provider_error(exc):
+                _retry_provider_failure(
+                    self, db, run, "document_generation_provider_error", exc
+                )
             _record_error(db, run, "document_generation_error", exc)
             _publish_progress(experiment.id, run.id, condition.id, "error")
             return

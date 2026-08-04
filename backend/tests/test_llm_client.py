@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from google.genai import errors as genai_errors
 
 from backend.config import Settings, settings
 from backend.services.llm_client import (
@@ -12,6 +13,7 @@ from backend.services.llm_client import (
     LLMResult,
     TokenUsage,
     TruncatedResponseError,
+    is_retryable_provider_error,
 )
 from backend.schemas.assessment_schema import AssessmentGenerationResponse
 from backend.services.reference_pdfs import (
@@ -42,6 +44,36 @@ def gemini_response(finish_reason="STOP"):
             tool_use_prompt_token_count=3,
         ),
     )
+
+
+@pytest.mark.parametrize("status_code", [500, 503, 599])
+def test_server_errors_are_retryable(status_code):
+    error = genai_errors.ServerError(
+        status_code,
+        {"error": {"code": status_code, "status": "UNAVAILABLE"}},
+    )
+
+    assert is_retryable_provider_error(error) is True
+
+
+@pytest.mark.parametrize("status_code", [408, 409, 429])
+def test_transient_client_errors_are_retryable(status_code):
+    error = genai_errors.ClientError(
+        status_code,
+        {"error": {"code": status_code, "status": "RESOURCE_EXHAUSTED"}},
+    )
+
+    assert is_retryable_provider_error(error) is True
+
+
+def test_permanent_provider_and_local_errors_are_not_retryable():
+    error = genai_errors.ClientError(
+        400,
+        {"error": {"code": 400, "status": "INVALID_ARGUMENT"}},
+    )
+
+    assert is_retryable_provider_error(error) is False
+    assert is_retryable_provider_error(ValueError("invalid tool turn")) is False
 
 
 def test_llm_client_installs_event_loop_when_worker_thread_has_none():

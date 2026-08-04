@@ -112,6 +112,7 @@ def run_generation_with_mocked_gemini(test_db, run_id, usage=(20, 8, 28)):
             return_value=b"docx",
         ),
         patch("backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"),
+        patch.object(settings, "docx_generation_backend", "legacy"),
     ):
         test_db.close = MagicMock()
         from backend.workers.assessment_worker import run_generation_pipeline
