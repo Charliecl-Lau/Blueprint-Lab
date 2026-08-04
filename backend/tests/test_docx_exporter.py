@@ -1,10 +1,32 @@
 from io import BytesIO
+from copy import deepcopy
 from zipfile import ZipFile
 
+import pytest
 from docx import Document
 from lxml import etree
 
-from backend.services.docx_exporter import build_assessment_docx
+from backend.services.docx_exporter import (
+    DocxExportValidationError,
+    build_assessment_docx as _build_assessment_docx,
+)
+
+
+def build_assessment_docx(**kwargs):
+    """Keep focused rendering fixtures valid under the export preflight contract."""
+    kwargs = deepcopy(kwargs)
+    for index, question in enumerate(kwargs.get("questions", []), start=1):
+        question.setdefault("metadata", {})
+        question["metadata"].setdefault("question_title", f"Fixture {index}")
+        question.setdefault("quality_checks", [{
+            "criterion": "Technical correctness",
+            "rating": 5,
+            "comment": "Verified for this fixture.",
+        }])
+        question.setdefault("revision_options", ["Vary the supplied values."])
+        if not question["revision_options"]:
+            question["revision_options"] = ["Vary the supplied values."]
+    return _build_assessment_docx(**kwargs)
 
 
 def thermodynamic_equation_ast():
@@ -123,7 +145,9 @@ def test_docx_uses_one_metadata_table_sourced_from_first_question():
 
     document = Document(BytesIO(content))
     rows = table_rows(document)
-    assert len(document.tables) == 1
+    assert len(document.tables) == 2
+    assert document.tables[0].cell(0, 0).text == "Field"
+    assert document.tables[0].cell(0, 1).text == "Entry"
     assert ("Run ID", "12") in rows
     assert ("Prompt ID", "34") in rows
     assert ("Condition Code", "C101") in rows
@@ -137,30 +161,17 @@ def test_docx_uses_one_metadata_table_sourced_from_first_question():
     assert all(value != "Hard" for row in rows for value in row)
 
 
-def test_docx_empty_assessment_keeps_run_metadata_table():
-    content = build_assessment_docx(
-        run_id=1,
-        prompt_id=2,
-        condition_code="C100",
-        run_number=1,
-        course="ENGR 101",
-        topic="Statics",
-        questions=[],
-    )
-
-    document = Document(BytesIO(content))
-    assert len(document.tables) == 1
-    assert table_rows(document) == [
-        ("Experiment ID", "Not Assigned"),
-        ("Condition ID", "Not Assigned"),
-        ("Run ID", "1"),
-        ("Prompt ID", "2"),
-        ("Assessment ID", "Not Assigned"),
-        ("Condition Code", "C100"),
-        ("Run Number", "1"),
-        ("Course", "ENGR 101"),
-        ("Topic", "Statics"),
-    ]
+def test_docx_empty_assessment_fails_preflight_visibly():
+    with pytest.raises(DocxExportValidationError, match="questions are required"):
+        _build_assessment_docx(
+            run_id=1,
+            prompt_id=2,
+            condition_code="C100",
+            run_number=1,
+            course="ENGR 101",
+            topic="Statics",
+            questions=[],
+        )
 
 
 def test_docx_applies_spaced_item_styles_and_real_answer_choice_lists():
@@ -185,13 +196,13 @@ def test_docx_applies_spaced_item_styles_and_real_answer_choice_lists():
 
     document = Document(BytesIO(content))
     paragraphs = document.paragraphs
-    assert any(p.text == "Question 1: Phase count" and p.style.name == "Heading 3" for p in paragraphs)
-    assert any(p.text == "Solution 1: Phase count" and p.style.name == "Heading 3" for p in paragraphs)
-    choices = [p for p in paragraphs if p.text in {"One", "Three [correct]"}]
+    assert any(p.text == "Question 1 — Phase count" and p.style.name == "Heading 2" for p in paragraphs)
+    assert any(p.text == "Solution 1 — Phase count" and p.style.name == "Heading 2" for p in paragraphs)
+    choices = [p for p in paragraphs if p.text in {"One", "Three"}]
     assert len(choices) == 2
     assert all(p.style.name == "List Bullet" for p in choices)
     assert all(not p.text.startswith("- ") for p in choices)
-    assert document.styles["Heading 2"].paragraph_format.space_before.pt >= 14
+    assert document.styles["Heading 2"].paragraph_format.space_before.pt == 12
     assert document.styles["Heading 3"].paragraph_format.space_before.pt >= 12
     assert document.styles["Normal"].paragraph_format.space_after.pt >= 6
     assert document.styles["List Bullet"].paragraph_format.space_after.pt >= 4
@@ -229,8 +240,8 @@ def test_docx_contains_rich_research_content_and_native_word_equation():
     assert ("Run Number", "2") in rows
     assert ("Concept-Map Bridge", "Connects MSE202 free energy to MSE302 phase stability.") in rows
     assert "Chemical potentials are equal at equilibrium." in text
-    assert "Assessment Quality Check" not in text
-    assert "Suggested Revision Options" in text
+    assert "4. Assessment Quality Check" in text
+    assert "5. Suggested Revision Options" in text
     assert "End-to-end token usage" not in text
 
     with ZipFile(BytesIO(content)) as archive:
@@ -326,9 +337,7 @@ def test_docx_replaces_equation_placeholders_inline_without_duplicate_blocks():
                 "body": "The value is [[EQ:option_value]].",
                 "is_correct": True,
             }],
-            "model_answer": (
-                "Using [[EQ:option_value]], substitution gives [[EQ:final_result]]."
-            ),
+            "model_answer": "Substitution gives [[EQ:final_result]].",
             "equations": [
                 {
                     "label": "gibbs_formula",
@@ -353,7 +362,7 @@ def test_docx_replaces_equation_placeholders_inline_without_duplicate_blocks():
         document_xml = archive.read("word/document.xml")
 
     assert b"[[EQ:" not in document_xml
-    assert document_xml.count(b"<m:oMath>") == 4
+    assert document_xml.count(b"<m:oMath>") == 3
     assert b"gibbs_formula:" not in document_xml
     assert b"option_value:" not in document_xml
     assert b"final_result:" not in document_xml
@@ -368,7 +377,13 @@ def test_docx_omits_end_to_end_token_usage():
         run_number=1,
         course="ENGR 101",
         topic="Statics",
-        questions=[],
+        questions=[{
+            "metadata": {"question_title": "Statics"},
+            "body": "State equilibrium.",
+            "options": [],
+            "model_answer": "The net force and moment are zero.",
+            "equations": [],
+        }],
     )
 
     document = Document(BytesIO(content))
@@ -487,3 +502,126 @@ def test_docx_serializes_scripts_radicals_and_matrices_to_omml():
 
     for tag in (b"<m:sSub>", b"<m:sSup>", b"<m:rad>", b"<m:m>", b"<m:mr>"):
         assert tag in document_xml
+
+
+def test_docx_preserves_fixed_five_section_template_and_solution_layout():
+    content = _build_assessment_docx(
+        run_id=40,
+        prompt_id=41,
+        condition_code="C100",
+        run_number=1,
+        course="MSE302",
+        topic="Phase stability",
+        questions=[
+            {
+                "type": "mcq",
+                "metadata": {"question_title": "Driving force"},
+                "body": "Which expression gives the driving force?",
+                "options": [
+                    {"body": "The Gibbs-energy change", "is_correct": True},
+                    {"body": "The temperature alone", "is_correct": False},
+                ],
+                "model_answer": (
+                    "Step 1: Write the governing relation\n"
+                    "Begin with the Gibbs-energy balance.\n"
+                    "[[EQ:driving_force]]\n"
+                    "Therefore, the first choice is correct. Physically, the sign determines spontaneity."
+                ),
+                "equations": [{
+                    "label": "driving_force",
+                    "expression": "DeltaG = DeltaH - T DeltaS",
+                    "location": "solution",
+                }],
+                "quality_checks": [
+                    {"criterion": "Correctness", "rating": 5, "comment": "Correct relation."},
+                    {"criterion": "Clarity", "rating": 4, "comment": "Clear wording."},
+                ],
+                "revision_options": ["Change the thermodynamic conditions."],
+            },
+            {
+                "type": "short_answer",
+                "metadata": {"question_title": "Interpretation"},
+                "body": "Interpret a negative driving force.",
+                "options": [],
+                "model_answer": "Begin with the sign convention. Therefore, the process is spontaneous.",
+                "equations": [],
+                "quality_checks": [
+                    {"criterion": "Correctness", "rating": 5, "comment": "Correct interpretation."},
+                ],
+                "revision_options": ["Ask for a physical example."],
+            },
+        ],
+    )
+
+    document = Document(BytesIO(content))
+    paragraphs = document.paragraphs
+    text = [paragraph.text for paragraph in paragraphs]
+    required = [
+        "1. Assessment Metadata",
+        "2. Student-Facing Questions",
+        "3. Fully Worked Solution",
+        "4. Assessment Quality Check",
+        "5. Suggested Revision Options",
+    ]
+    assert [text.index(heading) for heading in required] == sorted(
+        text.index(heading) for heading in required
+    )
+    assert text.index("Question 1 — Driving force") < text.index("Question 2 — Interpretation")
+    assert text.index("Question 2 — Interpretation") < text.index("Solution 1 — Driving force")
+    assert text.index("Solution 1 — Driving force") < text.index("Solution 2 — Interpretation")
+    assert text.index("Answer Key") < text.index("Solution 1 — Driving force")
+    assert "Questions" not in text and "Solutions" not in text
+    assert not any(value.lower().startswith("step 1") for value in text)
+    assert len([p for p in paragraphs if p.style.name == "Solution Equation"]) == 1
+
+    assert document.tables[0].cell(0, 0).text == "Field"
+    assert document.tables[0].cell(0, 1).text == "Entry"
+    metadata_rows = [tuple(cell.text for cell in row.cells) for row in document.tables[0].rows]
+    assert ("MSE202 Concept(s)", "Not provided") in metadata_rows
+    quality = next(table for table in document.tables if table.cell(0, 0).text == "Criterion")
+    assert len(quality.rows) == 4
+    assert [cell.text for cell in quality.rows[0].cells] == [
+        "Criterion", "Rating / 5", "Comment", "User Rating", "User Comment"
+    ]
+
+    with ZipFile(BytesIO(content)) as archive:
+        document_xml = archive.read("word/document.xml")
+    assert b"[[EQ:" not in document_xml
+    assert b"<m:oMath" in document_xml
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda questions: questions.clear(), "questions are required"),
+        (lambda questions: questions[0].pop("metadata"), "metadata is required"),
+        (lambda questions: questions[0].pop("model_answer"), "model answer is required"),
+        (lambda questions: questions[0].pop("quality_checks"), "quality-check rows are required"),
+        (lambda questions: questions[0].pop("revision_options"), "revision options are required"),
+        (
+            lambda questions: questions[0].update(model_answer="Use [[EQ:missing]]."),
+            "unresolved equation reference missing",
+        ),
+    ],
+)
+def test_docx_preflight_rejects_missing_required_content(mutation, message):
+    questions = [{
+        "metadata": {"question_title": "Complete fixture"},
+        "body": "Explain the result.",
+        "options": [],
+        "model_answer": "Begin with the definition. Therefore, the result follows.",
+        "equations": [],
+        "quality_checks": [{"criterion": "Correctness", "rating": 5, "comment": "Correct."}],
+        "revision_options": ["Change the input values."],
+    }]
+    mutation(questions)
+    with pytest.raises(DocxExportValidationError, match=message):
+        _build_assessment_docx(
+            run_id=50,
+            prompt_id=51,
+            condition_code="C010",
+            run_number=1,
+            course="MSE202",
+            topic="Validation",
+            questions=questions,
+        )

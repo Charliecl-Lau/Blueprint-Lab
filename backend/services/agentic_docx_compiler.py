@@ -18,6 +18,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 from backend.services.docx_content_catalog import DocxContentCatalog
+from backend.services.docx_exporter import validate_assessment_for_docx
 from backend.services.docx_layout_manifest import MANIFEST_VERSION, manifest_sha256
 from backend.services.docx_package_verifier import DocxPackageVerifier
 from backend.services.docx_tool_workspace import DocxWorkspace, WorkspaceError
@@ -38,7 +39,7 @@ class CompiledAgenticDocx:
 
 
 class AgenticDocxCompiler:
-    VERSION = "agentic-docx-compiler-v3-guided-derivation"
+    VERSION = "agentic-docx-compiler-v4-fixed-assessment-template"
 
     NAVY = "1F4E79"
     PALE_BLUE = "EAF2F8"
@@ -58,67 +59,89 @@ class AgenticDocxCompiler:
     def compile(self, workspace: DocxWorkspace, *, session_id: Optional[int] = None, iteration_number: int = 0) -> CompiledAgenticDocx:
         workspace.validate_structure(require_complete=True)
         state = workspace.to_dict()
+        assessment = workspace.catalog.clone_assessment()
+        validate_assessment_for_docx(assessment.get("questions") or [])
         document = Document()
         self._configure(document, state, workspace.catalog)
         placements = []
         mappings = []
         rendered_equations = set()
-        blocks = {item["id"]: item for item in state["blocks"]}
-        children = {}
-        for block in state["blocks"]:
-            children.setdefault(block.get("parent_id"), []).append(block)
-        for value in children.values():
-            value.sort(key=lambda item: (item.get("order", 0), item["id"]))
+        catalog = workspace.catalog
 
-        section_roles = {
-            block["id"]: block.get("role")
-            for block in state["blocks"]
-            if block.get("type") == "section"
-        }
-        for block in state["blocks"]:
-            parent_id = block.get("parent_id")
-            while parent_id:
-                if parent_id in section_roles:
-                    block["_section_role"] = section_roles[parent_id]
-                    break
-                parent = blocks.get(parent_id) or {}
-                parent_id = parent.get("parent_id")
-
-        question_blocks = [item for item in state["blocks"] if item.get("type") == "question"]
-        if question_blocks:
-            question_blocks.sort(key=lambda item: list(workspace.catalog.question_ids).index(str(item["question_id"])))
-            question_blocks[0]["_first_question"] = True
-
-        def render(block):
-            self._render_block(document, workspace.catalog, block, mappings, placements, rendered_equations)
-            for child in children.get(block["id"], []):
-                render(child)
-
-        roots = children.get(None, [])
-        role_roots = {block.get("role"): block for block in roots if block.get("type") == "section"}
-        rendered_roots = set()
-        for role in ("assessment_metadata", "questions"):
-            block = role_roots.get(role)
-            if block:
-                render(block); rendered_roots.add(block["id"])
-        solutions = role_roots.get("solutions")
-        answer_key = role_roots.get("answer_key")
-        if solutions:
-            self._render_block(document, workspace.catalog, solutions, mappings, placements, rendered_equations)
-            rendered_roots.add(solutions["id"])
-            if answer_key:
-                render(answer_key); rendered_roots.add(answer_key["id"])
-            for child in children.get(solutions["id"], []):
-                render(child)
-        elif answer_key:
-            render(answer_key); rendered_roots.add(answer_key["id"])
-        for role in ("quality_check", "revision_options"):
-            block = role_roots.get(role)
-            if block:
-                render(block); rendered_roots.add(block["id"])
-        for block in roots:
-            if block["id"] not in rendered_roots:
-                render(block)
+        # The application owns the assessment topology. Model-authored workspace
+        # blocks may influence approved design tokens, but never section order,
+        # headings, or assessed-content placement.
+        for role in (
+            "assessment_metadata",
+            "questions",
+            "solutions",
+            "quality_check",
+            "revision_options",
+        ):
+            self._render_block(
+                document,
+                catalog,
+                {
+                    "id": f"canonical-section-{role}",
+                    "type": "section",
+                    "role": role,
+                },
+                mappings,
+                placements,
+                rendered_equations,
+            )
+            if role == "questions":
+                for index, question_id in enumerate(catalog.question_ids):
+                    self._render_block(
+                        document,
+                        catalog,
+                        {
+                            "id": f"canonical-question-{question_id}",
+                            "type": "question",
+                            "question_id": question_id,
+                            "_first_question": index == 0,
+                        },
+                        mappings,
+                        placements,
+                        rendered_equations,
+                    )
+            elif role == "solutions":
+                if any(
+                    catalog.resolve_question(qid).get("options")
+                    for qid in catalog.question_ids
+                ):
+                    self._render_block(
+                        document,
+                        catalog,
+                        {"id": "canonical-answer-key", "type": "answer_key"},
+                        mappings,
+                        placements,
+                        rendered_equations,
+                    )
+                for question_id in catalog.question_ids:
+                    self._render_block(
+                        document,
+                        catalog,
+                        {
+                            "id": f"canonical-solution-{question_id}",
+                            "type": "solution",
+                            "question_id": question_id,
+                        },
+                        mappings,
+                        placements,
+                        rendered_equations,
+                    )
+            elif role == "quality_check":
+                self._render_block(
+                    document,
+                    catalog,
+                    {"id": "canonical-quality-check", "type": "quality_check"},
+                    mappings,
+                    placements,
+                    rendered_equations,
+                )
+            elif role == "revision_options":
+                self._render_revision_options(document, catalog, mappings)
 
         missing_equations = set(workspace.catalog.equation_ids) - rendered_equations
         if missing_equations:
@@ -148,7 +171,7 @@ class AgenticDocxCompiler:
             "validator_versions": package_report.tool_versions,
         }
         return CompiledAgenticDocx(
-            docx_bytes, docx_hash, workspace.catalog.clone_assessment(), manifest, manifest_sha256(manifest)
+            docx_bytes, docx_hash, assessment, manifest, manifest_sha256(manifest)
         )
 
     def _configure(self, document, state, catalog):
@@ -384,7 +407,10 @@ class AgenticDocxCompiler:
             ("Estimated time for a well-prepared student", values("estimated_time", "estimated_time_minutes")),
             ("Learning objective(s)", values("learning_objectives")),
         ]
-        rows = [(label, value) for label, value in rows if value]
+        rows = [
+            (label, value or "Not provided")
+            for label, value in rows
+        ]
         table = document.add_table(rows=1, cols=2)
         self._format_table(table, (1.72, 5.20))
         self._header(table.rows[0], ["Field", "Entry"])
@@ -443,6 +469,28 @@ class AgenticDocxCompiler:
             if option.get("is_correct") is True:
                 return chr(65 + index)
         return "See solution"
+
+    @staticmethod
+    def _render_revision_options(document, catalog, mappings):
+        for question_index, question_id in enumerate(catalog.question_ids, start=1):
+            question = catalog.resolve_question(question_id)
+            for revision_index, revision in enumerate(
+                question.get("revision_options") or [], start=1
+            ):
+                paragraph = document.add_paragraph(style="List Number")
+                paragraph.add_run(f"Q{question_index}: ").bold = True
+                paragraph.add_run(str(revision))
+                mappings.append({
+                    "block_id": (
+                        f"canonical-revision-{question_id}-{revision_index}"
+                    ),
+                    "type": "content",
+                    "question_id": str(question_id),
+                    "content_ref": (
+                        f"question.{question_id}.revision_option."
+                        f"{revision_index - 1}"
+                    ),
+                })
 
     def _render_question(self, document, catalog, qid, placements, rendered, *, first=False):
         question = catalog.resolve_question(qid)

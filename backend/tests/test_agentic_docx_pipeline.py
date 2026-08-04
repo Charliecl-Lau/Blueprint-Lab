@@ -9,6 +9,7 @@ from backend.services.docx_visual_renderer import PageImage, VisualFinding
 ASSESSMENT = {"questions": [{
     "type": "short_answer", "id": "1", "metadata": {"question_title": "Q"},
     "body": "Body", "options": [], "model_answer": "Answer", "equations": [],
+    "quality_checks": [{"criterion": "Correctness", "rating": 5, "comment": "Correct."}],
     "revision_options": ["A", "B"],
 }]}
 

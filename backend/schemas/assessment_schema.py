@@ -355,14 +355,14 @@ class ProviderQuestionResponse(BaseModel):
     options: List[ProviderMCQOptionSchema] = Field(default_factory=list)
     model_answer: Optional[str] = None
     equations: List[ProviderEquationSchema]
-    quality_checks: List[QualityCheckSchema] = Field(default_factory=list)
+    quality_checks: List[QualityCheckSchema] = Field(min_length=1)
     revision_options: List[str] = Field(min_length=2, max_length=3)
 
 
 class ProviderAssessmentGenerationResponse(BaseModel):
     model_config = {"extra": "forbid"}
 
-    questions: List[ProviderQuestionResponse]
+    questions: List[ProviderQuestionResponse] = Field(min_length=1)
 
 
 class AssessmentTraceability(BaseModel):

@@ -95,6 +95,11 @@ def complete_question(*, question_type, body, model_answer):
         "options": [],
         "model_answer": model_answer,
         "equations": [],
+        "quality_checks": [{
+            "criterion": "Technical correctness",
+            "rating": 5,
+            "comment": "The answer is technically correct.",
+        }],
         "revision_options": [
             "Add a numerical force balance.",
             "Ask students to state assumptions.",

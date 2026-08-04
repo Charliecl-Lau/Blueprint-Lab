@@ -22,6 +22,7 @@ def test_compiler_clones_assessment_and_emits_native_math_and_evidence():
             {"label": "e", "math": {"type": "symbol", "name": "E"}, "location": "question"},
             {"label": "a", "math": {"type": "symbol", "name": "A"}, "location": "solution"},
         ],
+        "quality_checks": [{"criterion": "Correctness", "rating": 5, "comment": "Correct."}],
         "revision_options": ["Change material", "Change temperature"],
     }]}
     catalog = DocxContentCatalog.from_assessment(source)
@@ -135,3 +136,64 @@ def test_compiler_applies_reference_question_solution_and_table_style():
     assert [len(table.columns) for table in document.tables] == [2, 2, 5]
     assert document.tables[0].cell(0, 0)._tc.tcPr.find(qn("w:shd")).get(qn("w:fill")) == "1F4E79"
     assert document.tables[2].cell(0, 0).text == "Criterion"
+
+
+def test_compiler_ignores_model_architecture_and_uses_fixed_template():
+    source = {"questions": [
+        {
+            "type": "short_answer",
+            "id": "2",
+            "metadata": {"question_title": "Second"},
+            "body": "Second body.",
+            "options": [],
+            "model_answer": "Second solution.",
+            "equations": [],
+            "quality_checks": [{"criterion": "Clarity", "rating": 5, "comment": "Clear."}],
+            "revision_options": ["Revise second."],
+        },
+        {
+            "type": "short_answer",
+            "id": "1",
+            "metadata": {"question_title": "First"},
+            "body": "First body.",
+            "options": [],
+            "model_answer": "First solution.",
+            "equations": [],
+            "quality_checks": [{"criterion": "Clarity", "rating": 5, "comment": "Clear."}],
+            "revision_options": ["Revise first."],
+        },
+    ]}
+    catalog = DocxContentCatalog.from_assessment(source)
+    workspace = DocxWorkspace.create(catalog)
+    operations = [
+        ("create_document", {}),
+        ("add_heading", {"block_id": "generic-questions", "literal_text": "Questions"}),
+        ("add_section", {"block_id": "solutions", "role": "solutions"}),
+        ("add_solution", {"block_id": "s1", "parent_id": "solutions", "question_id": "1"}),
+        ("add_solution", {"block_id": "s2", "parent_id": "solutions", "question_id": "2"}),
+        ("add_section", {"block_id": "questions", "role": "questions"}),
+        ("add_question", {"block_id": "q1", "parent_id": "questions", "question_id": "1"}),
+        ("add_question", {"block_id": "q2", "parent_id": "questions", "question_id": "2"}),
+        ("add_heading", {"block_id": "generic-solutions", "literal_text": "Solutions"}),
+        ("finalize_document", {}),
+    ]
+    workspace.apply_batch([
+        _call(index, tool, **arguments)
+        for index, (tool, arguments) in enumerate(operations)
+    ])
+
+    result = AgenticDocxCompiler().compile(workspace)
+    text = [p.text for p in Document(io.BytesIO(result.docx_bytes)).paragraphs]
+    sections = [
+        "1. Assessment Metadata",
+        "2. Student-Facing Questions",
+        "3. Fully Worked Solution",
+        "4. Assessment Quality Check",
+        "5. Suggested Revision Options",
+    ]
+    assert [text.index(section) for section in sections] == sorted(
+        text.index(section) for section in sections
+    )
+    assert text.index("Question 1 — Second") < text.index("Question 2 — First")
+    assert text.index("Question 2 — First") < text.index("Solution 1 — Second")
+    assert "Questions" not in text and "Solutions" not in text
