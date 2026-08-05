@@ -178,16 +178,25 @@ The deprecated `/generations/{id}`, `/generations/{id}/regenerate`, and generati
 
 ## Verification
 
-SQLite unit and workflow tests run by default. Set `TEST_POSTGRES_DATABASE_URL` to enable PostgreSQL migration and constraint integration tests; otherwise those tests report an explicit skip reason.
+The routine backend suite contains 497 SQLite unit and workflow tests. PostgreSQL
+migration checks are a separate nine-test suite because they reset the test
+database schema and require `TEST_POSTGRES_DATABASE_URL`.
 
 ```powershell
-python -m pytest backend/tests -v
+python -m pytest backend/tests -m "not integration" -v
 python -m pytest backend/tests/test_end_to_end_run_lifecycle.py -v
 python -m alembic check
 cd frontend
 npm test -- --run
 npm run lint
 npm run build
+```
+
+Run the PostgreSQL migration suite explicitly against a disposable test database:
+
+```powershell
+$env:TEST_POSTGRES_DATABASE_URL = "postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_lab_test"
+python -m pytest backend/tests/integration -m integration -v
 ```
 
 To verify a fresh PostgreSQL database, point `DATABASE_URL` at an empty test database and run `python -m alembic upgrade head` before the suite.

@@ -10,6 +10,52 @@ from backend.schemas.assessment_schema import (
 from backend.services.reproducibility import canonical_json, sha256_text
 
 
+def _legacy_assessment_metadata(run, questions: list[dict]) -> dict:
+    experiment = run.experiment
+    question_metadata = [item.get("metadata") or {} for item in questions]
+
+    def unique_values(key: str) -> list[str]:
+        values = []
+        for item in question_metadata:
+            candidate = item.get(key)
+            candidates = candidate if isinstance(candidate, list) else [candidate]
+            for value in candidates:
+                if value is not None and value not in values:
+                    values.append(value)
+        return values
+
+    factors = []
+    for key, label in (
+        ("concept_bridge_enabled", "Concept Bridge"),
+        ("few_shot_enabled", "Few-shot Examples"),
+        ("reference_content_enabled", "Reference Content"),
+        ("reasoning_guidance_enabled", "Reasoning Guidance"),
+    ):
+        if getattr(run.condition, key, False):
+            factors.append(label)
+    bridges = unique_values("concept_map_bridge")
+    contexts = unique_values("materials_science_context")
+    return {
+        "question_title": f"{experiment.topic} assessment",
+        "course": experiment.course,
+        "topic": experiment.topic,
+        "question_type": experiment.assessment_type,
+        "number_of_questions": len(questions),
+        "difficulty_level": experiment.difficulty,
+        "cognitive_demand": experiment.cognitive_demand,
+        "intended_assessment_setting": "Instructor question bank",
+        "mse202_concepts": unique_values("mse202_concepts") or [experiment.topic],
+        "mse302_concepts": unique_values("mse302_concepts") or [experiment.topic],
+        "concept_map_bridge": "; ".join(bridges) if bridges else None,
+        "materials_science_context": "; ".join(contexts) or experiment.topic,
+        "numerical_computation": "Not specified in legacy assessment data",
+        "estimated_time": f"{experiment.estimated_time_minutes} minutes",
+        "learning_objectives": list(experiment.learning_objectives),
+        "prompt_design_factors": factors,
+        "additional_instructions": experiment.additional_instruction,
+    }
+
+
 def provider_payload_from_stored(payload: dict) -> dict:
     candidate = deepcopy(payload)
     candidate.pop("traceability", None)
@@ -53,8 +99,17 @@ def enrich_assessment_traceability(
             "assessment_version": 1,
             "assessment_schema_version": assessment.schema_version,
         },
+        "assessment_metadata": validated["assessment_metadata"] or _legacy_assessment_metadata(
+            run, validated["questions"]
+        ),
         "questions": validated["questions"],
     }
+    metadata = enriched["assessment_metadata"]
+    metadata["prompt_template_id"] = enriched["traceability"][
+        "prompt_template_version"
+    ]
+    metadata["actual_prompt_id"] = enriched["traceability"]["prompt_id"]
+    metadata["output_id"] = assessment.id
     for ordinal, question_payload in enumerate(enriched["questions"]):
         question = questions_by_ordinal[ordinal]
         question_payload["traceability"] = {
@@ -62,6 +117,10 @@ def enrich_assessment_traceability(
             "ordinal": question.ordinal,
             "assessment_version": question.assessment_version,
         }
+    metadata["final_question_id"] = [
+        question_payload["traceability"]["assessment_question_id"]
+        for question_payload in enriched["questions"]
+    ]
 
     stored = StoredAssessmentPayload.model_validate(enriched).model_dump()
     assessment.parsed_json = stored

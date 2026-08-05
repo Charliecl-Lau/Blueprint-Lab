@@ -102,12 +102,37 @@ export interface AssessmentOutput {
   question_ids: number[]
   parsed_json: {
     traceability?: AssessmentTraceability
+    assessment_metadata?: AssessmentMetadata
     questions: Question[]
   } | null
   output_hash: string
   schema_version: string
   raw_response_text?: string
   validation?: AssessmentValidation
+}
+
+export interface AssessmentMetadata {
+  prompt_template_id?: string | null
+  actual_prompt_id?: string | number | null
+  output_id?: string | number | null
+  final_question_id?: string | number | Array<string | number> | null
+  question_title: string
+  course: string
+  topic: string
+  question_type: string
+  number_of_questions: number
+  difficulty_level: string
+  cognitive_demand: string
+  intended_assessment_setting: string
+  mse202_concepts: string[]
+  mse302_concepts: string[]
+  concept_map_bridge: string | null
+  materials_science_context: string
+  numerical_computation: string
+  estimated_time: string
+  learning_objectives: string[]
+  prompt_design_factors: string[]
+  additional_instructions?: string | null
 }
 
 export interface RewriteState {

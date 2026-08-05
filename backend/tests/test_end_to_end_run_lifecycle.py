@@ -13,6 +13,7 @@ from backend.models import (
 )
 from backend.services.llm_client import LLMResult, TokenUsage
 from backend.tests.test_evaluation_worker import _evaluation_json
+from backend.tests.test_worker import complete_assessment_metadata
 
 
 def valid_payload():
@@ -22,7 +23,7 @@ def valid_payload():
         "learning_objectives": ["Solve equilibrium problems."],
         "assessment_type": "mixed",
         "difficulty": "introductory",
-        "number_of_questions": 2,
+        "number_of_questions": 1,
         "estimated_time_minutes": 30,
         "prompt_structure": "openai",
         "factors": {
@@ -49,6 +50,7 @@ def create_valid_experiment(client, key):
 
 def assessment_response():
     return json.dumps({
+        "assessment_metadata": complete_assessment_metadata(),
         "questions": [{
             "type": "short_answer",
             "metadata": {

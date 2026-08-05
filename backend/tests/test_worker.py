@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -32,7 +33,7 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
 <task>Generate questions</task>
 <constraints>Use supplied facts</constraints>
 <verification>Check correctness</verification>
-<output_format>Return a JSON object with a top-level "questions" array</output_format>
+<output_format>Return a JSON object with a top-level "questions" array and "assessment_metadata" object</output_format>
 <reasoning_guidance>Use concise rationale</reasoning_guidance>"""
 
 
@@ -43,6 +44,17 @@ def isolate_assessment_worker_from_live_document_backends():
 
 
 def result(raw_text, input_tokens, output_tokens, total_tokens, finish="STOP"):
+    try:
+        payload = json.loads(raw_text)
+    except (TypeError, json.JSONDecodeError):
+        pass
+    else:
+        if isinstance(payload, dict) and "questions" in payload:
+            metadata = payload.setdefault(
+                "assessment_metadata", complete_assessment_metadata()
+            )
+            metadata["number_of_questions"] = len(payload["questions"])
+            raw_text = json.dumps(payload)
     return LLMResult(
         raw_text=raw_text,
         provider_request_id=f"response-{total_tokens}",
@@ -58,6 +70,28 @@ def result(raw_text, input_tokens, output_tokens, total_tokens, finish="STOP"):
             {},
         ),
     )
+
+
+def complete_assessment_metadata():
+    return {
+        "question_title": "Equilibrium assessment",
+        "course": "ENGR 101",
+        "topic": "Statics",
+        "question_type": "mixed",
+        "number_of_questions": 1,
+        "difficulty_level": "introductory",
+        "cognitive_demand": "Evaluate/Create",
+        "intended_assessment_setting": "Instructor question bank",
+        "mse202_concepts": ["Static equilibrium"],
+        "mse302_concepts": ["Mechanical stability"],
+        "concept_map_bridge": "Connects force balance to mechanical stability.",
+        "materials_science_context": "Applies equilibrium to stable material systems.",
+        "numerical_computation": "No numerical computation required",
+        "estimated_time": "10 minutes",
+        "learning_objectives": ["Solve equilibrium problems."],
+        "prompt_design_factors": [],
+        "additional_instructions": None,
+    }
 
 
 def run_pipeline_synchronously(run, test_db, llm, attachments=None):
@@ -122,7 +156,7 @@ def generation_fixture(test_db):
         learning_objectives=["Solve equilibrium problems."],
         assessment_type="mixed",
         difficulty="introductory",
-        number_of_questions=2,
+        number_of_questions=1,
         cognitive_demand="evaluate_create",
         additional_instruction="Use one laboratory scenario.",
     )
@@ -175,6 +209,7 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
         test_db.close = MagicMock()
         llm = MagicMock()
         raw_text = __import__("json").dumps({
+            "assessment_metadata": complete_assessment_metadata(),
             "questions": [
                 complete_question(
                     question_type="long_answer",
@@ -355,6 +390,7 @@ def test_anthropic_prompt_provider_failure_is_stage_specific(
 
 def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test_db):
     valid_response = __import__("json").dumps({
+        "assessment_metadata": complete_assessment_metadata(),
         "questions": [complete_question(
             question_type="short_answer",
             body="State the equilibrium condition.",
@@ -500,8 +536,12 @@ def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
 
     test_db.refresh(generation_fixture)
     assert generation_fixture.status == "complete", generation_fixture.error_message
-    assert generation_fixture.assessment.raw_response_text == repaired_raw
-    assert generation_fixture.assessment.output_hash == sha256_text(repaired_raw)
+    saved_raw = json.loads(generation_fixture.assessment.raw_response_text)
+    assert saved_raw["questions"] == json.loads(repaired_raw)["questions"]
+    assert saved_raw["assessment_metadata"] == complete_assessment_metadata()
+    assert generation_fixture.assessment.output_hash == sha256_text(
+        generation_fixture.assessment.raw_response_text
+    )
     assert generation_fixture.assessment.parsed_json["questions"][0]["body"] == (
         repaired_question["body"]
     )
@@ -520,7 +560,8 @@ def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
             generation_fixture.prompt.actual_prompt
         )
     )
-    assert rejected_raw in repair_call.kwargs["user_message"]
+    assert rejected_question["body"] in repair_call.kwargs["user_message"]
+    assert '"assessment_metadata"' in repair_call.kwargs["user_message"]
     assert expected_error in repair_call.kwargs["user_message"]
     assert repair_call.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
     usage_stages = [
@@ -612,7 +653,9 @@ def test_generation_pipeline_repairs_cross_location_equation_labels(
 
     test_db.refresh(generation_fixture)
     assert generation_fixture.status == "complete", generation_fixture.error_message
-    assert generation_fixture.assessment.raw_response_text == repaired_raw
+    saved_raw = json.loads(generation_fixture.assessment.raw_response_text)
+    assert saved_raw["questions"] == json.loads(repaired_raw)["questions"]
+    assert saved_raw["assessment_metadata"] == complete_assessment_metadata()
     assert generation_fixture.document_artifact.content == b"PK-generation-docx"
     assert llm.generate.call_count == 2
     repair_call = llm.generate.call_args_list[1]
@@ -681,13 +724,16 @@ def test_generation_pipeline_repairs_a_second_validation_failure(
 
     test_db.refresh(generation_fixture)
     assert generation_fixture.status == "complete", generation_fixture.error_message
-    assert generation_fixture.assessment.raw_response_text == valid_raw
+    saved_raw = json.loads(generation_fixture.assessment.raw_response_text)
+    assert saved_raw["questions"] == json.loads(valid_raw)["questions"]
+    assert saved_raw["assessment_metadata"] == complete_assessment_metadata()
     assert generation_fixture.assessment.parsed_json["questions"][0]["body"] == (
         valid_question["body"]
     )
     assert llm.generate.call_count == 3
     second_repair_call = llm.generate.call_args_list[2]
-    assert first_repair_raw in second_repair_call.kwargs["user_message"]
+    assert first_repair_question["body"] in second_repair_call.kwargs["user_message"]
+    assert '"assessment_metadata"' in second_repair_call.kwargs["user_message"]
     assert (
         "body: mathematical expression must use an equation reference"
         in second_repair_call.kwargs["user_message"]
@@ -770,10 +816,13 @@ def test_generation_pipeline_repairs_a_third_validation_failure(
 
     test_db.refresh(generation_fixture)
     assert generation_fixture.status == "complete", generation_fixture.error_message
-    assert generation_fixture.assessment.raw_response_text == valid_raw
+    saved_raw = json.loads(generation_fixture.assessment.raw_response_text)
+    assert saved_raw["questions"] == json.loads(valid_raw)["questions"]
+    assert saved_raw["assessment_metadata"] == complete_assessment_metadata()
     assert llm.generate.call_count == 4
     third_repair_call = llm.generate.call_args_list[3]
-    assert variable_definition_raw in third_repair_call.kwargs["user_message"]
+    assert variable_definition_question["model_answer"] in third_repair_call.kwargs["user_message"]
+    assert '"assessment_metadata"' in third_repair_call.kwargs["user_message"]
     assert "model_answer: mathematical expression" in (
         third_repair_call.kwargs["user_message"]
     )
@@ -794,6 +843,8 @@ def test_generation_pipeline_stops_after_three_invalid_repairs(
     generation_fixture,
     test_db,
 ):
+    generation_fixture.experiment.number_of_questions = 2
+    test_db.commit()
     question = complete_question(
         question_type="short_answer",
         body="The gas constant is R = 8.314 J/(mol K).",

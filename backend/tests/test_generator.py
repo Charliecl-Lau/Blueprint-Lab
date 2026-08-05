@@ -7,6 +7,25 @@ from backend.services.generator import generate_questions
 
 def complete_flat_payload(expression: str) -> dict:
     return {
+        "assessment_metadata": {
+            "question_title": "Equation rendering assessment",
+            "course": "MSE302 Thermodynamics II",
+            "topic": "Composition notation",
+            "question_type": "short_answer",
+            "number_of_questions": 1,
+            "difficulty_level": "introductory",
+            "cognitive_demand": "Apply/Analyze",
+            "intended_assessment_setting": "Instructor question bank",
+            "mse202_concepts": ["composition"],
+            "mse302_concepts": ["thermodynamics"],
+            "concept_map_bridge": "Relate composition notation to thermodynamics.",
+            "materials_science_context": "Binary alloy composition.",
+            "numerical_computation": "No numerical computation required",
+            "estimated_time": "10 minutes",
+            "learning_objectives": ["Interpret a materials-science equation."],
+            "prompt_design_factors": [],
+            "additional_instructions": None,
+        },
         "questions": [{
             "type": "short_answer",
             "metadata": {
@@ -92,3 +111,11 @@ def test_generate_questions_preserves_signed_superscript():
     assert superscript.items[0].value == "-"
     assert superscript.items[1].type == "number"
     assert superscript.items[1].value == "1"
+
+
+def test_generate_questions_rejects_requested_count_mismatch():
+    with pytest.raises(ValueError, match="expected 2 questions, received 1"):
+        generate_questions(
+            json.dumps(complete_flat_payload("x_A")),
+            expected_questions=2,
+        )

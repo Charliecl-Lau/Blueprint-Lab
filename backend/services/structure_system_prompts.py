@@ -1,7 +1,7 @@
 from backend.schemas.experiment_schema import PromptStructure
 
 
-STRUCTURE_PROMPT_VERSION = "10"
+STRUCTURE_PROMPT_VERSION = "12"
 
 OPENAI_STRUCTURE_SYSTEM_PROMPT = """You are Blueprint Lab, a prompt compiler for educational assessment generation.
 
@@ -87,7 +87,7 @@ Equation Notation Requirement
 
 The generated prompt must require the final DOCX to use editable native Microsoft Word OMML equations. For every equation or mathematical expression in a question body, answer option, or model answer, it must require one corresponding entry in that question's equations[] array and replace the original expression at its exact position with [[EQ:label]].
 
-Each equations[] entry must contain exactly label, expression, and location. Label must be a unique ASCII identifier that exactly matches its [[EQ:label]] placeholder. The generated prompt must forbid repeating the plain expression beside its placeholder. It must require expression to use Microsoft Word linear equation syntax with Unicode math characters and plain operators: / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals. Location must be question or solution. It must state that a question containing mathematical content with equations = [] is invalid.
+Each equations[] entry must contain exactly label, expression, and location. Label must be a unique ASCII identifier that exactly matches its [[EQ:label]] placeholder and appears in exactly one reference occurrence. Repeated displays of the same expression must use distinct entries and labels. The generated prompt must forbid repeating the plain expression beside its placeholder. It must require expression to use Microsoft Word linear equation syntax with Unicode math characters and plain operators: / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals. Location must be question or solution. It must state that a question containing mathematical content with equations = [] is invalid.
 
 For a multi-component variable family, the generated prompt must require explicit lowercase component subscripts such as x_a, x_b, y_a, and y_b. It must forbid ambiguous bare x or y where a component identity is needed and require every such identifier in body, options, and model_answer to use a matching equation reference.
 
@@ -95,7 +95,7 @@ The generated prompt must explicitly forbid returning equations as images, scree
 
 Assessment Metadata Requirement
 
-The generated prompt must instruct the assessment model to populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements. Traceability IDs that were not supplied must be set to "Not Assigned" rather than invented.
+The generated prompt must require one top-level assessment_metadata object for the complete assessment, distinct from question metadata. It must contain question_title, course, topic, question_type, number_of_questions, difficulty_level, cognitive_demand, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, numerical_computation, estimated_time, learning_objectives, prompt_design_factors, and additional_instructions. It must not invent traceability IDs; the application adds prompt_template_id, actual_prompt_id, output_id, and final_question_id after generation. Each question metadata object is question-level and must not be substituted for assessment_metadata.
 
 JSON Output Specification
 
@@ -104,6 +104,7 @@ The generated prompt must instruct the assessment model to return exactly one va
 The JSON object must contain
 
 {
+  "assessment_metadata": {...},
   "questions": [
       ...
   ]
@@ -284,11 +285,11 @@ Never invent missing information.
 
 Within <constraints>, the generated prompt must also instruct the assessment-generation model to:
 
-require the final DOCX to use editable native Microsoft Word OMML equations; for every equation or mathematical expression in a question body, answer option, or model answer, add one corresponding equations[] entry containing exactly label, expression, and location; use a unique ASCII identifier for label and replace the expression at its exact position with [[EQ:label]]; never repeat the plain expression beside its placeholder; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; set location to question or solution; state that mathematical content with equations = [] is invalid; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
+require the final DOCX to use editable native Microsoft Word OMML equations; for every equation or mathematical expression in a question body, answer option, or model answer, add one corresponding equations[] entry containing exactly label, expression, and location; use a unique ASCII identifier for label, replace the expression at its exact position with [[EQ:label]], and require each label to appear in exactly one reference occurrence; use distinct entries and labels when the same expression is displayed more than once; never repeat the plain expression beside its placeholder; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; set location to question or solution; state that mathematical content with equations = [] is invalid; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
 
 use explicit lowercase component variables such as x_a, x_b, y_a, and y_b rather than ambiguous bare x or y when a component identity is needed; require every such identifier in body, options, and model_answer to use a matching equation reference
 
-populate a metadata object for every question containing exactly these fields: prompt_template_id, actual_prompt_id, output_id, final_question_id, question_title, question_type, difficulty_level, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, estimated_time, learning_objectives, and id_requirements, using "Not Assigned" for any traceability ID that was not supplied rather than inventing one
+require one top-level assessment_metadata object for the complete assessment, distinct from question metadata, containing question_title, course, topic, question_type, number_of_questions, difficulty_level, cognitive_demand, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, numerical_computation, estimated_time, learning_objectives, prompt_design_factors, and additional_instructions; do not invent traceability IDs because the application adds prompt_template_id, actual_prompt_id, output_id, and final_question_id after generation; keep each question metadata object question-specific and never substitute questions[0].metadata for assessment_metadata
 JSON Output Requirements
 
 The generated prompt must instruct the assessment-generation model to return exactly one valid JSON object.
@@ -296,6 +297,7 @@ The generated prompt must instruct the assessment-generation model to return exa
 The JSON object must contain a top-level:
 
 {
+  "assessment_metadata": {...},
   "questions": [...]
 }
 

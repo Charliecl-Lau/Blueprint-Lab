@@ -6,8 +6,8 @@ from typing import Optional, Sequence
 from backend.schemas.experiment_schema import PromptFactors, PromptStructure
 
 
-ACTUAL_PROMPT_GENERATOR_VERSION = "13"
-OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "6"
+ACTUAL_PROMPT_GENERATOR_VERSION = "15"
+OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION = "8"
 OPENAI_TEMPLATE_PROVENANCE = "local-template:docs/actual_prompt_template.md"
 _OPENAI_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[2] / "docs" / "actual_prompt_template.md"
@@ -36,10 +36,15 @@ EQUATION_GENERATION_INSTRUCTION = (
     "from appearing in both question and solution content. If the same mathematical "
     "expression is needed in both, create two equation entries with distinct labels "
     "and matching locations, then use the corresponding label in each place. "
+    "Each equation label MUST appear in exactly one [[EQ:label]] reference. If the "
+    "same expression is displayed more than once, create a distinct equation entry "
+    "and unique label for every occurrence. "
     "For multi-component variable families, use explicit lowercase component "
     "subscripts such as x_a, x_b, y_a, and y_b; never leave a bare x or y "
     "when a component identity is required. Every such identifier must be "
     "represented by an equation reference in body, options, and model_answer. "
+    "Each equation label must appear in exactly one [[EQ:label]] reference. Split "
+    "every repeated display occurrence into a distinct equation entry and label. "
     "A question containing mathematical "
     "content with equations = [] is invalid. Do not return equations as images, screenshots, "
     "raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics."
@@ -143,6 +148,8 @@ _OPENAI_PLACEHOLDERS = (
     "concept_bridge_metadata_value",
     "materials_science_context",
     "prompt_design_factors",
+    "prompt_design_factor_labels_json",
+    "additional_instructions_json",
     "additional_instruction_block",
 )
 _ANTHROPIC_SECTIONS = (
@@ -291,6 +298,16 @@ def render_openai_actual_prompt(
         "prompt_design_factors": _format_prompt_design_factors(
             factors, factor_inputs, reference_pdf_filenames
         ),
+        "prompt_design_factor_labels_json": json.dumps(
+            [label for name, label in _FACTOR_DEFINITIONS if getattr(factors, name)],
+            ensure_ascii=False,
+        ),
+        "additional_instructions_json": json.dumps(
+            additional_instruction.strip()
+            if additional_instruction and additional_instruction.strip()
+            else None,
+            ensure_ascii=False,
+        ),
         "additional_instruction_block": (
             "Additional Instruction:\n" + additional_instruction.strip()
             if additional_instruction and additional_instruction.strip()
@@ -377,6 +394,10 @@ def validate_actual_prompt(
     if '"questions"' not in raw_text:
         raise ActualPromptValidationError(
             'Actual Prompt must require a top-level "questions" array'
+        )
+    if '"assessment_metadata"' not in raw_text:
+        raise ActualPromptValidationError(
+            'Actual Prompt must require top-level "assessment_metadata"'
         )
     if prompt_structure == "anthropic":
         _validate_anthropic(raw_text)

@@ -5,7 +5,7 @@ from backend.models.run import Assessment, Prompt, Run
 from backend.services.assessment_evaluation import persist_assessment_questions
 from backend.services.assessment_traceability import enrich_assessment_traceability
 from backend.services.reproducibility import canonical_json, sha256_text
-from backend.tests.test_worker import complete_question
+from backend.tests.test_worker import complete_assessment_metadata, complete_question
 
 
 def test_enrichment_uses_real_ids_and_preserves_raw_provider_evidence(test_db):
@@ -38,6 +38,7 @@ def test_enrichment_uses_real_ids_and_preserves_raw_provider_evidence(test_db):
         actual_prompt_generator_version="11",
     )
     provider_payload = {
+        "assessment_metadata": complete_assessment_metadata(),
         "questions": [
             complete_question(
                 question_type="short_answer",
@@ -75,5 +76,9 @@ def test_enrichment_uses_real_ids_and_preserves_raw_provider_evidence(test_db):
         "ordinal": 0,
         "assessment_version": 1,
     }
+    assert enriched["assessment_metadata"]["prompt_template_id"] == "template-4"
+    assert enriched["assessment_metadata"]["actual_prompt_id"] == run.prompt.id
+    assert enriched["assessment_metadata"]["output_id"] == run.assessment.id
+    assert enriched["assessment_metadata"]["final_question_id"] == [questions[0].id]
     assert run.assessment.raw_response_text == raw
     assert run.assessment.parsed_json_hash == sha256_text(canonical_json(enriched))

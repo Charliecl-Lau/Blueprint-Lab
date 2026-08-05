@@ -158,23 +158,37 @@ class LunaDirectDocumentGenerator:
             return DocumentGenerationResult(
                 False, False, ("source_assessment_missing",)
             )
-        progress("docx_authoring")
-        try:
-            provider = self.provider or LunaDirectDocxProvider()
-            generated = provider.generate(source.parsed_json, run_id=run.id)
-        except LunaDocxGenerationError as exc:
-            return DocumentGenerationResult(False, False, (exc.code,))
-        record_model_call(
-            db,
-            run=run,
-            call_id=str(uuid.uuid4()),
-            stage="docx_direct_generation",
-            attempt=1,
-            result=generated.provider_result,
-        )
-        progress("docx_validating")
-        report = self.verifier.verify(generated.content, source.parsed_json)
-        if not report.valid:
+        provider = self.provider or LunaDirectDocxProvider()
+        feedback: tuple[str, ...] = ()
+        report = None
+        generated = None
+        for attempt in range(1, 3):
+            progress("docx_authoring" if attempt == 1 else "docx_repairing")
+            try:
+                generated = provider.generate(
+                    source.parsed_json,
+                    run_id=run.id,
+                    verification_feedback=feedback,
+                )
+            except LunaDocxGenerationError as exc:
+                return DocumentGenerationResult(False, False, (exc.code,))
+            record_model_call(
+                db,
+                run=run,
+                call_id=str(uuid.uuid4()),
+                stage="docx_direct_generation",
+                attempt=attempt,
+                result=generated.provider_result,
+            )
+            progress("docx_validating")
+            report = self.verifier.verify(generated.content, source.parsed_json)
+            if report.valid:
+                break
+            feedback = tuple(
+                f"{issue.code}: {issue.evidence or 'no additional evidence'}"
+                for issue in report.issues
+            )
+        if report is None or generated is None or not report.valid:
             return DocumentGenerationResult(
                 False,
                 False,

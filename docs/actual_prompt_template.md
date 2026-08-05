@@ -72,6 +72,8 @@ Avoid copying or closely paraphrasing existing textbook, homework, or examinatio
 
 Make all assumptions explicit whenever necessary.
 
+Return one assessment_metadata object describing the complete assessment, not an individual question. Populate it from the supplied prompt parameters and the generated assessment. Keep question-specific titles in each question's metadata. Do not copy questions[0].metadata into assessment_metadata. State numerical_computation accurately based on whether the generated questions require numerical work. Do not invent traceability IDs; prompt_template_id, actual_prompt_id, output_id, and final_question_id are added by the application after generation.
+
 The student-facing question must be self-contained and include all numerical data, scenario information, and assumptions needed to solve the problem. Do not provide governing thermodynamic identities, equilibrium criteria, or other knowledge that students are expected to recall unless explicitly requested.
 
 Write the instructor solution as a continuous guided mathematical derivation, not as isolated numbered or titled steps. Do not use labels such as "Step 1", "Step 2", or "Step 3". Begin with the correct answer or final objective. Each paragraph must perform exactly one logical operation: introduce the governing principle or equation, define variables, state assumptions, substitute known values, differentiate, rearrange, simplify, calculate, check, or interpret. Separate major operations with a blank line. Place every major equation, rearrangement, derivative, substitution, intermediate calculation, and final calculation on its own line using one complete [[EQ:label]] reference. Use short natural transition phrases such as "The governing relation is...", "For this system...", "At constant temperature and pressure...", "Differentiating...", "Using the quotient rule...", "Substituting...", "Therefore...", "Hence...", "Finally...", "Check by reconstruction...", and "Physically..." so each paragraph leads naturally into the displayed equation or the next operation. Define every variable before using it, state all assumptions explicitly, and retain units throughout substitutions and calculations. End with the final answer and units, a brief physical interpretation, and, when applicable, a connection to the relevant MSE202 and MSE302 concepts. For multiple-choice questions, add a separate line titled "Why the other choices are incorrect" after the derivation, followed by one separate line for every distractor, beginning with its option letter and explaining the specific misconception, incorrect assumption, sign error, unit error, or algebraic error. The result should read like an instructor-written worked solution in a university thermodynamics textbook. {concept_bridge_solution_instruction}
@@ -84,11 +86,32 @@ When a problem has multiple components or members of one variable family, use ex
 
 Set location to question when the label appears in the question body or an answer option, and set location to solution when it appears in the model answer. A label is prohibited from appearing in both question and solution content. If the same mathematical expression is needed in both, create two equation entries with distinct labels and matching locations, then use the corresponding label in each place.
 
+Every equation label must appear in exactly one [[EQ:label]] reference. If the same expression must be displayed more than once, create a distinct equation entry and unique label for each occurrence.
+
 Output Format
 
 Return exactly one valid JSON object with the following structure.
 
 {
+ "assessment_metadata": {
+   "question_title": "A concise title for the complete assessment",
+   "course": "{course}",
+   "topic": "{topic}",
+   "question_type": "{question_type}",
+   "number_of_questions": {number_of_questions},
+   "difficulty_level": "{difficulty}",
+   "cognitive_demand": "{cognitive_demand}",
+   "intended_assessment_setting": "Instructor question bank, quiz, or examination for {course}",
+   "mse202_concepts": ["{mse202_concepts}"],
+   "mse302_concepts": ["{mse302_concepts}"],
+   "concept_map_bridge": {concept_bridge_metadata_value},
+   "materials_science_context": "{materials_science_context}",
+   "numerical_computation": "An accurate assessment-level description of the required numerical computation",
+   "estimated_time": "{estimated_time}",
+   "learning_objectives": {learning_objectives_json},
+   "prompt_design_factors": {prompt_design_factor_labels_json},
+   "additional_instructions": {additional_instructions_json}
+ },
  "questions": [
    {
      "type": "{question_type}",
@@ -140,4 +163,4 @@ Return only the JSON object. Do not include Markdown, code fences, explanations,
 
 Stop Rules
 
-Before returning the final response, verify that the output is valid JSON, contains exactly the requested number of questions, includes all required metadata fields, satisfies the supplied learning objective and prompt parameters, defines all variables before use, and contains no unresolved template variables, explanatory placeholder values, duplicated sections, or explanatory text outside the JSON object. [[EQ:label]] references are required equation references and must remain in the returned JSON.
+Before returning the final response, verify that the output is valid JSON, contains exactly one assessment_metadata object and the requested number of questions, includes all required assessment-level and question-level metadata fields, satisfies the supplied learning objective and prompt parameters, defines all variables before use, and contains no unresolved template variables, explanatory placeholder values, duplicated sections, or explanatory text outside the JSON object. [[EQ:label]] references are required equation references and must remain in the returned JSON.

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from backend.schemas.assessment_schema import (
     AssessmentGenerationResponse,
     ProviderAssessmentGenerationResponse,
@@ -18,10 +20,18 @@ def _canonical_payload(
     return payload
 
 
-def generate_questions(raw_text: str) -> AssessmentGenerationResponse:
+def generate_questions(
+    raw_text: str,
+    *,
+    expected_questions: Optional[int] = None,
+) -> AssessmentGenerationResponse:
     provider = ProviderAssessmentGenerationResponse.model_validate(
         _parse_json(raw_text)
     )
+    if expected_questions is not None and len(provider.questions) != expected_questions:
+        raise ValueError(
+            f"expected {expected_questions} questions, received {len(provider.questions)}"
+        )
     return AssessmentGenerationResponse.model_validate(
         _canonical_payload(provider)
     )

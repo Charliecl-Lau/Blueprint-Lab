@@ -53,12 +53,12 @@ def source_run(db):
     return run, deepcopy(manifest)
 
 
-def generated_result(content=b"PK-direct-docx"):
+def generated_result(content=b"PK-direct-docx", request_id="resp-direct"):
     return LunaDocxResult(
         content=content,
         provider_result=LLMResult(
             "created",
-            "resp-direct",
+            request_id,
             "gpt-5.6-luna",
             "gpt-5.6-luna-2026-08-01",
             "completed",
@@ -90,7 +90,9 @@ def test_luna_direct_persists_verified_artifact_without_rendering(test_db):
         )
 
     assert result.succeeded is True
-    provider.generate.assert_called_once_with(manifest, run_id=run.id)
+    provider.generate.assert_called_once_with(
+        manifest, run_id=run.id, verification_feedback=()
+    )
     verifier.verify.assert_called_once_with(b"PK-direct-docx", manifest)
     renderer.assert_not_called()
     assert progress.call_args_list[0].args == ("docx_authoring",)
@@ -140,3 +142,35 @@ def test_luna_direct_verification_failure_preserves_original_assessment(test_db)
     assert run.canonical_assessment.parsed_json == manifest
     assert run.document_artifact is None
     assert run.model_call_usages[-1].stage == "docx_direct_generation"
+    assert provider.generate.call_count == 2
+    assert provider.generate.call_args_list[1].kwargs["verification_feedback"] == (
+        "canonical_question_missing: no additional evidence",
+    )
+
+
+def test_luna_direct_repairs_once_with_machine_feedback(test_db):
+    run, manifest = source_run(test_db)
+    provider = MagicMock()
+    provider.generate.side_effect = [
+        generated_result(b"PK-invalid", "resp-invalid"),
+        generated_result(b"PK-repaired", "resp-repaired"),
+    ]
+    verifier = MagicMock()
+    verifier.verify.side_effect = [
+        VerificationReport(
+            False,
+            (VerificationIssue("native_equation_structure_invalid", evidence="equation index 2: subscript"),),
+        ),
+        VerificationReport(True, ()),
+    ]
+
+    result = LunaDirectDocumentGenerator(provider, verifier).generate(
+        db=test_db, run=run
+    )
+
+    assert result.succeeded is True
+    assert provider.generate.call_args_list[1].kwargs["verification_feedback"] == (
+        "native_equation_structure_invalid: equation index 2: subscript",
+    )
+    assert run.document_artifact.content == b"PK-repaired"
+    assert [item.attempt for item in run.model_call_usages[-2:]] == [1, 2]

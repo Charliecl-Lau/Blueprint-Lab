@@ -12,6 +12,25 @@ from backend.schemas.assessment_schema import (
 @pytest.fixture
 def complete_payload():
     return {
+        "assessment_metadata": {
+            "question_title": "Oxygen equilibrium assessment",
+            "course": "MSE302 Thermodynamics II",
+            "topic": "Gas-solid equilibrium",
+            "question_type": "short_answer",
+            "number_of_questions": 1,
+            "difficulty_level": "hard",
+            "cognitive_demand": "Apply/Analyze",
+            "intended_assessment_setting": "Instructor question bank",
+            "mse202_concepts": ["Gibbs free energy"],
+            "mse302_concepts": ["Gas-solid equilibrium"],
+            "concept_map_bridge": "Uses free energy to determine phase equilibrium.",
+            "materials_science_context": "Connects thermodynamics to phase transformations.",
+            "numerical_computation": "No numerical computation required",
+            "estimated_time": "15 minutes",
+            "learning_objectives": ["Apply Gibbs free energy to equilibrium."],
+            "prompt_design_factors": [],
+            "additional_instructions": None,
+        },
         "questions": [{
             "type": "short_answer",
             "metadata": {
@@ -105,6 +124,7 @@ def test_revision_options_require_two_or_three_items(complete_payload, count):
 
 
 def test_provider_schema_requires_complete_assessment_contract():
+    assert "assessment_metadata" in ASSESSMENT_PROVIDER_SCHEMA["required"]
     question = ASSESSMENT_PROVIDER_SCHEMA["$defs"][
         "ProviderQuestionResponse"
     ]
@@ -129,6 +149,27 @@ def test_provider_schema_requires_complete_assessment_contract():
     assert metadata["properties"]["learning_objectives"]["minItems"] == 1
     assert question["properties"]["revision_options"]["minItems"] == 2
     assert question["properties"]["revision_options"]["maxItems"] == 3
+
+
+def test_assessment_metadata_is_distinct_and_required(complete_payload):
+    payload = deepcopy(complete_payload)
+    del payload["assessment_metadata"]
+
+    with pytest.raises(ValidationError):
+        from backend.schemas.assessment_schema import ProviderAssessmentGenerationResponse
+
+        ProviderAssessmentGenerationResponse.model_validate(payload)
+
+    assessment_metadata = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["AssessmentMetadata"]
+    assert {
+        "question_title",
+        "course",
+        "topic",
+        "number_of_questions",
+        "intended_assessment_setting",
+        "numerical_computation",
+        "prompt_design_factors",
+    } <= set(assessment_metadata["required"])
 
 
 def test_flat_equation_references_accept_question_and_solution_locations(
@@ -204,6 +245,34 @@ def test_flat_equation_references_reject_duplicate_labels(complete_payload):
     ]
 
     with pytest.raises(ValidationError, match="equation labels must be unique"):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_flat_equation_references_reject_repeated_reference_occurrences(
+    complete_payload,
+):
+    question = complete_payload["questions"][0]
+    question["body"] = "Use [[EQ:relation]], then reuse [[EQ:relation]]."
+    question["equations"] = [{
+        "label": "relation",
+        "expression": "x_a = 0.5",
+        "location": "question",
+    }]
+
+    with pytest.raises(
+        ValidationError,
+        match="equation labels must be referenced exactly once",
+    ):
+        AssessmentGenerationResponse.model_validate(complete_payload)
+
+
+def test_assessment_metadata_question_count_must_match_array(complete_payload):
+    complete_payload["assessment_metadata"]["number_of_questions"] = 2
+
+    with pytest.raises(
+        ValidationError,
+        match="number_of_questions must equal questions length",
+    ):
         AssessmentGenerationResponse.model_validate(complete_payload)
 
 

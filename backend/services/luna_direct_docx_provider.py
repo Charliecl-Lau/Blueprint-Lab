@@ -96,11 +96,33 @@ def _download_bytes(download) -> bytes:
 
 class LunaDirectDocxProvider:
     def __init__(self, client=None, *, maximum_bytes: int | None = None):
-        self.client = client or OpenAI(api_key=settings.openai_api_key)
+        self.client = client or OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=settings.docx_tool_provider_timeout_seconds,
+            # A repair is already the pipeline's bounded retry. Disable SDK-level
+            # retries so one stalled HTTP request cannot silently multiply the
+            # configured timeout and leave the run in docx_repairing for minutes.
+            max_retries=0,
+        )
         self.maximum_bytes = maximum_bytes or settings.docx_sandbox_max_response_bytes
 
-    def generate(self, assessment_json: dict, *, run_id: int) -> LunaDocxResult:
+    def generate(
+        self,
+        assessment_json: dict,
+        *,
+        run_id: int,
+        verification_feedback: tuple[str, ...] = (),
+    ) -> LunaDocxResult:
         instructions = _PROMPT_PATH.read_text(encoding="utf-8")
+        if verification_feedback:
+            findings = "\n".join(f"* {item}" for item in verification_feedback)
+            instructions += (
+                "\n\n# Machine Verification Repair\n\n"
+                "A previous DOCX attempt failed the authoritative verifier. Rebuild "
+                "the document from scratch and correct every finding below. Do not "
+                "weaken, omit, or work around any validation requirement.\n\n"
+                f"{findings}\n"
+            )
         canonical = canonical_json(assessment_json)
         prompt_sha256 = hashlib.sha256(
             (instructions + "\n" + canonical).encode("utf-8")
@@ -115,12 +137,31 @@ class LunaDirectDocxProvider:
             raise LunaDocxGenerationError("container_creation_invalid")
 
         try:
+            uploaded = self.client.containers.files.create(
+                container_id,
+                file=(
+                    "assessment.json",
+                    canonical.encode("utf-8"),
+                    "application/json",
+                ),
+            )
+            canonical_path = _value(uploaded, "path")
+            if not canonical_path:
+                raise LunaDocxGenerationError("canonical_file_upload_invalid")
             response = self.client.responses.create(
                 model=LUNA_DIRECT_MODEL,
                 instructions=instructions,
                 input=[{
                     "role": "user",
-                    "content": [{"type": "input_text", "text": canonical}],
+                    "content": [{
+                        "type": "input_text",
+                        "text": (
+                            "The exact canonical JSON below is also mounted at "
+                            f"{canonical_path}. Load that file directly; "
+                            "do not retype its values into source code.\n\n"
+                            f"{canonical}"
+                        ),
+                    }],
                 }],
                 tools=[{"type": "code_interpreter", "container": container_id}],
                 tool_choice="required",

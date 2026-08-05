@@ -190,6 +190,34 @@ class QuestionMetadata(BaseModel):
     learning_objectives: List[str] = Field(min_length=1)
 
 
+class AssessmentMetadata(BaseModel):
+    """Canonical document-level metadata, distinct from per-question metadata."""
+
+    model_config = {"extra": "forbid"}
+
+    prompt_template_id: Optional[str] = None
+    actual_prompt_id: Optional[Union[str, int]] = None
+    output_id: Optional[Union[str, int]] = None
+    final_question_id: Optional[Union[str, int, List[Union[str, int]]]] = None
+    question_title: str
+    course: str
+    topic: str
+    question_type: str
+    number_of_questions: int = Field(ge=1)
+    difficulty_level: str
+    cognitive_demand: str
+    intended_assessment_setting: str
+    mse202_concepts: List[str] = Field(min_length=1)
+    mse302_concepts: List[str] = Field(min_length=1)
+    concept_map_bridge: Optional[str]
+    materials_science_context: str
+    numerical_computation: str
+    estimated_time: str
+    learning_objectives: List[str] = Field(min_length=1)
+    prompt_design_factors: List[str]
+    additional_instructions: Optional[str] = None
+
+
 class QualityCheckSchema(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -274,6 +302,15 @@ class QuestionResponse(BaseModel):
                 + ", ".join(shared_labels)
             )
 
+        duplicate_references = sorted(
+            label for label in set(all_references) if all_references.count(label) > 1
+        )
+        if duplicate_references:
+            raise ValueError(
+                "equation labels must be referenced exactly once; repeated labels: "
+                + ", ".join(duplicate_references)
+            )
+
         for label in question_references:
             if equation_by_label[label].location != "question":
                 raise ValueError(
@@ -328,7 +365,22 @@ class QuestionResponse(BaseModel):
 class AssessmentGenerationResponse(BaseModel):
     model_config = {"extra": "forbid"}
 
+    # Legacy saved assessments may predate the assessment-level contract. New
+    # provider responses require it below, and persistence enriches legacy data
+    # before a DOCX worker receives the canonical manifest.
+    assessment_metadata: Optional[AssessmentMetadata] = None
     questions: List[QuestionResponse]
+
+    @model_validator(mode="after")
+    def validate_assessment_question_count(self):
+        if (
+            self.assessment_metadata is not None
+            and self.assessment_metadata.number_of_questions != len(self.questions)
+        ):
+            raise ValueError(
+                "assessment_metadata.number_of_questions must equal questions length"
+            )
+        return self
 
 
 class ProviderMCQOptionSchema(BaseModel):
@@ -362,7 +414,16 @@ class ProviderQuestionResponse(BaseModel):
 class ProviderAssessmentGenerationResponse(BaseModel):
     model_config = {"extra": "forbid"}
 
+    assessment_metadata: AssessmentMetadata
     questions: List[ProviderQuestionResponse] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_assessment_question_count(self):
+        if self.assessment_metadata.number_of_questions != len(self.questions):
+            raise ValueError(
+                "assessment_metadata.number_of_questions must equal questions length"
+            )
+        return self
 
 
 class AssessmentTraceability(BaseModel):
@@ -394,6 +455,7 @@ class StoredAssessmentPayload(BaseModel):
     model_config = {"extra": "forbid"}
 
     traceability: AssessmentTraceability
+    assessment_metadata: AssessmentMetadata
     questions: List[StoredQuestionResponse]
 
 

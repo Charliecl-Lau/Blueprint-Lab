@@ -68,7 +68,7 @@ from backend.workers.evaluation_worker import run_llm_evaluation_pipeline
 
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 logger = logging.getLogger(__name__)
-_ASSESSMENT_SCHEMA_VERSION = "1"
+_ASSESSMENT_SCHEMA_VERSION = "2"
 _MAX_ERROR_MESSAGE_LENGTH = 1000
 _MAX_ASSESSMENT_REPAIR_ATTEMPTS = 3
 
@@ -596,9 +596,12 @@ def run_generation_pipeline(
             generated = None
             for repair_attempt in range(_MAX_ASSESSMENT_REPAIR_ATTEMPTS + 1):
                 try:
-                    generated = generate_questions(result.raw_text)
+                    generated = generate_questions(
+                        result.raw_text,
+                        expected_questions=experiment.number_of_questions,
+                    )
                     break
-                except ValidationError as exc:
+                except (ValidationError, ValueError) as exc:
                     if repair_attempt == _MAX_ASSESSMENT_REPAIR_ATTEMPTS:
                         validation_error = str(exc)
                         break

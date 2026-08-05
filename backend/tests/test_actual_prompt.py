@@ -22,7 +22,7 @@ def test_provider_structures_are_distinct_and_versioned():
     assert openai_prompt
     assert anthropic_prompt
     assert openai_prompt != anthropic_prompt
-    assert openai_version == anthropic_version == "10"
+    assert openai_version == anthropic_version == "12"
 
 
 def test_provider_structures_require_questions_array_contract():
@@ -88,8 +88,8 @@ def test_openai_template_and_versions_require_location_specific_labels():
         in prompt
     )
     assert "two equation entries with distinct labels" in prompt
-    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "13"
-    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "6"
+    assert actual_prompt.ACTUAL_PROMPT_GENERATOR_VERSION == "15"
+    assert actual_prompt.OPENAI_ACTUAL_PROMPT_TEMPLATE_VERSION == "8"
 
 
 def test_generation_and_actual_prompts_require_guided_solution_derivations():
@@ -225,7 +225,7 @@ def test_openai_prompt_includes_only_supplied_concept_bridge_when_enabled():
         factor_inputs={"concept_bridge": supplied},
     )
 
-    assert prompt.count(supplied) == 2
+    assert prompt.count(supplied) == 3
     assert '"concept_map_bridge": "Connect equilibrium to chemical potential."' in prompt
 
 
@@ -392,7 +392,7 @@ Use supplied factors
 Constraints
 Use supplied facts
 Output Format
-Return a JSON object with a top-level "questions" array
+Return a JSON object with a top-level "questions" array and "assessment_metadata" object
 Stop Rules
 Stop after output"""
 
@@ -400,7 +400,7 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
 <task>Generate questions</task>
 <constraints>Use supplied facts</constraints>
 <verification>Check correctness</verification>
-<output_format>Return a JSON object with a top-level "questions" array</output_format>
+<output_format>Return a JSON object with a top-level "questions" array and "assessment_metadata" object</output_format>
 <reasoning_guidance>Use concise rationale</reasoning_guidance>"""
 
 
@@ -413,7 +413,7 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
         (
             "openai",
             OPENAI_ACTUAL_PROMPT.replace(
-                'Output Format\nReturn a JSON object with a top-level "questions" array\n',
+                'Output Format\nReturn a JSON object with a top-level "questions" array and "assessment_metadata" object\n',
                 "",
             ),
         ),
