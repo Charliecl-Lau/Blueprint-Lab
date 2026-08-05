@@ -183,7 +183,14 @@ def test_generation_pipeline_logs_prompt_json_docx_and_metadata(generation_fixtu
 
         from backend.workers.assessment_worker import run_generation_pipeline
 
+        expected_provider = generation_fixture.provider
+        expected_model = generation_fixture.model
         run_generation_pipeline(generation_fixture.id)
+
+        MockLLM.assert_called_once_with(
+            provider=expected_provider,
+            model=expected_model,
+        )
 
         test_db.refresh(generation_fixture)
         assert generation_fixture.status == "complete"

@@ -59,7 +59,10 @@ def run_llm_evaluation_pipeline(run_id: int) -> None:
             return
 
         evaluation_model = settings.llm_evaluation_model or settings.llm_model
-        llm = LLMClient(model=evaluation_model)
+        llm = LLMClient(
+            provider=settings.llm_provider,
+            model=evaluation_model,
+        )
         questions = sorted(run.assessment.questions, key=lambda item: item.ordinal)
         if not questions:
             raise EvaluationValidationError("saved assessment questions are unavailable")

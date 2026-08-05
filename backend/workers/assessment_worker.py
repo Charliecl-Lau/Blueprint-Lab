@@ -194,7 +194,7 @@ def _cleanup_provider_files(
         return
     if llm is None:
         try:
-            llm = LLMClient()
+            llm = LLMClient(provider=attachments[0].provider)
         except Exception as exc:
             logger.warning(
                 "Reference PDF provider cleanup client initialization failed",
@@ -360,7 +360,7 @@ def run_generation_pipeline(
         if run.started_at is None:
             run.started_at = utc_now()
         ordered_sources = sorted(run.source_documents, key=lambda item: (item.ordinal, item.id))
-        llm = LLMClient(model=run.model)
+        llm = LLMClient(provider=run.provider, model=run.model)
         prompt = run.prompt
         if prompt is None:
             run.progress_message = "Preparing Prompt"
