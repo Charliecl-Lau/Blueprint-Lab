@@ -492,15 +492,35 @@ def test_openai_client_uses_strict_text_format_for_json_schema_dict():
         )
 
     request = client_type.return_value.responses.create.call_args.kwargs
-    assert request["text"] == {
-        "format": {
-            "type": "json_schema",
-            "name": "structured_response",
-            "schema": schema,
-            "strict": True,
-        }
-    }
+    strict_schema = request["text"]["format"]["schema"]
+    assert request["text"]["format"]["type"] == "json_schema"
+    assert request["text"]["format"]["name"] == "structured_response"
+    assert request["text"]["format"]["strict"] is True
+    assert strict_schema["required"] == ["questions"]
+    assert strict_schema["additionalProperties"] is False
     assert not client_type.return_value.responses.parse.called
+
+
+def test_openai_strict_schema_requires_defaulted_nested_assessment_fields():
+    from backend.schemas.assessment_schema import ASSESSMENT_PROVIDER_SCHEMA
+
+    with patch("backend.services.llm_client.OpenAI") as client_type:
+        client_type.return_value.responses.create.return_value = openai_response(
+            output_text='{"questions": []}'
+        )
+
+        LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+            "system", "user", response_schema=ASSESSMENT_PROVIDER_SCHEMA
+        )
+
+    strict_schema = client_type.return_value.responses.create.call_args.kwargs[
+        "text"
+    ]["format"]["schema"]
+    question = strict_schema["$defs"]["ProviderQuestionResponse"]
+    assert set(question["required"]) == set(question["properties"])
+    assert "options" in question["required"]
+    assert "quality_checks" in question["required"]
+    assert "default" not in question["properties"]["options"]
 
 
 def test_openai_incomplete_response_preserves_reason_and_usage():

@@ -36,6 +36,31 @@ def _without_defaults(value):
     return value
 
 
+def _openai_strict_schema(value):
+    """Normalize JSON Schema for OpenAI strict structured outputs.
+
+    OpenAI requires every property of every object to be listed in
+    ``required``. Optional values remain optional through their nullable
+    schema, while fields with application defaults must still be emitted by
+    the provider. JSON Schema ``default`` annotations are removed because
+    they are not accepted by strict response formats.
+    """
+    if isinstance(value, dict):
+        normalized = {
+            key: _openai_strict_schema(item)
+            for key, item in value.items()
+            if key != "default"
+        }
+        properties = normalized.get("properties")
+        if isinstance(properties, dict):
+            normalized["required"] = list(properties)
+            normalized["additionalProperties"] = False
+        return normalized
+    if isinstance(value, list):
+        return [_openai_strict_schema(item) for item in value]
+    return value
+
+
 def _gemini_response_schema(value):
     """Reduce JSON Schema to Gemini's supported structured-output subset.
 
@@ -340,13 +365,14 @@ class LLMClient:
         if response_schema is None:
             response = self._client.responses.create(**request)
         elif isinstance(response_schema, dict):
+            strict_schema = _openai_strict_schema(response_schema)
             response = self._client.responses.create(
                 **request,
                 text={
                     "format": {
                         "type": "json_schema",
                         "name": "structured_response",
-                        "schema": response_schema,
+                        "schema": strict_schema,
                         "strict": True,
                     }
                 },
