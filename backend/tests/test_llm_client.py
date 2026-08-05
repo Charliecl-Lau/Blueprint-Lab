@@ -26,7 +26,7 @@ from backend.services.reference_pdfs import (
 def client_for_response(response):
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         mock_client.return_value.models.generate_content.return_value = response
-        yield LLMClient()
+        yield LLMClient(provider="google")
 
 
 def gemini_response(finish_reason="STOP"):
@@ -86,7 +86,7 @@ def test_llm_client_installs_event_loop_when_worker_thread_has_none():
     ):
         from backend.services.llm_client import LLMClient
 
-        LLMClient()
+        LLMClient(provider="google")
 
     create_loop.assert_called_once_with()
     set_loop.assert_has_calls([call(new_loop)])
@@ -95,7 +95,7 @@ def test_llm_client_installs_event_loop_when_worker_thread_has_none():
 
 def test_llm_client_configures_sixty_second_provider_timeout():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
-        LLMClient()
+        LLMClient(provider="google")
 
     kwargs = mock_client.call_args.kwargs
     assert kwargs["api_key"] == settings.google_api_key
@@ -104,7 +104,7 @@ def test_llm_client_configures_sixty_second_provider_timeout():
 
 def test_llm_client_accepts_a_longer_provider_timeout():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
-        LLMClient(timeout_ms=120_000)
+        LLMClient(provider="google", timeout_ms=120_000)
 
     kwargs = mock_client.call_args.kwargs
     assert kwargs["http_options"].timeout == 120_000
@@ -115,8 +115,10 @@ def test_llm_client_rejects_nonpositive_provider_timeout():
         LLMClient(timeout_ms=0)
 
 
-def test_gemini_35_is_the_default_model():
-    assert Settings(_env_file=None).llm_model == "gemini-3.5-flash-lite"
+def test_openai_luna_is_the_default_provider_and_model():
+    configured = Settings(_env_file=None)
+    assert configured.llm_provider == "openai"
+    assert configured.llm_model == "gpt-5.6-luna"
     assert Settings(_env_file=None).docx_tool_provider_timeout_seconds == 120
 
 
@@ -124,7 +126,7 @@ def test_gemini_35_omits_legacy_sampling_fields():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         mock_client.return_value.models.generate_content.return_value = gemini_response()
 
-        LLMClient(model="gemini-3.5-flash-lite").generate(
+        LLMClient(provider="google", model="gemini-3.5-flash-lite").generate(
             "system",
             "user",
             model_settings={"temperature": 0.7, "top_p": 0.8, "seed": 42},
@@ -149,7 +151,7 @@ def test_llm_client_calls_generate_content():
         MockClient.return_value.models.generate_content.return_value = mock_response
 
         from backend.services.llm_client import LLMClient
-        client = LLMClient()
+        client = LLMClient(provider="google")
         result = client.generate(
             system_prompt="You are a test assistant.",
             user_message="Generate something.",
@@ -173,7 +175,7 @@ def test_llm_client_passes_model_name():
         MockClient.return_value.models.generate_content.return_value = mock_response
 
         from backend.services.llm_client import LLMClient
-        client = LLMClient(model="gemma-4-31b-it")
+        client = LLMClient(provider="google", model="gemma-4-31b-it")
         client.generate("system", "user")
 
         call_kwargs = MockClient.return_value.models.generate_content.call_args
@@ -189,7 +191,7 @@ def test_llm_client_passes_provider_structured_output_schema():
 
         from backend.services.llm_client import LLMClient
 
-        LLMClient().generate(
+        LLMClient(provider="google").generate(
             "system",
             "user",
             response_schema=AssessmentGenerationResponse,
@@ -221,7 +223,7 @@ def test_llm_client_uses_json_schema_for_canonical_assessment_contract():
         from backend.schemas.assessment_schema import ASSESSMENT_PROVIDER_SCHEMA
         from backend.services.llm_client import LLMClient
 
-        LLMClient().generate(
+        LLMClient(provider="google").generate(
             "system",
             "user",
             response_schema=ASSESSMENT_PROVIDER_SCHEMA,
@@ -242,7 +244,7 @@ def test_llm_client_uses_json_schema_for_pydantic_contract_without_defs():
         from backend.schemas.docx_authoring_schema import DocxProgramEnvelope
         from backend.services.llm_client import LLMClient
 
-        LLMClient().generate(
+        LLMClient(provider="google").generate(
             "system",
             "user",
             response_schema=DocxProgramEnvelope,
@@ -263,7 +265,7 @@ def test_llm_client_uses_configured_model_defaults_without_thinking_override():
 
         from backend.services.llm_client import LLMClient
 
-        LLMClient().generate("system", "user")
+        LLMClient(provider="google").generate("system", "user")
 
         config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
         assert config.thinking_config is None
@@ -282,7 +284,7 @@ def test_llm_client_raises_on_truncated_response():
         from backend.services.llm_client import LLMClient, TruncatedResponseError
 
         try:
-            LLMClient().generate("system", "user")
+            LLMClient(provider="google").generate("system", "user")
             assert False, "expected TruncatedResponseError"
         except TruncatedResponseError as exc:
             assert "MAX_TOKENS" in str(exc)
@@ -302,7 +304,7 @@ def test_llm_client_passes_explicit_model_settings_and_returns_metadata():
 
         from backend.services.llm_client import LLMClient
 
-        result = LLMClient(model="gemma-4-31b-it").generate("system", "user")
+        result = LLMClient(provider="google", model="gemma-4-31b-it").generate("system", "user")
 
         config = mock_client.return_value.models.generate_content.call_args.kwargs["config"]
         assert config.temperature == 0.2
@@ -350,7 +352,7 @@ def test_llm_client_uploads_pdf_with_safe_provider_metadata():
             mime_type="application/pdf",
         )
 
-        attachment = LLMClient().upload_pdf(pdf)
+        attachment = LLMClient(provider="google").upload_pdf(pdf)
 
     call_kwargs = mock_client.return_value.files.upload.call_args.kwargs
     assert isinstance(call_kwargs["file"], BytesIO)
@@ -376,7 +378,7 @@ def test_llm_client_attaches_ordered_provider_files():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         mock_client.return_value.models.generate_content.return_value = gemini_response()
 
-        LLMClient().generate("system", "user", attachments=attachments)
+        LLMClient(provider="google").generate("system", "user", attachments=attachments)
 
     contents = (
         mock_client.return_value.models.generate_content.call_args.kwargs["contents"]
@@ -392,7 +394,7 @@ def test_llm_client_keeps_text_only_contents_unchanged():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         mock_client.return_value.models.generate_content.return_value = gemini_response()
 
-        LLMClient().generate("system", "user", attachments=[])
+        LLMClient(provider="google").generate("system", "user", attachments=[])
 
     assert (
         mock_client.return_value.models.generate_content.call_args.kwargs["contents"]
@@ -402,8 +404,105 @@ def test_llm_client_keeps_text_only_contents_unchanged():
 
 def test_llm_client_deletes_provider_file_by_name():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
-        LLMClient().delete_file("files/reference-1")
+        LLMClient(provider="google").delete_file("files/reference-1")
 
     mock_client.return_value.files.delete.assert_called_once_with(
         name="files/reference-1"
     )
+
+
+def openai_response(*, status="completed", output_text="result"):
+    return SimpleNamespace(
+        id="resp_123",
+        model="gpt-5.6-luna-2026-08-01",
+        status=status,
+        output_text=output_text,
+        output_parsed=None,
+        incomplete_details=(
+            SimpleNamespace(reason="max_output_tokens")
+            if status == "incomplete"
+            else None
+        ),
+        usage=SimpleNamespace(
+            input_tokens=120,
+            output_tokens=50,
+            total_tokens=170,
+            input_tokens_details=SimpleNamespace(cached_tokens=25),
+            output_tokens_details=SimpleNamespace(reasoning_tokens=15),
+        ),
+    )
+
+
+def test_openai_client_constructs_responses_request_with_ordered_files():
+    attachments = [
+        ProviderFileAttachment("file-one", "file-one", "application/pdf", "openai"),
+        ProviderFileAttachment("file-two", "file-two", "application/pdf", "openai"),
+    ]
+    with patch("backend.services.llm_client.OpenAI") as client_type:
+        client_type.return_value.responses.create.return_value = openai_response()
+
+        result = LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+            "system", "user", attachments=attachments
+        )
+
+    client_type.assert_called_once_with(api_key=settings.openai_api_key, timeout=60.0)
+    request = client_type.return_value.responses.create.call_args.kwargs
+    assert request["model"] == "gpt-5.6-luna"
+    assert request["instructions"] == "system"
+    assert request["input"][0]["content"] == [
+        {"type": "input_text", "text": "user"},
+        {"type": "input_file", "file_id": "file-one"},
+        {"type": "input_file", "file_id": "file-two"},
+    ]
+    assert result.provider_request_id == "resp_123"
+    assert result.model_version == "gpt-5.6-luna-2026-08-01"
+    assert result.usage == TokenUsage(120, 50, 170, 25, 15, {})
+
+
+def test_openai_client_uses_responses_parse_for_pydantic_output():
+    with patch("backend.services.llm_client.OpenAI") as client_type:
+        response = openai_response(output_text='{"questions": []}')
+        client_type.return_value.responses.parse.return_value = response
+
+        LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+            "system",
+            "user",
+            response_schema=AssessmentGenerationResponse,
+        )
+
+    request = client_type.return_value.responses.parse.call_args.kwargs
+    assert request["text_format"] is AssessmentGenerationResponse
+    assert not client_type.return_value.responses.create.called
+
+
+def test_openai_incomplete_response_preserves_reason_and_usage():
+    with patch("backend.services.llm_client.OpenAI") as client_type:
+        client_type.return_value.responses.create.return_value = openai_response(
+            status="incomplete", output_text="partial"
+        )
+
+        with pytest.raises(TruncatedResponseError) as raised:
+            LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+                "system", "user"
+            )
+
+    assert raised.value.result.finish_reason == "max_output_tokens"
+    assert raised.value.result.usage.reasoning_tokens == 15
+
+
+def test_openai_uploads_and_deletes_pdf_file():
+    pdf = ValidatedReferencePdf("reference.pdf", b"%PDF-1.7\nvalid")
+    with patch("backend.services.llm_client.OpenAI") as client_type:
+        client_type.return_value.files.create.return_value = SimpleNamespace(id="file-123")
+        client = LLMClient(provider="openai", model="gpt-5.6-luna")
+
+        attachment = client.upload_pdf(pdf)
+        client.delete_file(attachment.name)
+
+    assert attachment == ProviderFileAttachment(
+        "file-123", "file-123", "application/pdf", "openai"
+    )
+    client_type.return_value.files.create.assert_called_once_with(
+        file=("reference.pdf", pdf.content, "application/pdf"), purpose="user_data"
+    )
+    client_type.return_value.files.delete.assert_called_once_with("file-123")

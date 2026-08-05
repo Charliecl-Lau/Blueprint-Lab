@@ -113,6 +113,14 @@ def test_provider_attachment_round_trips_through_task_metadata():
     assert ProviderFileAttachment.from_dict(attachment.to_dict()) == attachment
 
 
+def test_legacy_attachment_metadata_defaults_to_google_provider():
+    attachment = ProviderFileAttachment.from_dict(
+        {"name": "files/legacy", "uri": "https://files/legacy", "mime_type": "application/pdf"}
+    )
+
+    assert attachment.provider == "google"
+
+
 def test_cleanup_logs_deletion_failures_without_provider_details(caplog):
     llm = MagicMock()
     llm.delete_file.side_effect = RuntimeError("provider URI secret-value")

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import re
 from dataclasses import dataclass
@@ -7,6 +8,14 @@ from typing import Optional, Sequence
 
 from google import genai
 from google.genai import errors as genai_errors, types
+from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
 
 from backend.config import settings
 from backend.services.reference_pdfs import (
@@ -79,7 +88,14 @@ class TruncatedResponseError(RuntimeError):
 
 
 def is_retryable_provider_error(exc: Exception) -> bool:
-    """Return whether a Gemini request failed for a transient HTTP reason."""
+    """Return whether a provider request failed for a transient HTTP reason."""
+    if isinstance(
+        exc,
+        (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError),
+    ):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in {408, 409, 429} or exc.status_code >= 500
     if isinstance(exc, genai_errors.ServerError):
         return True
     return isinstance(exc, genai_errors.ClientError) and exc.code in {
@@ -153,26 +169,83 @@ def _usage_from_response(response) -> Optional[TokenUsage]:
     )
 
 
+def _openai_usage_from_response(response) -> Optional[TokenUsage]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    input_details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
+    raw = usage.model_dump(exclude_none=True) if hasattr(usage, "model_dump") else {}
+    known = {"input_tokens", "output_tokens", "total_tokens", "input_tokens_details", "output_tokens_details"}
+    extras = {
+        key: value
+        for key, value in raw.items()
+        if key not in known and key.endswith("_tokens") and isinstance(value, int)
+    }
+    return TokenUsage(
+        input_tokens=getattr(usage, "input_tokens", None),
+        output_tokens=getattr(usage, "output_tokens", None),
+        total_tokens=getattr(usage, "total_tokens", None),
+        cached_content_tokens=getattr(input_details, "cached_tokens", None),
+        reasoning_tokens=getattr(output_details, "reasoning_tokens", None),
+        extra_token_counts=extras,
+    )
+
+
 class LLMClient:
     def __init__(
         self,
+        provider: Optional[str] = None,
         model: Optional[str] = None,
         *,
         timeout_ms: int = 60_000,
     ):
         if timeout_ms <= 0:
             raise ValueError("provider timeout must be positive")
+        self.provider = (provider or settings.llm_provider).lower()
         self.model = model or settings.llm_model
-        try:
-            asyncio.get_event_loop()
-        except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-        self._client = genai.Client(
-            api_key=settings.google_api_key,
-            http_options=types.HttpOptions(timeout=timeout_ms),
-        )
+        if self.provider == "openai":
+            self._client = OpenAI(
+                api_key=settings.openai_api_key,
+                timeout=timeout_ms / 1000,
+            )
+        elif self.provider == "google":
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
+            self._client = genai.Client(
+                api_key=settings.google_api_key,
+                http_options=types.HttpOptions(timeout=timeout_ms),
+            )
+        else:
+            raise ValueError(f"unsupported LLM provider: {self.provider}")
 
     def generate(
+        self,
+        system_prompt: str,
+        user_message: str,
+        model_settings: Optional[dict] = None,
+        response_schema: Optional[type] = None,
+        attachments: Sequence[ProviderFileAttachment] = (),
+    ) -> LLMResult:
+        if self.provider == "openai":
+            return self._generate_openai(
+                system_prompt,
+                user_message,
+                model_settings=model_settings,
+                response_schema=response_schema,
+                attachments=attachments,
+            )
+        return self._generate_google(
+            system_prompt,
+            user_message,
+            model_settings=model_settings,
+            response_schema=response_schema,
+            attachments=attachments,
+        )
+
+    def _generate_google(
         self,
         system_prompt: str,
         user_message: str,
@@ -241,7 +314,74 @@ class LLMClient:
             raise TruncatedResponseError(result)
         return result
 
+    def _generate_openai(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        model_settings: Optional[dict],
+        response_schema: Optional[type],
+        attachments: Sequence[ProviderFileAttachment],
+    ) -> LLMResult:
+        overrides = model_settings or {}
+        content: list[dict[str, str]] = [{"type": "input_text", "text": user_message}]
+        for attachment in attachments:
+            if attachment.provider != "openai":
+                raise ValueError("attachment provider does not match OpenAI client")
+            content.append({"type": "input_file", "file_id": attachment.name})
+        request = {
+            "model": self.model,
+            "instructions": system_prompt,
+            "input": [{"role": "user", "content": content}],
+            "max_output_tokens": overrides.get(
+                "max_output_tokens", settings.llm_max_output_tokens
+            ),
+        }
+        if response_schema is None:
+            response = self._client.responses.create(**request)
+        else:
+            response = self._client.responses.parse(
+                **request,
+                text_format=response_schema,
+            )
+        status = getattr(response, "status", None)
+        incomplete_details = getattr(response, "incomplete_details", None)
+        finish_reason = (
+            getattr(incomplete_details, "reason", None)
+            if status == "incomplete"
+            else status
+        )
+        raw_text = getattr(response, "output_text", "") or ""
+        parsed = getattr(response, "output_parsed", None)
+        if parsed is not None:
+            if hasattr(parsed, "model_dump_json"):
+                raw_text = parsed.model_dump_json()
+            elif isinstance(parsed, dict):
+                raw_text = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
+        result = LLMResult(
+            raw_text=raw_text,
+            provider_request_id=getattr(response, "id", None),
+            model_name=self.model,
+            model_version=getattr(response, "model", None),
+            finish_reason=finish_reason,
+            usage=_openai_usage_from_response(response),
+        )
+        if status == "incomplete":
+            raise TruncatedResponseError(result)
+        return result
+
     def upload_pdf(self, pdf: ValidatedReferencePdf) -> ProviderFileAttachment:
+        if self.provider == "openai":
+            uploaded = self._client.files.create(
+                file=(pdf.filename, pdf.content, "application/pdf"),
+                purpose="user_data",
+            )
+            return ProviderFileAttachment(
+                name=uploaded.id,
+                uri=uploaded.id,
+                mime_type="application/pdf",
+                provider="openai",
+            )
         uploaded = self._client.files.upload(
             file=BytesIO(pdf.content),
             config=types.UploadFileConfig(
@@ -256,6 +396,9 @@ class LLMClient:
         )
 
     def delete_file(self, name: str) -> None:
+        if self.provider == "openai":
+            self._client.files.delete(name)
+            return
         self._client.files.delete(name=name)
 
     def generate_json(self, system_prompt: str, user_message: str) -> dict:
@@ -272,6 +415,39 @@ class LLMClient:
         model_settings: Optional[dict] = None,
     ) -> LLMResult:
         """Generate one structured response from bounded in-memory images."""
+        if self.provider == "openai":
+            content: list[dict[str, str]] = [{"type": "input_text", "text": user_message}]
+            for image in inline_images:
+                data = image.get("data")
+                if not isinstance(data, bytes) or image.get("mime_type") != "image/png":
+                    raise ValueError("only in-memory PNG review parts are supported")
+                encoded = base64.b64encode(data).decode("ascii")
+                content.append({"type": "input_image", "image_url": f"data:image/png;base64,{encoded}"})
+            overrides = model_settings or {}
+            response = self._client.responses.parse(
+                model=self.model,
+                instructions=system_prompt,
+                input=[{"role": "user", "content": content}],
+                max_output_tokens=overrides.get("max_output_tokens", settings.llm_max_output_tokens),
+                text_format=response_schema,
+            )
+            status = getattr(response, "status", None)
+            details = getattr(response, "incomplete_details", None)
+            parsed = getattr(response, "output_parsed", None)
+            raw_text = getattr(response, "output_text", "") or ""
+            if parsed is not None and hasattr(parsed, "model_dump_json"):
+                raw_text = parsed.model_dump_json()
+            result = LLMResult(
+                raw_text,
+                getattr(response, "id", None),
+                self.model,
+                getattr(response, "model", None),
+                getattr(details, "reason", None) if status == "incomplete" else status,
+                _openai_usage_from_response(response),
+            )
+            if status == "incomplete":
+                raise TruncatedResponseError(result)
+            return result
         overrides = model_settings or {}
         parts = [types.Part.from_text(text=user_message)]
         for image in inline_images:

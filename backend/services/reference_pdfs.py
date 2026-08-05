@@ -28,12 +28,14 @@ class ProviderFileAttachment:
     name: str
     uri: str
     mime_type: str
+    provider: str = "google"
 
     def to_dict(self) -> dict[str, str]:
         return {
             "name": self.name,
             "uri": self.uri,
             "mime_type": self.mime_type,
+            "provider": self.provider,
         }
 
     @classmethod
@@ -42,6 +44,7 @@ class ProviderFileAttachment:
             name=value["name"],
             uri=value["uri"],
             mime_type=value["mime_type"],
+            provider=value.get("provider", "google"),
         )
 
 

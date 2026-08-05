@@ -6,8 +6,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     google_api_key: str = ""
-    llm_provider: str = "google"
-    llm_model: str = "gemini-3.5-flash-lite"
+    openai_api_key: str = ""
+    llm_provider: str = "openai"
+    llm_model: str = "gpt-5.6-luna"
     llm_evaluation_model: Optional[str] = None
     llm_temperature: float = 0.2
     llm_top_p: float = 0.95
