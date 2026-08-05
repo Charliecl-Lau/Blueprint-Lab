@@ -475,6 +475,34 @@ def test_openai_client_uses_responses_parse_for_pydantic_output():
     assert not client_type.return_value.responses.create.called
 
 
+def test_openai_client_uses_strict_text_format_for_json_schema_dict():
+    schema = {
+        "type": "object",
+        "properties": {"questions": {"type": "array", "items": {"type": "string"}}},
+        "required": ["questions"],
+        "additionalProperties": False,
+    }
+    with patch("backend.services.llm_client.OpenAI") as client_type:
+        client_type.return_value.responses.create.return_value = openai_response(
+            output_text='{"questions": []}'
+        )
+
+        LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+            "system", "user", response_schema=schema
+        )
+
+    request = client_type.return_value.responses.create.call_args.kwargs
+    assert request["text"] == {
+        "format": {
+            "type": "json_schema",
+            "name": "structured_response",
+            "schema": schema,
+            "strict": True,
+        }
+    }
+    assert not client_type.return_value.responses.parse.called
+
+
 def test_openai_incomplete_response_preserves_reason_and_usage():
     with patch("backend.services.llm_client.OpenAI") as client_type:
         client_type.return_value.responses.create.return_value = openai_response(

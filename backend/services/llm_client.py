@@ -339,6 +339,18 @@ class LLMClient:
         }
         if response_schema is None:
             response = self._client.responses.create(**request)
+        elif isinstance(response_schema, dict):
+            response = self._client.responses.create(
+                **request,
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "structured_response",
+                        "schema": response_schema,
+                        "strict": True,
+                    }
+                },
+            )
         else:
             response = self._client.responses.parse(
                 **request,
