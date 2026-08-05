@@ -4,12 +4,16 @@ from types import SimpleNamespace
 import pytest
 
 from backend.services.docx_grounding import DocxGrounding
-from backend.services.gemini_docx_authoring import AuthoringEnvelopeError, GeminiDocxAuthoringProvider
+from backend.services.gemini_docx_authoring import (
+    DOCX_AUTHORING_MODEL,
+    AuthoringEnvelopeError,
+    GeminiDocxAuthoringProvider,
+)
 from backend.services.llm_client import LLMResult
 
 
 class FakeClient:
-    model = "gemini-3.5-flash-lite"
+    model = DOCX_AUTHORING_MODEL
     def __init__(self, raw): self.raw, self.calls = raw, []
     def generate(self, **kwargs):
         self.calls.append(kwargs)

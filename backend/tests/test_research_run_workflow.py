@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+from backend.config import settings
 from backend.models.experiment import Condition, Experiment
 from backend.schemas.run_schema import SourceBinding
 from backend.services.llm_client import LLMResult, TokenUsage
@@ -85,6 +86,7 @@ def test_research_workflow_preserves_independent_runs_and_source_snapshot(test_d
             return_value=b"docx",
         ),
         patch("backend.workers.assessment_worker.run_llm_evaluation_pipeline.delay"),
+        patch.object(settings, "docx_generation_backend", "legacy"),
     ):
         test_db.close = MagicMock()
         mock_client.return_value.generate.side_effect = provider_result

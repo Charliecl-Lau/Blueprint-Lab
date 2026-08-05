@@ -13,6 +13,7 @@ def test_sqlite_remains_a_supported_explicit_database():
     assert settings.database_url.startswith("sqlite")
 
 
-def test_default_google_model_uses_a_generate_content_identifier():
+def test_default_model_is_openai_luna():
     settings = Settings(_env_file=None)
-    assert settings.llm_model == "gemini-3.5-flash-lite"
+    assert settings.llm_provider == "openai"
+    assert settings.llm_model == "gpt-5.6-luna"

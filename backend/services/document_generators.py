@@ -61,7 +61,7 @@ class AgenticToolDocumentGenerator:
         contract = (prompt_root / "docx_tool_design_system.md").read_bytes() + (prompt_root / "docx_tool_visual_review.md").read_bytes()
         session = DocxToolSession(
             run_id=run.id, source_assessment_id=source.id, cycle_number=cycle,
-            provider="google", model=DOCX_TOOL_MODEL, status="pending",
+            provider="openai", model=DOCX_TOOL_MODEL, status="pending",
             content_catalog_hash=catalog.sha256, design_contract_hash=hashlib.sha256(contract).hexdigest(),
             workspace_revision=0, maximum_revisions=settings.docx_tool_max_revisions,
             idempotency_key=f"run-{run.id}-agentic-cycle-{cycle}",

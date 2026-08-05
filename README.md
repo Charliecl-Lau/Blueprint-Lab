@@ -26,13 +26,13 @@ Prerequisites:
 - Python 3.9 or newer
 - Node.js and npm
 - Docker Desktop
-- A Google AI API key with access to the configured Gemini model
+- An OpenAI API key with access to `gpt-5.6-luna`
 
 Run all commands from the repository root unless a step says otherwise.
 
 ### 1. Configure the environment
 
-Copy the environment template, then put your Google API key in `.env`. Do not put a real key in `.env.example`; `.env` is ignored by Git.
+Copy the environment template, then put your OpenAI API key in `.env`. Do not put a real key in `.env.example`; `.env` is ignored by Git.
 
 ```powershell
 Copy-Item .env.example .env
@@ -43,14 +43,26 @@ The relevant values should look like this:
 ```dotenv
 DATABASE_URL=postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_lab
 REDIS_URL=redis://localhost:6379/0
-GOOGLE_API_KEY=replace-with-your-google-api-key
-LLM_PROVIDER=google
-LLM_MODEL=gemini-3.5-flash-lite
+OPENAI_API_KEY=replace-with-your-openai-api-key
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-5.6-luna
 LLM_EVALUATION_MODEL=
 LLM_TEMPERATURE=0.2
 LLM_MAX_OUTPUT_TOKENS=32768
 LOCAL_REVIEWER_ID=local-reviewer
+DOCX_GENERATION_BACKEND=luna_direct
 ```
+
+The experimental `luna_direct` document backend keeps the established
+Actual-Prompt-driven assessment JSON workflow unchanged. After that JSON is
+validated and persisted as canonical content, a second `gpt-5.6-luna` Responses
+call uses an ephemeral Code Interpreter container to create a real DOCX. The
+worker downloads the file immediately, validates its OOXML package, canonical
+question and solution text, unresolved equation placeholders, and native OMML
+equations, then stores the verified artifact. This path intentionally does not
+invoke LibreOffice or perform PDF/image visual rendering. The selectable
+`legacy`, `self_hosted_code`, and `agentic_tools` backends remain available for
+comparison.
 
 ### 2. Install dependencies
 
@@ -124,7 +136,7 @@ The grading page places the collapsed, read-only LLM evaluation before the expan
 
 The form validates all required assessment fields and content for each enabled prompt factor before sending a request. Reference Content accepts one to three PDF files, each no larger than 20 MB, and advises keeping each PDF to 100 pages or fewer. Incomplete submissions show a grouped dialog and inline accessible errors, and create no experiment, run, or Celery task. Repeated valid submissions use an idempotency key so a retried request does not enqueue duplicate work.
 
-Reference PDFs are submitted with the experiment as multipart form data: `payload` contains the experiment JSON and each ordered file uses the repeated `reference_pdfs` field. The PDFs are uploaded temporarily to Gemini and attached only to assessment generation and schema repair. PostgreSQL stores only the ordered original filenames linked to the run—never PDF bytes, extracted PDF text, base64 data, Gemini file names, or Gemini URIs. Temporary Gemini files are retained across automatic Celery retries and deleted after a terminal outcome. Retrying a PDF-backed run requires a fresh one-to-three-file upload; non-PDF retries remain one-click.
+Reference PDFs are submitted with the experiment as multipart form data: `payload` contains the experiment JSON and each ordered file uses the repeated `reference_pdfs` field. The PDFs are uploaded temporarily to the configured provider and attached only to assessment generation and schema repair. PostgreSQL stores only the ordered original filenames linked to the run—never PDF bytes, extracted PDF text, base64 data, provider file names, or provider URIs. Temporary provider files are retained across automatic Celery retries and deleted after a terminal outcome. Retrying a PDF-backed run requires a fresh one-to-three-file upload; non-PDF retries remain one-click.
 
 See [Run Lifecycle and Token Accounting](docs/RUN_LIFECYCLE_AND_TOKEN_ACCOUNTING.md) for the accounting definitions, retry behavior, legacy display, and isolation contract. `LLM_EVALUATION_MODEL` optionally separates evaluation from generation; when blank, evaluation uses `LLM_MODEL`.
 

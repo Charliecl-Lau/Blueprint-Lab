@@ -121,7 +121,7 @@ class DocxAuthoringPipeline:
                 if resumable is not None and resumable.status == "requested":
                     attempt = resumable
                     attempt.status = "generated"
-                    attempt.provider = "google"
+                    attempt.provider = "openai"
                     attempt.model = authored.provider_result.model_name
                     attempt.model_version = authored.provider_result.model_version
                     attempt.provider_request_id = authored.provider_result.provider_request_id
@@ -137,7 +137,7 @@ class DocxAuthoringPipeline:
                         cycle_number=cycle,
                         attempt_number=attempt_number,
                         status="generated",
-                        provider="google",
+                        provider="openai",
                         model=authored.provider_result.model_name,
                         model_version=authored.provider_result.model_version,
                         provider_request_id=authored.provider_result.provider_request_id,

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from celery.exceptions import MaxRetriesExceededError, Retry
 
+from backend.config import settings
 from backend.models import ModelCallUsage, RunReferencePdf
 from backend.models.experiment import Condition, Experiment, Generation
 from backend.schemas.experiment_schema import PromptFactors
@@ -33,6 +34,12 @@ ANTHROPIC_ACTUAL_PROMPT = """<context>Course context</context>
 <verification>Check correctness</verification>
 <output_format>Return a JSON object with a top-level "questions" array</output_format>
 <reasoning_guidance>Use concise rationale</reasoning_guidance>"""
+
+
+@pytest.fixture(autouse=True)
+def isolate_assessment_worker_from_live_document_backends():
+    with patch.object(settings, "docx_generation_backend", "legacy"):
+        yield
 
 
 def result(raw_text, input_tokens, output_tokens, total_tokens, finish="STOP"):

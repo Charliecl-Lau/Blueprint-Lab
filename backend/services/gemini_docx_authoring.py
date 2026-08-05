@@ -13,7 +13,7 @@ from backend.services.llm_client import LLMClient
 from backend.services.reproducibility import canonical_json, sha256_text
 
 
-DOCX_AUTHORING_MODEL = "gemini-3.5-flash-lite"
+DOCX_AUTHORING_MODEL = "gpt-5.6-luna"
 _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 
 
@@ -23,7 +23,9 @@ class AuthoringEnvelopeError(ValueError):
 
 class GeminiDocxAuthoringProvider:
     def __init__(self, client: LLMClient | None = None):
-        self.client = client or LLMClient(model=DOCX_AUTHORING_MODEL)
+        self.client = client or LLMClient(
+            provider="openai", model=DOCX_AUTHORING_MODEL
+        )
         if self.client.model != DOCX_AUTHORING_MODEL:
             raise ValueError(f"DOCX authoring requires {DOCX_AUTHORING_MODEL}")
 
