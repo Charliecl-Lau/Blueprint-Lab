@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     llm_top_p: float = 0.95
     llm_seed: Optional[int] = None
     llm_max_output_tokens: int = 32768
-    docx_generation_backend: Literal["legacy", "self_hosted_code", "agentic_tools"] = "legacy"
+    docx_generation_backend: Literal[
+        "luna_direct", "legacy", "self_hosted_code", "agentic_tools"
+    ] = "luna_direct"
     docx_tool_max_revisions: int = 2
     docx_tool_max_operations_per_turn: int = 100
     docx_tool_max_review_pages: int = 25

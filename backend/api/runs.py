@@ -153,7 +153,14 @@ def _rewrite_state(run: Run) -> dict:
     attempts = list(run.docx_authoring_attempts)
     tool_sessions = list(run.docx_tool_sessions)
     latest_tool_session = max(tool_sessions, key=lambda item: (item.cycle_number, item.id or 0), default=None)
-    backend = "agentic_tools" if latest_tool_session is not None else ("self_hosted_code" if attempts else "legacy")
+    has_luna_direct = any(
+        usage.stage == "docx_direct_generation" for usage in run.model_call_usages
+    )
+    backend = (
+        "agentic_tools"
+        if latest_tool_session is not None
+        else ("self_hosted_code" if attempts else ("luna_direct" if has_luna_direct else "legacy"))
+    )
     latest_cycle = max((item.cycle_number for item in attempts), default=None)
     cycle_attempts = [
         item for item in attempts if item.cycle_number == latest_cycle
@@ -186,6 +193,10 @@ def _rewrite_state(run: Run) -> dict:
             issue_codes.append(latest.failure_category)
     if latest_tool_session is not None and not issue_codes and latest_tool_session.status == "failed":
         issue_codes.append(latest_tool_session.final_decision or "agentic_docx_failed")
+    if backend == "luna_direct" and not issue_codes and run.status == "rewrite_failed":
+        issue_codes.extend(
+            code.strip() for code in (run.error_message or "").split(",") if code.strip()
+        )
 
     artifact_available = bool(
         canonical is not None

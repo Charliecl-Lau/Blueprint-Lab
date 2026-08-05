@@ -435,6 +435,68 @@ def test_rewrite_failure_returns_original_and_only_safe_issue_codes(client, test
     assert "SECRET" not in str(body)
 
 
+def test_run_detail_identifies_luna_direct_rewrite_from_model_usage(client, test_db):
+    experiment, condition = _experiment_and_condition(test_db)
+    run = Run(
+        experiment=experiment,
+        condition=condition,
+        run_number=1,
+        status="complete",
+        model_settings={},
+        input_tokens=10,
+        output_tokens=5,
+        total_tokens=15,
+        model_call_count=1,
+    )
+    original = Assessment(
+        version=1,
+        kind="original_generation",
+        raw_response_text="canonical",
+        parsed_json={"questions": [{"body": "Question"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    rewrite = Assessment(
+        version=2,
+        kind="full_rewrite",
+        source_assessment=original,
+        raw_response_text="canonical",
+        parsed_json={"questions": [{"body": "Question"}]},
+        output_hash="a" * 64,
+        schema_version="1",
+    )
+    run.assessment_versions.extend([original, rewrite])
+    run.canonical_assessment = rewrite
+    rewrite.document_artifact = DocumentArtifact(
+        run=run,
+        filename="direct.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        content=b"PK-direct",
+    )
+    run.model_call_usages.append(
+        ModelCallUsage(
+            call_id="direct-generation",
+            stage="docx_direct_generation",
+            attempt=1,
+            status="response",
+            provider_response_id="resp-direct",
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=15,
+            extra_token_counts={},
+        )
+    )
+    test_db.add(run)
+    test_db.commit()
+
+    body = client.get(f"/runs/{run.id}").json()
+
+    assert body["rewrite"]["backend"] == "luna_direct"
+    assert body["rewrite"]["status"] == "succeeded"
+    assert body["rewrite"]["attempt_count"] == 0
+    assert body["token_usage"]["stages"][0]["stage"] == "docx_direct_generation"
+
+
 def test_evaluation_retry_endpoint_reuses_viewer_ready_run(client, test_db):
     experiment, condition = _experiment_and_condition(test_db)
     run = Run(

@@ -21,6 +21,11 @@ from backend.services.docx_content_catalog import DocxContentCatalog
 from backend.services.docx_visual_renderer import DocxVisualRenderer
 from backend.services.docx_tool_workspace import DocxWorkspace
 from backend.services.gemini_docx_tool_agent import DOCX_TOOL_MODEL, GeminiDocxToolAgent
+from backend.services.luna_direct_docx_provider import (
+    LunaDirectDocxProvider,
+    LunaDocxGenerationError,
+)
+from backend.services.luna_direct_docx_verifier import LunaDirectDocxVerifier
 from backend.services.usage_tracking import record_model_call
 
 
@@ -132,9 +137,68 @@ class AgenticToolDocumentGenerator:
         return DocumentGenerationResult(True, True)
 
 
+class LunaDirectDocumentGenerator:
+    def __init__(self, provider=None, verifier=None):
+        self.provider = provider
+        self.verifier = verifier or LunaDirectDocxVerifier()
+
+    def generate(
+        self,
+        *,
+        db: Session,
+        run: Run,
+        attachments=(),
+        progress=lambda _: None,
+    ) -> DocumentGenerationResult:
+        source = next(
+            (item for item in run.assessment_versions if item.version == 1),
+            None,
+        )
+        if source is None or source.parsed_json is None:
+            return DocumentGenerationResult(
+                False, False, ("source_assessment_missing",)
+            )
+        progress("docx_authoring")
+        try:
+            provider = self.provider or LunaDirectDocxProvider()
+            generated = provider.generate(source.parsed_json, run_id=run.id)
+        except LunaDocxGenerationError as exc:
+            return DocumentGenerationResult(False, False, (exc.code,))
+        record_model_call(
+            db,
+            run=run,
+            call_id=str(uuid.uuid4()),
+            stage="docx_direct_generation",
+            attempt=1,
+            result=generated.provider_result,
+        )
+        progress("docx_validating")
+        report = self.verifier.verify(generated.content, source.parsed_json)
+        if not report.valid:
+            return DocumentGenerationResult(
+                False,
+                False,
+                tuple(dict.fromkeys(issue.code for issue in report.issues)),
+            )
+        artifact = generated_docx_artifact(run_id=run.id, content=generated.content)
+        persist_rewrite_and_canonicalize(
+            db,
+            run=run,
+            manifest=source.parsed_json,
+            artifact=artifact,
+            schema_version=source.schema_version,
+        )
+        return DocumentGenerationResult(True, True)
+
+
 class DocumentGeneratorRegistry:
     def __init__(self):
-        self._generators = {"legacy": LegacyDocumentGenerator(), "self_hosted_code": SelfHostedCodeDocumentGenerator(), "agentic_tools": AgenticToolDocumentGenerator()}
+        self._generators = {
+            "luna_direct": LunaDirectDocumentGenerator(),
+            "legacy": LegacyDocumentGenerator(),
+            "self_hosted_code": SelfHostedCodeDocumentGenerator(),
+            "agentic_tools": AgenticToolDocumentGenerator(),
+        }
     def get(self, name): return self._generators[name]
 
 

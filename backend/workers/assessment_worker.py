@@ -231,9 +231,9 @@ def _create_document(
     """Create the configured artifact and return whether version 2 is canonical."""
     messages = {
         "documenting": "Creating assessment document",
-        "docx_authoring": "Gemini is designing the Word document" if settings.docx_generation_backend == "agentic_tools" else "Authoring assessment document",
+        "docx_authoring": "Luna is generating the Word document" if settings.docx_generation_backend == "luna_direct" else ("Gemini is designing the Word document" if settings.docx_generation_backend == "agentic_tools" else "Authoring assessment document"),
         "docx_executing": "Applying document operations" if settings.docx_generation_backend == "agentic_tools" else "Executing DOCX program",
-        "docx_validating": "Rendering and verifying the Word document" if settings.docx_generation_backend == "agentic_tools" else "Validating assessment document",
+        "docx_validating": "Structurally verifying the Luna Word document" if settings.docx_generation_backend == "luna_direct" else ("Rendering and verifying the Word document" if settings.docx_generation_backend == "agentic_tools" else "Validating assessment document"),
         "docx_repairing": "Gemini is revising the rendered document" if settings.docx_generation_backend == "agentic_tools" else "Repairing assessment document",
     }
 
@@ -284,11 +284,12 @@ def run_docx_rewrite_pipeline(
             return
 
         agentic = settings.docx_generation_backend == "agentic_tools"
+        luna_direct = settings.docx_generation_backend == "luna_direct"
         messages = {
             "documenting": "Creating assessment document",
-            "docx_authoring": "Gemini is designing the Word document" if agentic else "Authoring Word document",
+            "docx_authoring": "Luna is generating the Word document" if luna_direct else ("Gemini is designing the Word document" if agentic else "Authoring Word document"),
             "docx_executing": "Applying document operations" if agentic else "Building Word document in sandbox",
-            "docx_validating": "Rendering and verifying the Word document" if agentic else "Verifying Word document",
+            "docx_validating": "Structurally verifying the Luna Word document" if luna_direct else ("Rendering and verifying the Word document" if agentic else "Verifying Word document"),
             "docx_repairing": "Gemini is revising the rendered document" if agentic else "Repairing Word document",
         }
 

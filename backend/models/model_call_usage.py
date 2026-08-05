@@ -25,7 +25,7 @@ class ModelCallUsage(Base):
             "stage IN ('actual_prompt','planning','validation','assessment','evaluation','repair',"
             "'structured_output_retry','docx_authoring','docx_repair',"
             "'docx_code_generation','docx_code_repair','docx_tool_design',"
-            "'docx_visual_review')",
+            "'docx_visual_review','docx_direct_generation')",
             name="ck_model_call_usages_stage",
         ),
         CheckConstraint(

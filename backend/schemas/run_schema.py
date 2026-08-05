@@ -67,7 +67,9 @@ class RewriteFailure(BaseModel):
 
 
 class RewriteState(BaseModel):
-    backend: Literal["legacy", "self_hosted_code", "agentic_tools"] = "legacy"
+    backend: Literal[
+        "luna_direct", "legacy", "self_hosted_code", "agentic_tools"
+    ] = "luna_direct"
     status: Literal["not_started", "in_progress", "succeeded", "failed"]
     attempt_count: int
     repair_available: bool
