@@ -4,9 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from backend.models import Assessment, Run
 from backend.services.document_generators import (
-    GeminiLunaPairDocumentGenerator,
     LunaDirectDocumentGenerator,
-    auto_download_docx,
     document_generator_registry,
 )
 from backend.services.docx_verification import VerificationIssue, VerificationReport
@@ -73,64 +71,14 @@ def generated_result(content=b"PK-direct-docx", request_id="resp-direct"):
     )
 
 
-def test_registry_resolves_all_document_backends():
+def test_registry_resolves_single_vendor_document_backends():
     for backend in (
-        "gemini_luna_pair",
         "luna_direct",
         "legacy",
         "self_hosted_code",
         "agentic_tools",
     ):
         assert document_generator_registry.get(backend) is not None
-
-
-def test_auto_download_docx_uses_provider_specific_filename(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "backend.services.document_generators.settings.docx_auto_download_dir",
-        str(tmp_path),
-    )
-
-    saved = auto_download_docx(run_id=42, provider="gemini", content=b"PK-docx")
-
-    assert saved == tmp_path / "blueprint-lab-run-42-gemini.docx"
-    assert saved.read_bytes() == b"PK-docx"
-    assert list(tmp_path.iterdir()) == [saved]
-
-
-def test_pair_generates_both_documents_from_the_same_run(test_db):
-    run, _ = source_run(test_db)
-    gemini = MagicMock()
-    gemini.generate.return_value = SimpleNamespace(
-        succeeded=True,
-        canonicalized=False,
-        safe_issue_codes=(),
-        artifact_content=b"PK-gemini",
-    )
-    luna = MagicMock()
-    luna.generate.return_value = SimpleNamespace(
-        succeeded=True,
-        canonicalized=True,
-        safe_issue_codes=(),
-        artifact_content=b"PK-luna",
-    )
-    downloader = MagicMock()
-
-    result = GeminiLunaPairDocumentGenerator(
-        gemini=gemini,
-        luna=luna,
-        downloader=downloader,
-    ).generate(db=test_db, run=run)
-
-    assert result.succeeded is True
-    assert result.canonicalized is True
-    assert gemini.generate.call_args.kwargs["run"] is run
-    assert luna.generate.call_args.kwargs["run"] is run
-    assert gemini.generate.call_args.kwargs["persist_artifact"] is False
-    assert luna.generate.call_args.kwargs["persist_artifact"] is True
-    assert [call.kwargs for call in downloader.call_args_list] == [
-        {"run_id": run.id, "provider": "gemini", "content": b"PK-gemini"},
-        {"run_id": run.id, "provider": "luna", "content": b"PK-luna"},
-    ]
 
 
 def test_luna_direct_persists_verified_artifact_without_rendering(test_db):

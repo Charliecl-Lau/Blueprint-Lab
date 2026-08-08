@@ -55,18 +55,10 @@ ASSESSMENT_MAX_REPAIR_ATTEMPTS=3
 DOCX_TOOL_PROVIDER_TIMEOUT_SECONDS=300
 DOCX_TOOL_REASONING_EFFORT=medium
 LOCAL_REVIEWER_ID=local-reviewer
-DOCX_GENERATION_BACKEND=gemini_luna_pair
-DOCX_AUTO_DOWNLOAD_DIR=C:\Users\yeekw\Documents\Blueprint-Lab Run Result\Paper
+DOCX_GENERATION_BACKEND=luna_direct
 ```
 
-The default `gemini_luna_pair` document backend sends the same validated
-assessment manifest to the Gemini tool-authoring pipeline and the Luna direct
-DOCX pipeline. It automatically writes
-`blueprint-lab-run-<id>-gemini.docx` and
-`blueprint-lab-run-<id>-luna.docx` to `DOCX_AUTO_DOWNLOAD_DIR`; the verified
-Luna file remains the canonical artifact available through the application.
-
-The experimental `luna_direct` document backend keeps the established
+The default `luna_direct` document backend keeps the established
 Actual-Prompt-driven assessment JSON workflow unchanged. After that JSON is
 validated and persisted as canonical content, a second `gpt-5.6-sol` Responses
 call uses an ephemeral Code Interpreter container to create a real DOCX and

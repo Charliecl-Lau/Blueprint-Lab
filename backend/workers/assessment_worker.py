@@ -596,7 +596,7 @@ def _create_document(
     """Create the configured artifact and return whether version 2 is canonical."""
     messages = {
         "documenting": "Creating assessment document",
-        "docx_authoring": "Generating the Gemini and Luna Word documents" if settings.docx_generation_backend == "gemini_luna_pair" else ("Luna is generating the Word document" if settings.docx_generation_backend == "luna_direct" else ("Gemini is designing the Word document" if settings.docx_generation_backend == "agentic_tools" else "Authoring assessment document")),
+        "docx_authoring": "Sol is generating the Word document" if settings.docx_generation_backend == "luna_direct" else ("Gemini is designing the Word document" if settings.docx_generation_backend == "agentic_tools" else "Authoring assessment document"),
         "docx_executing": "Applying document operations" if settings.docx_generation_backend == "agentic_tools" else "Executing DOCX program",
         "docx_validating": "Structurally verifying the Luna Word document" if settings.docx_generation_backend == "luna_direct" else ("Rendering and verifying the Word document" if settings.docx_generation_backend == "agentic_tools" else "Validating assessment document"),
         "docx_repairing": "Gemini is revising the rendered document" if settings.docx_generation_backend == "agentic_tools" else "Repairing assessment document",

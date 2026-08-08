@@ -18,11 +18,8 @@ class Settings(BaseSettings):
     llm_provider_timeout_seconds: int = 300
     assessment_max_repair_attempts: int = 3
     docx_generation_backend: Literal[
-        "gemini_luna_pair", "luna_direct", "legacy", "self_hosted_code", "agentic_tools"
-    ] = "gemini_luna_pair"
-    docx_auto_download_dir: str = (
-        r"C:\Users\yeekw\Documents\Blueprint-Lab Run Result\Paper"
-    )
+        "luna_direct", "legacy", "self_hosted_code", "agentic_tools"
+    ] = "luna_direct"
     docx_tool_max_revisions: int = 2
     docx_tool_max_operations_per_turn: int = 100
     docx_tool_max_review_pages: int = 25

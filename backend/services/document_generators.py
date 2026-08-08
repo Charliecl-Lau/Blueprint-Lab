@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,21 +38,6 @@ class DocumentGenerationResult:
     canonicalized: bool
     safe_issue_codes: tuple[str, ...] = ()
     artifact_content: bytes | None = None
-
-
-def auto_download_docx(*, run_id: int, provider: str, content: bytes) -> Path:
-    """Atomically save a provider comparison artifact to the configured folder."""
-    destination = Path(settings.docx_auto_download_dir)
-    destination.mkdir(parents=True, exist_ok=True)
-    final_path = destination / f"blueprint-lab-run-{run_id}-{provider}.docx"
-    temporary_path = destination / f".{final_path.name}.{uuid.uuid4().hex}.tmp"
-    try:
-        temporary_path.write_bytes(content)
-        os.replace(temporary_path, final_path)
-    finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
-    return final_path
 
 
 class LegacyDocumentGenerator:
@@ -339,67 +323,9 @@ class LunaDirectDocumentGenerator:
                     db.commit()
 
 
-class GeminiLunaPairDocumentGenerator:
-    """Generate two DOCX files from assessment version 1 for direct comparison."""
-
-    def __init__(self, gemini=None, luna=None, downloader=auto_download_docx):
-        self.gemini = gemini or AgenticToolDocumentGenerator()
-        self.luna = luna or LunaDirectDocumentGenerator()
-        self.downloader = downloader
-
-    def generate(
-        self,
-        *,
-        db: Session,
-        run: Run,
-        attachments=(),
-        progress=lambda _: None,
-    ) -> DocumentGenerationResult:
-        issue_codes: list[str] = []
-        gemini_result = self.gemini.generate(
-            db=db,
-            run=run,
-            attachments=attachments,
-            progress=progress,
-            persist_artifact=False,
-        )
-        if gemini_result.succeeded and gemini_result.artifact_content is not None:
-            self.downloader(
-                run_id=run.id,
-                provider="gemini",
-                content=gemini_result.artifact_content,
-            )
-        else:
-            issue_codes.extend(gemini_result.safe_issue_codes or ("gemini_docx_failed",))
-
-        luna_result = self.luna.generate(
-            db=db,
-            run=run,
-            attachments=attachments,
-            progress=progress,
-            persist_artifact=True,
-        )
-        if luna_result.succeeded and luna_result.artifact_content is not None:
-            self.downloader(
-                run_id=run.id,
-                provider="luna",
-                content=luna_result.artifact_content,
-            )
-        else:
-            issue_codes.extend(luna_result.safe_issue_codes or ("luna_docx_failed",))
-
-        return DocumentGenerationResult(
-            succeeded=not issue_codes,
-            canonicalized=luna_result.canonicalized,
-            safe_issue_codes=tuple(dict.fromkeys(issue_codes)),
-            artifact_content=luna_result.artifact_content,
-        )
-
-
 class DocumentGeneratorRegistry:
     def __init__(self):
         self._generators = {
-            "gemini_luna_pair": GeminiLunaPairDocumentGenerator(),
             "luna_direct": LunaDirectDocumentGenerator(),
             "legacy": LegacyDocumentGenerator(),
             "self_hosted_code": SelfHostedCodeDocumentGenerator(),
