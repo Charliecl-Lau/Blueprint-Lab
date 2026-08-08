@@ -39,7 +39,7 @@ class Provider:
     def author_program(self, grounding, *, attempt_number, repair_context=None):
         self.calls.append((attempt_number, repair_context))
         envelope = DocxProgramEnvelope(schema_version="docx-program-envelope/1", language="python", entrypoint="program.py", program=f"# attempt {attempt_number}", expected_outputs=["assessment.docx", "assessment_manifest.json"], grounding_sha256=grounding.sha256, generation_notes="")
-        return AuthoringResult(envelope, LLMResult("{}", f"response-{attempt_number}", "gpt-5.6-luna", "v1", "STOP"), 1, "c" * 64)
+        return AuthoringResult(envelope, LLMResult("{}", f"response-{attempt_number}", "gpt-5.6-sol", "v1", "STOP"), 1, "c" * 64)
 
 
 class Sandbox:
@@ -70,4 +70,4 @@ def test_pipeline_canonicalizes_only_after_all_gates_pass(test_db):
     assert run.document_artifact.content == b"docx"
     assert [usage.stage for usage in run.model_call_usages] == ["docx_code_generation"]
     assert run.docx_authoring_attempts[0].provider == "openai"
-    assert run.docx_authoring_attempts[0].model == "gpt-5.6-luna"
+    assert run.docx_authoring_attempts[0].model == "gpt-5.6-sol"

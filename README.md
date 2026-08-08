@@ -26,7 +26,7 @@ Prerequisites:
 - Python 3.9 or newer
 - Node.js and npm
 - Docker Desktop
-- An OpenAI API key with access to `gpt-5.6-luna`
+- An OpenAI API key with access to `gpt-5.6-sol`
 
 Run all commands from the repository root unless a step says otherwise.
 
@@ -45,7 +45,7 @@ DATABASE_URL=postgresql+psycopg://blueprint:blueprint@localhost:5432/blueprint_l
 REDIS_URL=redis://localhost:6379/0
 OPENAI_API_KEY=replace-with-your-openai-api-key
 LLM_PROVIDER=openai
-LLM_MODEL=gpt-5.6-luna
+LLM_MODEL=gpt-5.6-sol
 LLM_EVALUATION_MODEL=
 LLM_TEMPERATURE=0.2
 LLM_MAX_OUTPUT_TOKENS=32768
@@ -68,7 +68,7 @@ Luna file remains the canonical artifact available through the application.
 
 The experimental `luna_direct` document backend keeps the established
 Actual-Prompt-driven assessment JSON workflow unchanged. After that JSON is
-validated and persisted as canonical content, a second `gpt-5.6-luna` Responses
+validated and persisted as canonical content, a second `gpt-5.6-sol` Responses
 call uses an ephemeral Code Interpreter container to create a real DOCX and
 makes the Image Generation tool available for optional supplementary solution
 figures. Equations and assessed prose always remain editable Word content. The

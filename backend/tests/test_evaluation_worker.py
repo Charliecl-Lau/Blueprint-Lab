@@ -172,12 +172,12 @@ def _run_worker(test_db, llm):
         return redis_client
 
 
-def test_evaluation_worker_uses_configured_openai_luna_client(test_db, monkeypatch):
+def test_evaluation_worker_uses_configured_openai_sol_client(test_db, monkeypatch):
     run = _saved_run(test_db)
-    llm = MagicMock(model="gpt-5.6-luna", run_id=run.id)
+    llm = MagicMock(model="gpt-5.6-sol", run_id=run.id)
     llm.generate.return_value = _result()
     monkeypatch.setattr(settings, "llm_provider", "openai")
-    monkeypatch.setattr(settings, "llm_model", "gpt-5.6-luna")
+    monkeypatch.setattr(settings, "llm_model", "gpt-5.6-sol")
     monkeypatch.setattr(settings, "llm_evaluation_model", None)
     test_db.close = MagicMock()
 
@@ -190,7 +190,7 @@ def test_evaluation_worker_uses_configured_openai_luna_client(test_db, monkeypat
 
         run_llm_evaluation_pipeline.run(run.id)
 
-    client_type.assert_called_once_with(provider="openai", model="gpt-5.6-luna")
+    client_type.assert_called_once_with(provider="openai", model="gpt-5.6-sol")
 
 
 def test_evaluation_worker_finalizes_saved_questions_without_mutating_run(

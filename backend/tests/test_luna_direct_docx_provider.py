@@ -25,7 +25,7 @@ def docx_bytes():
 def response(citations, *, status="completed"):
     return SimpleNamespace(
         id="resp-docx",
-        model="gpt-5.6-luna-2026-08-01",
+        model="gpt-5.6-sol-2026-08-01",
         status=status,
         output_text="Created the assessment.",
         output=[SimpleNamespace(content=[SimpleNamespace(annotations=citations)])],

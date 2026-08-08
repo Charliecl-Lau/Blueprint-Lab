@@ -92,17 +92,17 @@ def test_run_without_overrides_persists_effective_environment_settings(
     assert run.max_tokens == 4096
 
 
-def test_run_snapshot_uses_openai_luna_defaults(test_db, monkeypatch):
+def test_run_snapshot_uses_openai_sol_defaults(test_db, monkeypatch):
     item = condition(test_db)
     monkeypatch.setattr(settings, "llm_provider", "openai")
-    monkeypatch.setattr(settings, "llm_model", "gpt-5.6-luna")
+    monkeypatch.setattr(settings, "llm_model", "gpt-5.6-sol")
 
     run = create_run(test_db, item.id, [])
 
     assert run.provider == "openai"
-    assert run.model == "gpt-5.6-luna"
+    assert run.model == "gpt-5.6-sol"
     assert run.execution_config["effective_provider_request"]["provider"] == "openai"
-    assert run.execution_config["effective_provider_request"]["model"] == "gpt-5.6-luna"
+    assert run.execution_config["effective_provider_request"]["model"] == "gpt-5.6-sol"
 
 
 def test_retry_copies_effective_snapshot_when_environment_defaults_change(

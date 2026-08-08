@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import contextmanager
 from io import BytesIO
 from types import SimpleNamespace
@@ -115,10 +116,10 @@ def test_llm_client_rejects_nonpositive_provider_timeout():
         LLMClient(timeout_ms=0)
 
 
-def test_openai_luna_is_the_default_provider_and_model():
+def test_openai_sol_is_the_default_provider_and_model():
     configured = Settings(_env_file=None)
     assert configured.llm_provider == "openai"
-    assert configured.llm_model == "gpt-5.6-luna"
+    assert configured.llm_model == "gpt-5.6-sol"
     assert Settings(_env_file=None).docx_tool_provider_timeout_seconds == 300
 
 
@@ -414,7 +415,7 @@ def test_llm_client_deletes_provider_file_by_name():
 def openai_response(*, status="completed", output_text="result"):
     return SimpleNamespace(
         id="resp_123",
-        model="gpt-5.6-luna-2026-08-01",
+        model="gpt-5.6-sol-2026-08-01",
         status=status,
         output_text=output_text,
         output_parsed=None,
@@ -441,7 +442,7 @@ def test_openai_client_constructs_responses_request_with_ordered_files():
     with patch("backend.services.llm_client.OpenAI") as client_type:
         client_type.return_value.responses.create.return_value = openai_response()
 
-        result = LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+        result = LLMClient(provider="openai", model="gpt-5.6-sol").generate(
             "system", "user", attachments=attachments
         )
 
@@ -450,7 +451,7 @@ def test_openai_client_constructs_responses_request_with_ordered_files():
         timeout=float(settings.llm_provider_timeout_seconds),
     )
     request = client_type.return_value.responses.create.call_args.kwargs
-    assert request["model"] == "gpt-5.6-luna"
+    assert request["model"] == "gpt-5.6-sol"
     assert request["instructions"] == "system"
     assert request["input"][0]["content"] == [
         {"type": "input_text", "text": "user"},
@@ -459,7 +460,7 @@ def test_openai_client_constructs_responses_request_with_ordered_files():
     ]
     assert request["reasoning"] == {"effort": "high"}
     assert result.provider_request_id == "resp_123"
-    assert result.model_version == "gpt-5.6-luna-2026-08-01"
+    assert result.model_version == "gpt-5.6-sol-2026-08-01"
     assert result.usage == TokenUsage(120, 50, 170, 25, 15, {})
 
 
@@ -468,7 +469,7 @@ def test_openai_client_uses_responses_parse_for_pydantic_output():
         response = openai_response(output_text='{"questions": []}')
         client_type.return_value.responses.parse.return_value = response
 
-        LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+        LLMClient(provider="openai", model="gpt-5.6-sol").generate(
             "system",
             "user",
             response_schema=AssessmentGenerationResponse,
@@ -492,7 +493,7 @@ def test_openai_client_uses_strict_text_format_for_json_schema_dict():
             output_text='{"questions": []}'
         )
 
-        LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+        LLMClient(provider="openai", model="gpt-5.6-sol").generate(
             "system", "user", response_schema=schema
         )
 
@@ -514,7 +515,7 @@ def test_openai_strict_schema_requires_defaulted_nested_assessment_fields():
             output_text='{"questions": []}'
         )
 
-        LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+        LLMClient(provider="openai", model="gpt-5.6-sol").generate(
             "system", "user", response_schema=ASSESSMENT_PROVIDER_SCHEMA
         )
 
@@ -528,6 +529,27 @@ def test_openai_strict_schema_requires_defaulted_nested_assessment_fields():
     assert "default" not in question["properties"]["options"]
 
 
+def test_openai_strict_schema_rewrites_discriminated_unions_to_any_of():
+    from backend.schemas.assessment_schema import ASSESSMENT_PROVIDER_SCHEMA
+
+    with patch("backend.services.llm_client.OpenAI") as client_type:
+        client_type.return_value.responses.create.return_value = openai_response(
+            output_text='{"questions": []}'
+        )
+
+        LLMClient(provider="openai", model="gpt-5.6-sol").generate(
+            "system", "user", response_schema=ASSESSMENT_PROVIDER_SCHEMA
+        )
+
+    strict_schema = client_type.return_value.responses.create.call_args.kwargs[
+        "text"
+    ]["format"]["schema"]
+    serialized = json.dumps(strict_schema)
+    assert '"oneOf"' not in serialized
+    assert '"discriminator"' not in serialized
+    assert '"anyOf"' in serialized
+
+
 def test_openai_incomplete_response_preserves_reason_and_usage():
     with patch("backend.services.llm_client.OpenAI") as client_type:
         client_type.return_value.responses.create.return_value = openai_response(
@@ -535,7 +557,7 @@ def test_openai_incomplete_response_preserves_reason_and_usage():
         )
 
         with pytest.raises(TruncatedResponseError) as raised:
-            LLMClient(provider="openai", model="gpt-5.6-luna").generate(
+            LLMClient(provider="openai", model="gpt-5.6-sol").generate(
                 "system", "user"
             )
 
@@ -547,7 +569,7 @@ def test_openai_uploads_and_deletes_pdf_file():
     pdf = ValidatedReferencePdf("reference.pdf", b"%PDF-1.7\nvalid")
     with patch("backend.services.llm_client.OpenAI") as client_type:
         client_type.return_value.files.create.return_value = SimpleNamespace(id="file-123")
-        client = LLMClient(provider="openai", model="gpt-5.6-luna")
+        client = LLMClient(provider="openai", model="gpt-5.6-sol")
 
         attachment = client.upload_pdf(pdf)
         client.delete_file(attachment.name)

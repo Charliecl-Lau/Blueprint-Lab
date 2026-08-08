@@ -13,7 +13,7 @@ from backend.services.llm_client import LLMClient
 from backend.services.reproducibility import canonical_json, sha256_text
 
 
-DOCX_AUTHORING_MODEL = "gpt-5.6-luna"
+DOCX_AUTHORING_MODEL = "gpt-5.6-sol"
 _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 
 

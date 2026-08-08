@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     openai_api_key: str = ""
     llm_provider: str = "openai"
-    llm_model: str = "gpt-5.6-luna"
+    llm_model: str = "gpt-5.6-sol"
     llm_evaluation_model: Optional[str] = None
     llm_temperature: float = 0.2
     llm_top_p: float = 0.95

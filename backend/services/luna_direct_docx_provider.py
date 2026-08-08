@@ -16,7 +16,7 @@ from backend.services.llm_client import LLMResult, TokenUsage
 from backend.services.reproducibility import canonical_json
 
 
-LUNA_DIRECT_MODEL = "gpt-5.6-luna"
+LUNA_DIRECT_MODEL = "gpt-5.6-sol"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "luna_direct_docx_system.md"
 
 

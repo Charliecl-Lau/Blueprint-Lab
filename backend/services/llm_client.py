@@ -46,11 +46,16 @@ def _openai_strict_schema(value):
     they are not accepted by strict response formats.
     """
     if isinstance(value, dict):
-        normalized = {
-            key: _openai_strict_schema(item)
-            for key, item in value.items()
-            if key != "default"
-        }
+        normalized = {}
+        for key, item in value.items():
+            if key in {"default", "discriminator"}:
+                continue
+            # Pydantic emits discriminated unions as ``oneOf`` plus a
+            # discriminator mapping. OpenAI's strict structured-output subset
+            # accepts the equivalent ``anyOf`` form but rejects ``oneOf``.
+            normalized["anyOf" if key == "oneOf" else key] = (
+                _openai_strict_schema(item)
+            )
         properties = normalized.get("properties")
         if isinstance(properties, dict):
             normalized["required"] = list(properties)
