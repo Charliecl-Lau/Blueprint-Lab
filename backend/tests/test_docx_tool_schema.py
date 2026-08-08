@@ -16,9 +16,9 @@ def test_agentic_docx_client_uses_extended_provider_timeout():
         GeminiDocxToolAgent()
 
     client_class.assert_called_once_with(
-        provider="openai",
+        provider="google",
         model=DOCX_TOOL_MODEL,
-        timeout_ms=120_000,
+        timeout_ms=300_000,
     )
 
 

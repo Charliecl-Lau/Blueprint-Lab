@@ -34,6 +34,36 @@ def test_gemini_authoring_uses_strict_schema_grounding_and_attachments():
     assert "code_execution" not in repr(client.calls[0]).casefold()
 
 
+def test_gemini_authoring_prompt_matches_luna_quality_contract_with_sandbox_limits():
+    grounding = DocxGrounding({"x": 1})
+    client = FakeClient(envelope(grounding.sha256))
+
+    GeminiDocxAuthoringProvider(client).author_program(grounding, attempt_number=1)
+
+    prompt = client.calls[0]["system_prompt"]
+    for requirement in (
+        "# Role",
+        "# Personality",
+        "# Measure of Success",
+        "# Required Document Structure",
+        "# Equation Rendering",
+        "# Document Design",
+        "# Verification",
+        "editable native Microsoft Word equations",
+        "dynamic `Page X of Y`",
+        "accessible tables",
+        "keep_with_next",
+    ):
+        assert requirement in prompt
+    assert "/output/assessment.docx" in prompt
+    assert "/output/assessment_manifest.json" in prompt
+    assert "manifest_json_schema" in prompt
+    assert "requirements.manifest_invariants" in prompt
+    assert "/mnt/data/assessment.docx" not in prompt
+    assert "Image Generation tool" not in prompt
+    assert "Do not import `os`, `pathlib`, `sys`, `subprocess`, `zipfile`" in prompt
+
+
 @pytest.mark.parametrize("raw", ["```json\n{}\n```", "prose {}", "{} {}"])
 def test_gemini_authoring_rejects_non_envelope_output(raw):
     grounding = DocxGrounding({"x": 1})

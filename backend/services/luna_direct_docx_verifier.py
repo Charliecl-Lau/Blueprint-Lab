@@ -17,6 +17,7 @@ from backend.services.reproducibility import canonical_json, sha256_text
 
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+_WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 _EQ_REFERENCE = re.compile(r"\[\[EQ:[A-Za-z0-9_-]+\]\]")
 _EQ_LABEL_REFERENCE = re.compile(r"\[\[EQ:([A-Za-z0-9_-]+)\]\]")
 _RAW_LINEAR_MATH = re.compile(r"[_^]|\\(?:alpha|beta|gamma|delta|frac|sqrt)\b")
@@ -176,8 +177,22 @@ def _metadata_table(root) -> tuple[list[tuple[str, str]], bool]:
     return [], False
 
 
-def _referenced_equations(questions: list[dict]) -> list[dict]:
-    ordered: list[dict] = []
+def _placeholder_placement(value: str, start: int, end: int) -> str:
+    line_start = value.rfind("\n", 0, start) + 1
+    line_end = value.find("\n", end)
+    if line_end < 0:
+        line_end = len(value)
+    before = value[line_start:start].strip()
+    after = value[end:line_end].strip()
+    after_without_punctuation = re.sub(r"[.,;:!?]+", "", after).strip()
+    return "display" if not before and not after_without_punctuation else "inline"
+
+
+def _referenced_equation_placements(
+    questions: list[dict],
+) -> list[tuple[dict, str]]:
+    ordered: list[tuple[dict, str]] = []
+    included: set[int] = set()
     for location in ("question", "solution"):
         for question in questions:
             equations = {
@@ -191,18 +206,31 @@ def _referenced_equations(questions: list[dict]) -> list[dict]:
             )
             found = False
             for value in texts:
-                for label in _EQ_LABEL_REFERENCE.findall(value or ""):
+                text = value or ""
+                for match in _EQ_LABEL_REFERENCE.finditer(text):
+                    label = match.group(1)
                     equation = equations.get(label)
                     if equation is not None:
-                        ordered.append(equation)
+                        ordered.append(
+                            (
+                                equation,
+                                _placeholder_placement(
+                                    text, match.start(), match.end()
+                                ),
+                            )
+                        )
+                        included.add(id(equation))
                         found = True
             if not found:
-                ordered.extend(
-                    item
-                    for item in question.get("equations") or []
-                    if item.get("location") == location and item not in ordered
-                )
+                for item in question.get("equations") or []:
+                    if item.get("location") == location and id(item) not in included:
+                        ordered.append((item, "display"))
+                        included.add(id(item))
     return ordered
+
+
+def _referenced_equations(questions: list[dict]) -> list[dict]:
+    return [equation for equation, _ in _referenced_equation_placements(questions)]
 
 
 def _structured_math_requirements(node) -> tuple[Counter, set[str]]:
@@ -218,6 +246,8 @@ def _structured_math_requirements(node) -> tuple[Counter, set[str]]:
             return
         kind = value.get("type")
         structure = {
+            "delimiter": "delimiter",
+            "function": "function",
             "fraction": "fraction",
             "subscript": "subscript",
             "superscript": "superscript",
@@ -245,6 +275,8 @@ def _equation_structure_errors(equation, equation_entry: dict) -> list[str]:
     if isinstance(structured_math, dict):
         required, required_glyphs = _structured_math_requirements(structured_math)
         actual = {
+            "delimiter": len(equation.xpath(".//m:d", namespaces=namespaces)),
+            "function": len(equation.xpath(".//m:func", namespaces=namespaces)),
             "fraction": len(equation.xpath(".//m:f", namespaces=namespaces)),
             "subscript": len(
                 equation.xpath(".//m:sSub | .//m:sSubSup", namespaces=namespaces)
@@ -305,7 +337,11 @@ class LunaDirectDocxVerifier:
             evidence = ",".join(issue.code for issue in package_report.issues)
             return VerificationReport(
                 valid=False,
-                issues=(VerificationIssue("docx_package_invalid", evidence=evidence),),
+                issues=(VerificationIssue(
+                    "docx_package_invalid",
+                    repairable=all(issue.repairable for issue in package_report.issues),
+                    evidence=evidence,
+                ),),
                 package_sha256=package_hash,
                 manifest_sha256=manifest_hash,
                 tool_versions={"luna_direct_verifier": "4", "package_verifier": "1"},
@@ -436,52 +472,91 @@ class LunaDirectDocxVerifier:
         ):
             issues.append(VerificationIssue("assessment_section_order_invalid"))
 
-        expected_equation_entries = _referenced_equations(questions)
-        expected_equations = len(expected_equation_entries)
-        native_equations = root.xpath("//m:oMathPara/m:oMath", namespaces={"m": _M_NS})
-        all_native_equations = root.xpath("//m:oMath", namespaces={"m": _M_NS})
+        expected_equation_placements = _referenced_equation_placements(questions)
+        expected_equations = len(expected_equation_placements)
+        native_equations = root.xpath("//m:oMath", namespaces={"m": _M_NS})
         if expected_equations and not native_equations:
             issues.append(VerificationIssue("native_equation_missing"))
         elif len(native_equations) != expected_equations:
-            issues.append(
-                VerificationIssue(
-                    "native_equation_count_mismatch",
-                    evidence=f"expected {expected_equations}, found {len(native_equations)} display equations",
-                )
-            )
-        if len(all_native_equations) != len(native_equations):
-            issues.append(VerificationIssue("native_equation_display_invalid"))
-        for index, equation in enumerate(native_equations):
-            container = equation.getparent()
-            justification = container.xpath(
-                "./m:oMathParaPr/m:jc",
-                namespaces={"m": _M_NS},
-            )
-            # ISO/IEC 29500 defines an omitted m:jc (and one without m:val) as
-            # centerGroup. Only an explicit non-centred value violates the
-            # display-equation contract.
-            justification_value = (
-                justification[0].get(f"{{{_M_NS}}}val") if justification else None
-            )
-            if justification_value not in {None, "center", "centerGroup"}:
                 issues.append(
                     VerificationIssue(
-                        "native_equation_display_invalid",
-                        evidence=(
-                            f"equation index {index}: explicit justification "
-                            f"{justification_value!r} is not centered"
-                        ),
+                        "native_equation_count_mismatch",
+                        evidence=f"expected {expected_equations}, found {len(native_equations)} native equations",
+                        expected={"count": expected_equations},
+                        actual={"count": len(native_equations)},
                     )
                 )
-            if index < len(expected_equation_entries):
+        for index, equation in enumerate(native_equations):
+            container = equation.getparent()
+            actual_placement = (
+                "display"
+                if container.tag == f"{{{_M_NS}}}oMathPara"
+                else "inline"
+            )
+            if index < len(expected_equation_placements):
+                equation_entry, expected_placement = expected_equation_placements[index]
+            else:
+                equation_entry, expected_placement = None, None
+            if expected_placement != actual_placement or (
+                actual_placement == "inline"
+                and container.tag != f"{{{_W_NS}}}p"
+            ):
+                issues.append(
+                    VerificationIssue(
+                        "native_equation_placement_invalid",
+                        evidence=(
+                            f"equation index {index}: expected {expected_placement}, "
+                            f"found {actual_placement}"
+                        ),
+                        target={
+                            "equation_label": (equation_entry or {}).get("label"),
+                            "equation_index": index,
+                        },
+                        expected={"placement": expected_placement},
+                        actual={"placement": actual_placement},
+                    )
+                )
+            if actual_placement == "display":
+                justification = container.xpath(
+                    "./m:oMathParaPr/m:jc",
+                    namespaces={"m": _M_NS},
+                )
+                # ISO/IEC 29500 defines an omitted m:jc (and one without m:val)
+                # as centerGroup. Only an explicit non-centred value violates
+                # the display-equation contract.
+                justification_value = (
+                    justification[0].get(f"{{{_M_NS}}}val")
+                    if justification
+                    else None
+                )
+                if justification_value not in {None, "center", "centerGroup"}:
+                    issues.append(
+                        VerificationIssue(
+                            "native_equation_display_invalid",
+                            evidence=(
+                                f"equation index {index}: explicit justification "
+                                f"{justification_value!r} is not centered"
+                            ),
+                        )
+                    )
+            if equation_entry is not None:
                 missing = _equation_structure_errors(
-                    equation, expected_equation_entries[index]
+                    equation, equation_entry
                 )
                 if missing:
                     issues.append(
                         VerificationIssue(
                             "native_equation_structure_invalid",
-                            evidence=f"equation index {index}: {','.join(missing)}",
+                            evidence=(
+                                f"equation label {(equation_entry or {}).get('label') or '<unknown>'} "
+                                f"at index {index}: {','.join(missing)}"
+                            ),
+                            target={
+                                "equation_label": (equation_entry or {}).get("label"),
+                                "equation_index": index,
+                            },
+                            expected={"required_constructs": missing},
+                            actual={"missing_constructs": missing},
                         )
                     )
         raw_math_text = " ".join(
@@ -489,6 +564,23 @@ class LunaDirectDocxVerifier:
         )
         if _RAW_LINEAR_MATH.search(raw_math_text):
             issues.append(VerificationIssue("native_equation_structure_invalid"))
+
+        for index, drawing in enumerate(
+            root.xpath("//w:drawing", namespaces={"w": _W_NS})
+        ):
+            properties = drawing.xpath(
+                ".//wp:docPr", namespaces={"wp": _WP_NS}
+            )
+            alternative_text = "" if not properties else (
+                properties[0].get("descr") or properties[0].get("title") or ""
+            )
+            if not alternative_text.strip():
+                issues.append(
+                    VerificationIssue(
+                        "image_alt_text_missing",
+                        evidence=f"drawing index {index}",
+                    )
+                )
 
         relationship_text = relationships.decode("utf-8", errors="ignore")
         if not header_xml or "/header" not in relationship_text:
@@ -507,5 +599,5 @@ class LunaDirectDocxVerifier:
             issues=tuple(issues),
             package_sha256=package_hash,
             manifest_sha256=manifest_hash,
-            tool_versions={"luna_direct_verifier": "4", "package_verifier": "1"},
+            tool_versions={"luna_direct_verifier": "6", "package_verifier": "1"},
         )

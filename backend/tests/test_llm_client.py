@@ -93,13 +93,13 @@ def test_llm_client_installs_event_loop_when_worker_thread_has_none():
     mock_client.assert_called_once()
 
 
-def test_llm_client_configures_sixty_second_provider_timeout():
+def test_llm_client_configures_environment_provider_timeout():
     with patch("backend.services.llm_client.genai.Client") as mock_client:
         LLMClient(provider="google")
 
     kwargs = mock_client.call_args.kwargs
     assert kwargs["api_key"] == settings.google_api_key
-    assert kwargs["http_options"].timeout == 60_000
+    assert kwargs["http_options"].timeout == settings.llm_provider_timeout_seconds * 1000
 
 
 def test_llm_client_accepts_a_longer_provider_timeout():
@@ -119,7 +119,7 @@ def test_openai_luna_is_the_default_provider_and_model():
     configured = Settings(_env_file=None)
     assert configured.llm_provider == "openai"
     assert configured.llm_model == "gpt-5.6-luna"
-    assert Settings(_env_file=None).docx_tool_provider_timeout_seconds == 120
+    assert Settings(_env_file=None).docx_tool_provider_timeout_seconds == 300
 
 
 def test_gemini_35_omits_legacy_sampling_fields():
@@ -445,7 +445,10 @@ def test_openai_client_constructs_responses_request_with_ordered_files():
             "system", "user", attachments=attachments
         )
 
-    client_type.assert_called_once_with(api_key=settings.openai_api_key, timeout=60.0)
+    client_type.assert_called_once_with(
+        api_key=settings.openai_api_key,
+        timeout=float(settings.llm_provider_timeout_seconds),
+    )
     request = client_type.return_value.responses.create.call_args.kwargs
     assert request["model"] == "gpt-5.6-luna"
     assert request["instructions"] == "system"
@@ -454,6 +457,7 @@ def test_openai_client_constructs_responses_request_with_ordered_files():
         {"type": "input_file", "file_id": "file-one"},
         {"type": "input_file", "file_id": "file-two"},
     ]
+    assert request["reasoning"] == {"effort": "high"}
     assert result.provider_request_id == "resp_123"
     assert result.model_version == "gpt-5.6-luna-2026-08-01"
     assert result.usage == TokenUsage(120, 50, 170, 25, 15, {})
@@ -472,6 +476,7 @@ def test_openai_client_uses_responses_parse_for_pydantic_output():
 
     request = client_type.return_value.responses.parse.call_args.kwargs
     assert request["text_format"] is AssessmentGenerationResponse
+    assert request["reasoning"] == {"effort": "high"}
     assert not client_type.return_value.responses.create.called
 
 

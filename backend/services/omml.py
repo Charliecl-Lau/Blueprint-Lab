@@ -41,6 +41,7 @@ _LINEAR_TOKEN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _EQUATION_PLACEHOLDER_PATTERN = re.compile(r"\[\[EQ:([A-Za-z0-9_-]+)\]\]")
+_FUNCTION_NAMES = {"ln", "exp", "sin", "cos", "tan", "log"}
 
 
 def _sequence(items: list[dict]) -> dict:
@@ -96,10 +97,16 @@ class _LinearEquationParser:
         node = self._parse_product()
         while self._peek() == "/":
             self._take()
+            numerator = (
+                node["content"] if node.get("type") == "delimiter" else node
+            )
+            denominator = self._parse_product()
+            if denominator.get("type") == "delimiter":
+                denominator = denominator["content"]
             node = {
                 "type": "fraction",
-                "numerator": node,
-                "denominator": self._parse_product(),
+                "numerator": numerator,
+                "denominator": denominator,
             }
         return node
 
@@ -144,9 +151,23 @@ class _LinearEquationParser:
             node = self._parse_equation()
             if self._take() != closing:
                 raise ValueError(f"missing closing {closing}")
-            return node
+            return {
+                "type": "delimiter",
+                "opening": token,
+                "closing": closing,
+                "content": node,
+            }
         if token.lower() == "sqrt" or token == "√":
-            return {"type": "radical", "radicand": self._parse_atom()}
+            radicand = self._parse_atom()
+            if radicand.get("type") == "delimiter":
+                radicand = radicand["content"]
+            return {"type": "radical", "radicand": radicand}
+        if token.lower() in _FUNCTION_NAMES and self._peek() in ("(", "{"):
+            return {
+                "type": "function",
+                "name": token,
+                "argument": self._parse_atom(),
+            }
         if token in (")", "}", "_", "^", "/"):
             raise ValueError(f"unexpected token: {token}")
         if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", token):
@@ -210,6 +231,28 @@ def _serialize(node) -> list:
         return [child for item in node["items"] for child in _serialize(item)]
     if kind == "equation":
         return _serialize(node["left"]) + [_math_run("=")] + _serialize(node["right"])
+    if kind == "delimiter":
+        delimiter = OxmlElement("m:d")
+        properties = OxmlElement("m:dPr")
+        opening = OxmlElement("m:begChr")
+        opening.set(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/math}val",
+            node.get("opening", "("),
+        )
+        closing = OxmlElement("m:endChr")
+        closing.set(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/math}val",
+            node.get("closing", ")"),
+        )
+        properties.extend((opening, closing))
+        delimiter.append(properties)
+        delimiter.append(_container("m:e", _serialize(node["content"])))
+        return [delimiter]
+    if kind == "function":
+        function = OxmlElement("m:func")
+        function.append(_container("m:fName", [_math_run(node["name"])]))
+        function.append(_container("m:e", _serialize(node["argument"])))
+        return [function]
     if kind == "product":
         operator = {"implicit": "", "dot": "·", "cross": "×"}.get(
             node.get("operator", "implicit"), ""

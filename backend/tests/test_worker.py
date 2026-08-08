@@ -5,11 +5,14 @@ import pytest
 from celery.exceptions import MaxRetriesExceededError, Retry
 
 from backend.config import settings
-from backend.models import ModelCallUsage, RunReferencePdf
+from backend.models import AssessmentRepairAttempt, ModelCallUsage, RunReferencePdf
 from backend.models.experiment import Condition, Experiment, Generation
 from backend.schemas.experiment_schema import PromptFactors
 from backend.schemas.assessment_schema import (
     ASSESSMENT_PROVIDER_SCHEMA,
+    ASSESSMENT_QUESTION_PROVIDER_SCHEMA,
+    ASSESSMENT_SEGMENT_REPLACEMENT_SCHEMA,
+    ASSESSMENT_CANONICAL_QUESTION_SCHEMA,
     AssessmentGenerationResponse,
 )
 from backend.services.llm_client import LLMResult, TokenUsage, TruncatedResponseError
@@ -384,7 +387,11 @@ def test_anthropic_prompt_provider_failure_is_stage_specific(
             run_pipeline_synchronously(generation_fixture, test_db, llm)
 
     test_db.refresh(generation_fixture)
-    assert generation_fixture.status == "error"
+    assert generation_fixture.status == "pending"
+    assert generation_fixture.progress_message == (
+        "Provider connection failed; retrying generation"
+    )
+    assert generation_fixture.completed_at is None
     assert generation_fixture.error_type == "actual_prompt_provider_error"
 
 
@@ -433,20 +440,20 @@ def test_generation_retry_resumes_from_persisted_prompt(generation_fixture, test
             "ProviderQuestionResponse"
         ]
         assert set(question_schema["required"]) >= {
-            "type", "body", "metadata", "revision_options"
+            "type", "body_segments", "metadata", "revision_options"
         }
         assert "quality_checks" in question_schema["properties"]
         assert "metadata" in question_schema["properties"]
         assert "$defs" in ASSESSMENT_PROVIDER_SCHEMA
-        assert "body_segments" not in question_schema["properties"]
-        equation_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"][
-            "ProviderEquationSchema"
+        assert "body_segments" in question_schema["properties"]
+        assert "equations" not in question_schema["properties"]
+        math_schema = ASSESSMENT_PROVIDER_SCHEMA["$defs"][
+            "ProviderMathSegment"
         ]
-        assert {"label", "expression", "location"}.issubset(
-            equation_schema["required"]
+        assert {"type", "expression", "display"}.issubset(
+            math_schema["required"]
         )
-        assert "math" not in equation_schema["properties"]
-        assert "model_answer_segments" not in question_schema["properties"]
+        assert "model_answer_segments" in question_schema["properties"]
         usage_calls = (
             test_db.query(ModelCallUsage)
             .filter_by(run_id=generation_fixture.id)
@@ -561,9 +568,11 @@ def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
         )
     )
     assert rejected_question["body"] in repair_call.kwargs["user_message"]
-    assert '"assessment_metadata"' in repair_call.kwargs["user_message"]
-    assert expected_error in repair_call.kwargs["user_message"]
-    assert repair_call.kwargs["response_schema"] is ASSESSMENT_PROVIDER_SCHEMA
+    assert '"assessment_metadata"' not in repair_call.kwargs["user_message"]
+    assert "mathematical expression must use an equation reference" in (
+        repair_call.kwargs["user_message"]
+    )
+    assert repair_call.kwargs["response_schema"] is ASSESSMENT_CANONICAL_QUESTION_SCHEMA
     usage_stages = [
         usage.stage
         for usage in test_db.query(ModelCallUsage)
@@ -575,6 +584,188 @@ def test_generation_pipeline_repairs_plain_formula_text_before_docx_creation(
     assert generation_fixture.model_call_count == 2
     assert generation_fixture.total_tokens == 46
     mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+
+
+def test_segmented_generation_repairs_only_the_affected_question(
+    generation_fixture,
+    test_db,
+):
+    metadata = complete_question(
+        question_type="short_answer",
+        body="unused",
+        model_answer="unused",
+    )["metadata"]
+    invalid_question = {
+        "type": "short_answer",
+        "metadata": metadata,
+        "body_segments": [{
+            "type": "text",
+            "text": "The gas constant is R = 8.314 J/(mol K).",
+        }],
+        "options": [],
+        "model_answer_segments": [{
+            "type": "text",
+            "text": "Use the supplied value.",
+        }],
+        "quality_checks": [{
+            "criterion": "Technical correctness",
+            "rating": 5,
+            "comment": "The answer is technically correct.",
+        }],
+        "revision_options": [
+            "Add a numerical force balance.",
+            "Ask students to state assumptions.",
+        ],
+    }
+    repaired_question = {
+        **invalid_question,
+        "body_segments": [
+            {"type": "text", "text": "The gas constant is "},
+            {
+                "type": "math",
+                "expression": "R = 8.314 J/(mol K)",
+                "display": False,
+            },
+            {"type": "text", "text": "."},
+        ],
+    }
+    initial_raw = json.dumps({
+        "assessment_metadata": complete_assessment_metadata(),
+        "questions": [invalid_question],
+    })
+    repaired_raw = json.dumps({"segments": repaired_question["body_segments"]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(initial_raw, 20, 8, 28),
+        result(repaired_raw, 8, 4, 12),
+    ]
+
+    mock_redis = run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.status == "complete", generation_fixture.error_message
+    compiled = generation_fixture.assessment.parsed_json["questions"][0]
+    assert compiled["body"] == (
+        "The gas constant is [[EQ:q1_question_body_m1]]."
+    )
+    assert compiled["equations"][0]["expression"] == "R = 8.314 J/(mol K)"
+    repair_call = llm.generate.call_args_list[1]
+    assert repair_call.kwargs["response_schema"] is ASSESSMENT_SEGMENT_REPLACEMENT_SCHEMA
+    assert "single `segments` array" in (
+        repair_call.kwargs["user_message"]
+    )
+    assert "VALIDATOR_ERROR_JSON" in repair_call.kwargs["user_message"]
+    assert "assessment_metadata" not in repair_call.kwargs["user_message"]
+    assert generation_fixture.model_call_count == 2
+    evidence = test_db.query(AssessmentRepairAttempt).one()
+    assert evidence.question_ordinal == 0
+    assert evidence.attempt_number == 1
+    assert evidence.status == "merged"
+    assert evidence.success is True
+    assert evidence.repair_scope == "content_block"
+    assert evidence.target_path == "questions.0.body_segments.0"
+    assert evidence.before_hash and evidence.after_hash
+    assert evidence.issues[0]["code"] == "raw_math_in_text_segment"
+    assert evidence.model_call_usage.stage == "repair"
+    versions = sorted(generation_fixture.assessment_versions, key=lambda item: item.version)
+    assert [item.kind for item in versions] == ["original_generation", "localized_repair"]
+    assert versions[0].raw_response_text == initial_raw
+    assert versions[0].parsed_json is None
+    assert generation_fixture.assessment is versions[1]
+    mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+
+
+def test_segmented_repair_logs_failed_replacement_before_success(
+    generation_fixture,
+    test_db,
+):
+    metadata = complete_question(
+        question_type="short_answer", body="unused", model_answer="unused"
+    )["metadata"]
+    question = {
+        "type": "short_answer",
+        "metadata": metadata,
+        "body_segments": [{"type": "text", "text": "Use R = 8.314 J/(mol K)."}],
+        "options": [],
+        "model_answer_segments": [{"type": "text", "text": "Substitute it."}],
+        "quality_checks": [{
+            "criterion": "Technical correctness", "rating": 5, "comment": "Correct."
+        }],
+        "revision_options": ["Variant A", "Variant B"],
+    }
+    initial_raw = json.dumps({
+        "assessment_metadata": complete_assessment_metadata(),
+        "questions": [question],
+    })
+    invalid_replacement = json.dumps({"segments": [{
+        "type": "math", "expression": "R = 9.999 J/(mol K)", "display": False
+    }]})
+    valid_replacement = json.dumps({"segments": [
+        {"type": "text", "text": "Use "},
+        {"type": "math", "expression": "R = 8.314 J/(mol K)", "display": False},
+        {"type": "text", "text": "."},
+    ]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(initial_raw, 20, 8, 28),
+        result(invalid_replacement, 5, 3, 8),
+        result(valid_replacement, 5, 3, 8),
+    ]
+
+    run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    attempts = sorted(generation_fixture.assessment_repair_attempts, key=lambda item: item.attempt_number)
+    assert generation_fixture.status == "complete"
+    assert [item.success for item in attempts] == [False, True]
+    assert [item.attempt_number for item in attempts] == [1, 2]
+    assert "numerical content" in attempts[0].failure_reason
+    assert attempts[0].before_content == attempts[1].before_content
+
+
+def test_segmented_repair_limit_preserves_original_and_all_attempts(
+    generation_fixture,
+    test_db,
+):
+    metadata = complete_question(
+        question_type="short_answer", body="unused", model_answer="unused"
+    )["metadata"]
+    question = {
+        "type": "short_answer",
+        "metadata": metadata,
+        "body_segments": [{"type": "text", "text": "Use R = 8.314 J/(mol K)."}],
+        "options": [],
+        "model_answer_segments": [{"type": "text", "text": "Substitute it."}],
+        "quality_checks": [{
+            "criterion": "Technical correctness", "rating": 5, "comment": "Correct."
+        }],
+        "revision_options": ["Variant A", "Variant B"],
+    }
+    initial_raw = json.dumps({
+        "assessment_metadata": complete_assessment_metadata(),
+        "questions": [question],
+    })
+    forbidden = json.dumps({"segments": [{
+        "type": "math", "expression": "R = 9.999 J/(mol K)", "display": False
+    }]})
+    llm = MagicMock()
+    llm.generate.side_effect = [
+        result(initial_raw, 20, 8, 28),
+        result(forbidden, 5, 3, 8),
+        result(forbidden, 5, 3, 8),
+        result(forbidden, 5, 3, 8),
+    ]
+
+    run_pipeline_synchronously(generation_fixture, test_db, llm)
+
+    test_db.refresh(generation_fixture)
+    attempts = sorted(generation_fixture.assessment_repair_attempts, key=lambda item: item.attempt_number)
+    assert generation_fixture.status == "error"
+    assert generation_fixture.error_type == "structural_repair_failed"
+    assert generation_fixture.assessment.kind == "original_generation"
+    assert generation_fixture.assessment.raw_response_text == initial_raw
+    assert [item.success for item in attempts] == [False, False, False]
+    assert llm.generate.call_count == 4
 
 
 def test_generation_pipeline_repairs_cross_location_equation_labels(
@@ -664,7 +855,7 @@ def test_generation_pipeline_repairs_cross_location_equation_labels(
         "g_mix_def, temp"
         in repair_call.kwargs["user_message"]
     )
-    assert "Audit every equation label in every question" in (
+    assert "Audit every text segment" in (
         repair_call.kwargs["system_prompt"]
     )
     usage_stages = [
@@ -732,8 +923,8 @@ def test_generation_pipeline_repairs_a_second_validation_failure(
     )
     assert llm.generate.call_count == 3
     second_repair_call = llm.generate.call_args_list[2]
-    assert first_repair_question["body"] in second_repair_call.kwargs["user_message"]
-    assert '"assessment_metadata"' in second_repair_call.kwargs["user_message"]
+    assert initial_question["body"] in second_repair_call.kwargs["user_message"]
+    assert '"assessment_metadata"' not in second_repair_call.kwargs["user_message"]
     assert (
         "body: mathematical expression must use an equation reference"
         in second_repair_call.kwargs["user_message"]
@@ -821,11 +1012,9 @@ def test_generation_pipeline_repairs_a_third_validation_failure(
     assert saved_raw["assessment_metadata"] == complete_assessment_metadata()
     assert llm.generate.call_count == 4
     third_repair_call = llm.generate.call_args_list[3]
-    assert variable_definition_question["model_answer"] in third_repair_call.kwargs["user_message"]
-    assert '"assessment_metadata"' in third_repair_call.kwargs["user_message"]
-    assert "model_answer: mathematical expression" in (
-        third_repair_call.kwargs["user_message"]
-    )
+    assert invalid_question["body"] in third_repair_call.kwargs["user_message"]
+    assert '"assessment_metadata"' not in third_repair_call.kwargs["user_message"]
+    assert "VALIDATION_ISSUES_JSON" in third_repair_call.kwargs["user_message"]
     usage_stages = [
         usage.stage
         for usage in test_db.query(ModelCallUsage)
@@ -864,12 +1053,12 @@ def test_generation_pipeline_stops_after_three_invalid_repairs(
 
     test_db.refresh(generation_fixture)
     assert generation_fixture.status == "error"
-    assert generation_fixture.error_type == "assessment_parse_error", (
+    assert generation_fixture.error_type == "structural_repair_failed", (
         generation_fixture.error_message
     )
     assert generation_fixture.assessment.parsed_json is None
     assert generation_fixture.document_artifact is None
-    assert llm.generate.call_count == 4
+    assert llm.generate.call_count == 1
     usage_stages = [
         usage.stage
         for usage in test_db.query(ModelCallUsage)
@@ -877,9 +1066,9 @@ def test_generation_pipeline_stops_after_three_invalid_repairs(
         .order_by(ModelCallUsage.id)
         .all()
     ]
-    assert usage_stages == ["assessment", "repair", "repair", "repair"]
-    assert generation_fixture.model_call_count == 4
-    assert generation_fixture.total_tokens == 85
+    assert usage_stages == ["assessment"]
+    assert generation_fixture.model_call_count == 1
+    assert generation_fixture.total_tokens == 28
     mock_redis.evaluation_delay.assert_not_called()
 
 
@@ -908,17 +1097,14 @@ def test_generation_pipeline_recovers_explicit_component_symbols_after_repair_li
 
     test_db.refresh(generation_fixture)
     assessment = generation_fixture.assessment
-    assert generation_fixture.status == "complete"
-    assert assessment.validation_status == "valid"
-    assert assessment.parsed_json["questions"][0]["body"] == (
-        "Compare [[EQ:auto_q1_body_x_b_1]] with the reference value."
-    )
-    assert assessment.parsed_json["questions"][0]["model_answer"] == (
-        "The relevant component is [[EQ:auto_q1_model_answer_x_a_1]]."
-    )
-    assert assessment.recovery_actions
-    assert generation_fixture.document_artifact is not None
-    mock_redis.evaluation_delay.assert_called_once_with(generation_fixture.id)
+    assert generation_fixture.status == "error"
+    assert generation_fixture.error_type == "structural_repair_failed"
+    assert assessment.kind == "original_generation"
+    assert json.loads(assessment.raw_response_text)["questions"] == [question]
+    assert assessment.parsed_json is None
+    assert len(generation_fixture.assessment_repair_attempts) == 3
+    assert generation_fixture.document_artifact is None
+    mock_redis.evaluation_delay.assert_not_called()
 
 
 def test_generation_pipeline_keeps_renderable_assessment_with_warnings_after_repair_limit(
@@ -946,11 +1132,13 @@ def test_generation_pipeline_keeps_renderable_assessment_with_warnings_after_rep
 
     test_db.refresh(generation_fixture)
     assessment = generation_fixture.assessment
-    assert generation_fixture.status == "complete_with_warnings"
-    assert generation_fixture.viewer_ready_at is not None
-    assert assessment.validation_status == "warning"
-    assert assessment.parsed_json is not None
-    assert assessment.validation_issues
+    assert generation_fixture.status == "error"
+    assert generation_fixture.error_type == "structural_repair_failed"
+    assert generation_fixture.viewer_ready_at is None
+    assert assessment.validation_status == "invalid"
+    assert assessment.parsed_json is None
+    assert json.loads(assessment.raw_response_text)["questions"] == [question]
+    assert len(generation_fixture.assessment_repair_attempts) == 3
     assert generation_fixture.document_artifact is None
     mock_redis.evaluation_delay.assert_not_called()
 
@@ -994,7 +1182,11 @@ def test_openai_generation_provider_failure_is_stage_specific(
             with pytest.raises(RuntimeError, match="retry scheduled"):
                 run_generation_pipeline(generation_fixture.id)
         test_db.refresh(generation_fixture)
-        assert generation_fixture.status == "error"
+        assert generation_fixture.status == "pending"
+        assert generation_fixture.progress_message == (
+            "Provider connection failed; retrying generation"
+        )
+        assert generation_fixture.completed_at is None
         assert generation_fixture.error_type == "generation_provider_error"
 
 
@@ -1266,6 +1458,9 @@ def test_exhausted_retry_deletes_every_provider_file(
         call("files/one"),
         call("files/two"),
     ]
+    test_db.refresh(generation_fixture)
+    assert generation_fixture.status == "error"
+    assert generation_fixture.completed_at is not None
     assert "Reference PDF provider cleanup failed" in caplog.text
     assert "delete failed" not in caplog.text
 

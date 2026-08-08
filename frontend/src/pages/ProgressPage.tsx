@@ -31,6 +31,46 @@ const agenticLabels: Partial<Record<Stage, string>> = {
   rewrite_failed: 'Original document remains available',
 }
 
+const activityMessages: Partial<Record<Stage, string[]>> = {
+  pending: ['Waiting for generation to begin…'],
+  prompting: [
+    'Preparing the assessment instructions…',
+    'Organizing the provided requirements…',
+  ],
+  generating: [
+    'Structuring the assessment…',
+    'Preparing questions and solutions…',
+  ],
+  documenting: [
+    'Formatting the assessment content…',
+    'Building the document structure…',
+  ],
+  docx_authoring: [
+    'Formatting the assessment content…',
+    'Building the document structure…',
+  ],
+  docx_executing: [
+    'Applying document formatting…',
+    'Assembling the Word document…',
+  ],
+  docx_validating: [
+    'Checking document structure…',
+    'Confirming the document is ready…',
+  ],
+  docx_repairing: [
+    'Correcting document issues…',
+    'Preparing the revised document…',
+  ],
+}
+
+function formatElapsed(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
 export function ProgressPage() {
   const { runId } = useParams()
   const id = Number(runId)
@@ -43,6 +83,8 @@ export function ProgressPage() {
   const applyRunSnapshot = useRunStore((state) => state.applyRunSnapshot)
   const [recovering, setRecovering] = useState(false)
   const [retryingRewrite, setRetryingRewrite] = useState(false)
+  const [activityState, setActivityState] = useState<{ stage?: Stage, index: number }>({ index: 0 })
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     if (!id) return
@@ -65,6 +107,7 @@ export function ProgressPage() {
   useSSE(id || null, receive)
 
   const runStatus = run?.status
+  const terminal = runStatus ? isTerminalRunStatus(runStatus) : false
   useEffect(() => {
     if (!id || !runStatus || isTerminalRunStatus(runStatus)) return
     const timer = window.setInterval(() => {
@@ -73,10 +116,41 @@ export function ProgressPage() {
     return () => window.clearInterval(timer)
   }, [id, mergeRun, runStatus])
 
+  const messages = runStatus ? activityMessages[runStatus] : undefined
+  useEffect(() => {
+    if (terminal || !messages || messages.length < 2) return
+    let timer: number
+    const rotate = () => {
+      setActivityState((current) => ({
+        stage: runStatus,
+        index: current.stage === runStatus ? (current.index + 1) % messages.length : 1,
+      }))
+      timer = window.setTimeout(rotate, 10000)
+    }
+    timer = window.setTimeout(rotate, 10000)
+    return () => window.clearTimeout(timer)
+  }, [messages, runStatus, terminal])
+
+  useEffect(() => {
+    if (terminal || !run?.started_at) return
+    let timer: number
+    const tick = () => {
+      setNow(Date.now())
+      timer = window.setTimeout(tick, 1000)
+    }
+    timer = window.setTimeout(tick, 1000)
+    return () => window.clearTimeout(timer)
+  }, [run?.started_at, terminal])
+
   const condition = experiment?.conditions.find((item) => item.id === run?.condition_id)
   const statusLabel = run
     ? (run.rewrite?.backend === 'agentic_tools' ? agenticLabels[run.status] : undefined) ?? labels[run.status]
     : undefined
+  const activityIndex = activityState.stage === runStatus ? activityState.index : 0
+  const activityMessage = messages?.[activityIndex % messages.length]
+  const elapsedSeconds = run?.started_at
+    ? Math.max(0, (now - new Date(run.started_at).getTime()) / 1000)
+    : null
   const recoverAssessment = async () => {
     if (!run || !id) return
     setRecovering(true)
@@ -113,7 +187,24 @@ export function ProgressPage() {
             </article>
           ) : <p>Loading persisted run state…</p>}
           {run?.error?.message && <p className="error">{run.error.message}</p>}
-          {run?.progress_message && run.progress_message !== statusLabel && (
+          {run && !terminal && activityMessage && (
+            <div className="active-progress">
+              <p className="activity-message" aria-live="polite" aria-atomic="true">
+                {activityMessage}
+              </p>
+              <p className="elapsed-time">
+                {elapsedSeconds === null ? 'Working' : `Working · ${formatElapsed(elapsedSeconds)} elapsed`}
+              </p>
+              <p className="progress-reassurance">
+                {elapsedSeconds !== null && elapsedSeconds >= 120
+                  ? 'Still working. Complex assessments may take several minutes.'
+                  : 'This can take several minutes. You may leave this page; work will continue in the background.'}
+              </p>
+            </div>
+          )}
+          {run?.progress_message
+            && run.progress_message !== statusLabel
+            && run.progress_message !== activityMessage && (
             <p className="progress-message">{run.progress_message}</p>
           )}
         </section>

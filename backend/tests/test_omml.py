@@ -39,3 +39,20 @@ def test_linear_parser_keeps_signed_values_inside_superscripts():
                 value,
             ],
         }
+
+
+def test_linear_parser_preserves_grouping_and_recognizes_functions():
+    grouped = parse_linear_expression("R T (1/x_a + 1/x_b)")
+    delimiter = grouped["items"][-1]
+
+    assert delimiter["type"] == "delimiter"
+    assert delimiter["opening"] == "("
+    assert delimiter["closing"] == ")"
+    assert delimiter["content"]["type"] == "sequence"
+
+    function = parse_linear_expression("ln(x_a)")
+
+    assert function["type"] == "function"
+    assert function["name"] == "ln"
+    assert function["argument"]["type"] == "delimiter"
+    assert function["argument"]["content"]["type"] == "subscript"

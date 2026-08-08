@@ -3,6 +3,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from backend.celery_app import celery_app
 from backend.api.experiments import router as experiments_router
 from backend.api.evaluations import router as evaluations_router
 from backend.api.generations import router as generations_router
@@ -63,3 +64,14 @@ app.include_router(source_documents_router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/health/worker")
+def worker_health():
+    replies = celery_app.control.inspect(timeout=1).ping()
+    if not replies:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "workers": 0},
+        )
+    return {"status": "ok", "workers": len(replies)}

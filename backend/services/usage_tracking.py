@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -38,6 +39,7 @@ def record_model_call(
     attempt: int,
     result: Optional[LLMResult] = None,
     failed: bool = False,
+    requested_at: Optional[datetime] = None,
 ) -> ModelCallUsage:
     """Persist one provider request and atomically update its run aggregates."""
 
@@ -75,6 +77,7 @@ def record_model_call(
         extra_token_counts=(
             dict(token_usage.extra_token_counts) if token_usage is not None else {}
         ),
+        created_at=requested_at or utc_now(),
         responded_at=utc_now() if result is not None else None,
     )
 

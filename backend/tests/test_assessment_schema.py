@@ -129,8 +129,10 @@ def test_provider_schema_requires_complete_assessment_contract():
         "ProviderQuestionResponse"
     ]
     assert set(question["required"]) >= {
-        "type", "body", "metadata", "equations", "revision_options"
+        "type", "body_segments", "metadata", "revision_options"
     }
+    assert "body" not in question["properties"]
+    assert "equations" not in question["properties"]
     assert "quality_checks" in question["properties"]
     metadata = ASSESSMENT_PROVIDER_SCHEMA["$defs"]["QuestionMetadata"]
     assert set(metadata["required"]) >= {
@@ -491,21 +493,24 @@ def test_canonical_schema_retains_structured_math_contract():
     assert "segments" in option["properties"]
 
 
-def test_provider_schema_uses_flat_equations_without_recursive_math_defs():
+def test_provider_schema_uses_segments_without_provider_authored_labels():
     definitions = ASSESSMENT_PROVIDER_SCHEMA["$defs"]
     question = definitions["ProviderQuestionResponse"]
-    equation = definitions["ProviderEquationSchema"]
+    math_segment = definitions["ProviderMathSegment"]
     option = definitions["ProviderMCQOptionSchema"]
 
     assert {
         "MathNode",
         "EquationMathNode",
+        "DelimiterMathNode",
+        "FunctionMathNode",
         "FractionMathNode",
         "SequenceMathNode",
     }.isdisjoint(definitions)
-    assert "body_segments" not in question["properties"]
-    assert "model_answer_segments" not in question["properties"]
-    assert "segments" not in option["properties"]
-    assert "math" not in equation["properties"]
-    assert {"label", "expression", "location"} <= set(equation["required"])
-    assert equation["properties"]["expression"]["minLength"] == 1
+    assert "body_segments" in question["properties"]
+    assert "model_answer_segments" in question["properties"]
+    assert "segments" in option["properties"]
+    assert "equations" not in question["properties"]
+    assert "ProviderEquationSchema" not in definitions
+    assert {"type", "expression", "display"} <= set(math_segment["required"])
+    assert math_segment["properties"]["expression"]["minLength"] == 1

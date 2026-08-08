@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { useRunStore } from '../store/runStore'
@@ -48,6 +48,7 @@ const failedRun: Run = {
 }
 
 beforeEach(() => {
+  vi.useRealTimers()
   useRunStore.getState().reset()
   useRunStore.getState().mergeExperiment({ ...experiment, runs: [failedRun] })
   vi.stubGlobal('EventSource', undefined)
@@ -56,6 +57,19 @@ beforeEach(() => {
     json: async () => String(input).includes('/experiments/') ? experiment : failedRun,
   })))
 })
+
+function renderProgress(run: Run) {
+  useRunStore.getState().mergeExperiment({ ...experiment, runs: [run] })
+  vi.mocked(fetch).mockImplementation(async (input: string | URL | Request) => ({
+    ok: true,
+    json: async () => String(input).includes('/experiments/') ? experiment : run,
+  }) as Response)
+  return render(
+    <MemoryRouter initialEntries={[`/runs/${run.id}/progress`]}>
+      <Routes><Route path="/runs/:runId/progress" element={<ProgressPage />} /></Routes>
+    </MemoryRouter>,
+  )
+}
 
 test('shows terminal rewrite failure recovery and the persisted detail', () => {
   render(
@@ -70,4 +84,71 @@ test('shows terminal rewrite failure recovery and the persisted detail', () => {
     'href', '/experiments/1/viewer/7',
   )
   expect(screen.getByRole('button', { name: 'Retry Word rewrite' })).toBeEnabled()
+})
+
+test('shows server-based elapsed time and rotates contextual activity wording', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-08-06T12:00:30Z'))
+  const run: Run = {
+    id: 8, experiment_id: 1, condition_id: 2, run_number: 1,
+    status: 'generating', started_at: '2026-08-06T12:00:00Z',
+  }
+
+  renderProgress(run)
+
+  expect(screen.getByText('Generating questions')).toBeVisible()
+  expect(screen.getByText('Structuring the assessment…')).toHaveAttribute('aria-live', 'polite')
+  expect(screen.getByText('Working · 30s elapsed')).not.toHaveAttribute('aria-live')
+
+  act(() => { vi.advanceTimersByTime(10000) })
+
+  expect(screen.getByText('Preparing questions and solutions…')).toBeVisible()
+  expect(screen.getByText('Working · 40s elapsed')).toBeVisible()
+  expect(screen.queryByText(/%/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+})
+
+test('resets activity wording when the persisted stage changes', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-08-06T12:00:30Z'))
+  const run: Run = {
+    id: 8, experiment_id: 1, condition_id: 2, run_number: 1,
+    status: 'generating', started_at: '2026-08-06T12:00:00Z',
+  }
+  renderProgress(run)
+  act(() => { vi.advanceTimersByTime(10000) })
+  expect(screen.getByText('Preparing questions and solutions…')).toBeVisible()
+
+  act(() => {
+    useRunStore.getState().mergeRun({ ...run, status: 'docx_validating' })
+  })
+
+  expect(screen.getByText('Checking document structure…')).toBeVisible()
+})
+
+test('reassures users during long runs and falls back safely without a start time', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-08-06T12:02:01Z'))
+  const run: Run = {
+    id: 8, experiment_id: 1, condition_id: 2, run_number: 1,
+    status: 'docx_authoring', started_at: '2026-08-06T12:00:00Z',
+  }
+  const view = renderProgress(run)
+  expect(screen.getByText('Working · 2m 1s elapsed')).toBeVisible()
+  expect(screen.getByText('Still working. Complex assessments may take several minutes.')).toBeVisible()
+
+  view.unmount()
+  renderProgress({ ...run, id: 9, started_at: null })
+
+  expect(screen.getByText('Working')).toBeVisible()
+})
+
+test('does not show active progress details for terminal runs', () => {
+  renderProgress({
+    id: 8, experiment_id: 1, condition_id: 2, run_number: 1,
+    status: 'complete', started_at: '2026-08-06T12:00:00Z',
+  })
+
+  expect(screen.queryByText(/^Working/)).not.toBeInTheDocument()
+  expect(screen.queryByText('Structuring the assessment…')).not.toBeInTheDocument()
 })

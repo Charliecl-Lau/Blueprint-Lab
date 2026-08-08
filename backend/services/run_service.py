@@ -70,6 +70,11 @@ def resolve_execution_config(
             if requested_model.max_output_tokens is not None
             else settings.llm_max_output_tokens
         ),
+        "reasoning_effort": (
+            requested_model.reasoning_effort
+            if requested_model.reasoning_effort is not None
+            else settings.llm_reasoning_effort
+        ),
         "provider_settings": dict(requested_model.provider_settings),
     }
     effective_provider_request = {
@@ -84,6 +89,10 @@ def resolve_execution_config(
         )
         if effective["seed"] is not None:
             effective_provider_request["seed"] = effective["seed"]
+    if effective["provider"] == "openai":
+        effective_provider_request["reasoning_effort"] = effective[
+            "reasoning_effort"
+        ]
     return {
         "schema_version": "1",
         "requested": requested,

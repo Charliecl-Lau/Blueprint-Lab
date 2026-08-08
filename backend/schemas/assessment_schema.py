@@ -79,6 +79,19 @@ class EquationMathNode(BaseModel):
     right: "MathNode"
 
 
+class DelimiterMathNode(BaseModel):
+    type: Literal["delimiter"]
+    content: "MathNode"
+    opening: str = "("
+    closing: str = ")"
+
+
+class FunctionMathNode(BaseModel):
+    type: Literal["function"]
+    name: str
+    argument: "MathNode"
+
+
 class FractionMathNode(BaseModel):
     type: Literal["fraction"]
     numerator: "MathNode"
@@ -127,6 +140,8 @@ MathNode = Annotated[
         OperatorMathNode,
         SequenceMathNode,
         EquationMathNode,
+        DelimiterMathNode,
+        FunctionMathNode,
         FractionMathNode,
         DifferentialMathNode,
         ProductMathNode,
@@ -142,6 +157,8 @@ MathNode = Annotated[
 for _recursive_model in (
     SequenceMathNode,
     EquationMathNode,
+    DelimiterMathNode,
+    FunctionMathNode,
     FractionMathNode,
     ProductMathNode,
     SubscriptMathNode,
@@ -383,19 +400,40 @@ class AssessmentGenerationResponse(BaseModel):
         return self
 
 
+class ProviderTextSegment(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    type: Literal["text"]
+    text: str = Field(min_length=1)
+
+
+class ProviderMathSegment(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    type: Literal["math"]
+    expression: str = Field(min_length=1)
+    display: bool
+
+
+ProviderContentSegment = Annotated[
+    Union[ProviderTextSegment, ProviderMathSegment],
+    Field(discriminator="type"),
+]
+
+
+class ProviderSegmentReplacement(BaseModel):
+    """A localized replacement for one rejected content segment."""
+
+    model_config = {"extra": "forbid"}
+
+    segments: List[ProviderContentSegment] = Field(min_length=1)
+
+
 class ProviderMCQOptionSchema(BaseModel):
     model_config = {"extra": "forbid"}
 
-    body: str
+    segments: List[ProviderContentSegment] = Field(min_length=1)
     is_correct: bool
-
-
-class ProviderEquationSchema(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    label: str
-    expression: str = Field(min_length=1)
-    location: Literal["question", "solution"]
 
 
 class ProviderQuestionResponse(BaseModel):
@@ -403,12 +441,24 @@ class ProviderQuestionResponse(BaseModel):
 
     type: Literal["mcq", "short_answer", "long_answer"]
     metadata: QuestionMetadata
-    body: str
+    body_segments: List[ProviderContentSegment] = Field(min_length=1)
     options: List[ProviderMCQOptionSchema] = Field(default_factory=list)
-    model_answer: Optional[str] = None
-    equations: List[ProviderEquationSchema]
+    model_answer_segments: Optional[List[ProviderContentSegment]] = None
     quality_checks: List[QualityCheckSchema] = Field(min_length=1)
     revision_options: List[str] = Field(min_length=2, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_question_shape(self):
+        if self.type == "mcq":
+            if not self.options:
+                raise ValueError("mcq questions require options")
+            if sum(option.is_correct for option in self.options) != 1:
+                raise ValueError("mcq questions require exactly one correct option")
+        elif self.options:
+            raise ValueError("non-mcq questions cannot contain options")
+        if not self.model_answer_segments:
+            raise ValueError("questions require model_answer_segments")
+        return self
 
 
 class ProviderAssessmentGenerationResponse(BaseModel):
@@ -462,3 +512,7 @@ class StoredAssessmentPayload(BaseModel):
 ASSESSMENT_PROVIDER_SCHEMA = (
     ProviderAssessmentGenerationResponse.model_json_schema()
 )
+
+ASSESSMENT_QUESTION_PROVIDER_SCHEMA = ProviderQuestionResponse.model_json_schema()
+ASSESSMENT_SEGMENT_REPLACEMENT_SCHEMA = ProviderSegmentReplacement.model_json_schema()
+ASSESSMENT_CANONICAL_QUESTION_SCHEMA = QuestionResponse.model_json_schema()

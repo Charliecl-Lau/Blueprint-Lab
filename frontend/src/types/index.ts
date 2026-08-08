@@ -136,9 +136,12 @@ export interface AssessmentMetadata {
 }
 
 export interface RewriteState {
-  backend?: 'legacy' | 'self_hosted_code' | 'agentic_tools'
+  backend?: 'legacy' | 'self_hosted_code' | 'agentic_tools' | 'luna_direct'
   status: 'not_started' | 'in_progress' | 'succeeded' | 'failed'
   attempt_count: number
+  repair_count?: number
+  outcome?: 'succeeded' | 'failed' | null
+  evidence_available?: boolean
   repair_available: boolean
   original_assessment_id: number | null
   original_version: number | null
@@ -199,6 +202,7 @@ export interface Run {
   condition_id: number
   run_number: number
   status: Stage
+  started_at?: string | null
   viewer_ready_at?: string | null
   progress_message?: string | null
   viewer_available?: boolean

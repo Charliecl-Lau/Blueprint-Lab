@@ -60,6 +60,7 @@ def test_run_without_overrides_persists_effective_environment_settings(
     monkeypatch.setattr(settings, "llm_temperature", 0.31)
     monkeypatch.setattr(settings, "llm_top_p", 0.82)
     monkeypatch.setattr(settings, "llm_max_output_tokens", 4096)
+    monkeypatch.setattr(settings, "llm_reasoning_effort", "high")
 
     run = create_run(test_db, item.id, [])
 
@@ -73,6 +74,7 @@ def test_run_without_overrides_persists_effective_environment_settings(
             "top_p": 0.82,
             "seed": None,
             "max_output_tokens": 4096,
+            "reasoning_effort": "high",
             "provider_settings": {},
         },
         "effective_provider_request": {

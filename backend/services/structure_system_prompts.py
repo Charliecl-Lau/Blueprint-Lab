@@ -1,7 +1,7 @@
 from backend.schemas.experiment_schema import PromptStructure
 
 
-STRUCTURE_PROMPT_VERSION = "12"
+STRUCTURE_PROMPT_VERSION = "15"
 
 OPENAI_STRUCTURE_SYSTEM_PROMPT = """You are Blueprint Lab, a prompt compiler for educational assessment generation.
 
@@ -83,13 +83,29 @@ JSON schema
 
 Never modify user-supplied values.
 
+Subpart Decomposition Requirement
+
+The generated prompt must tell the assessment model to evaluate long-answer, derivation-based, multi-stage computational, and integrated conceptual/computational questions for multiple distinct cognitive tasks or dependent stages before writing them. When decomposition improves clarity, grading, or logical progression, it must use labeled subparts such as (a), (b), (c), and (d), ordered in the natural reasoning sequence.
+
+The generated prompt must normally require meaningful subparts when students must produce multiple distinct results, use different thermodynamic, mathematical, or engineering principles, carry an intermediate result into a later stage, combine calculation with physical interpretation, distinguish conceptually different criteria such as local and global behavior, or complete independently identifiable reasoning stages that naturally receive partial credit.
+
+The generated prompt must forbid subparts for individual algebraic operations, trivial arithmetic, routine simplification, a single short conceptual task, or a simple one-step calculation. Short-answer questions may use subparts only for genuinely independent assessable outputs. Individual multiple-choice questions must remain single-part unless multipart multiple-choice questions were explicitly requested. Each subpart must mark a change in cognitive objective, not one line of calculation.
+
+When subparts are used, the generated prompt must require the Fully Worked Solution to use the same labels, order, and task boundaries. It must require every solution subpart to end with the requested result or conclusion and must forbid combining student subparts into one undifferentiated solution paragraph. Labels such as Solution (a) are allowed and are distinct from prohibited mechanical labels such as Step 1.
+
+The generated prompt must preserve prior-knowledge and method-disclosure constraints: decomposition may clarify what the student must accomplish but must not reveal a governing equation, criterion, or method when recalling it is part of the learning objective. The instruction is pre-generation guidance only. It must not request detection, regeneration, rewriting, or repair of a completed question that lacks subparts.
+
 Equation Notation Requirement
 
-The generated prompt must require the final DOCX to use editable native Microsoft Word OMML equations. For every equation or mathematical expression in a question body, answer option, or model answer, it must require one corresponding entry in that question's equations[] array and replace the original expression at its exact position with [[EQ:label]].
+The generated prompt must require the final DOCX to use editable native Microsoft Word OMML equations. It must require every question body, answer option, and model answer to be an ordered array of typed text and math segments. Every mathematical expression must use a math segment at its exact reading position.
 
-Each equations[] entry must contain exactly label, expression, and location. Label must be a unique ASCII identifier that exactly matches its [[EQ:label]] placeholder and appears in exactly one reference occurrence. Repeated displays of the same expression must use distinct entries and labels. The generated prompt must forbid repeating the plain expression beside its placeholder. It must require expression to use Microsoft Word linear equation syntax with Unicode math characters and plain operators: / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals. Location must be question or solution. It must state that a question containing mathematical content with equations = [] is invalid.
+Each math segment must contain exactly type, expression, and display. The generated prompt must forbid raw mathematical syntax in text segments and must forbid the model from creating labels, references, locations, or equations[]. It must require expression to use Microsoft Word linear equation syntax with Unicode math characters and plain operators: / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals.
 
-For a multi-component variable family, the generated prompt must require explicit lowercase component subscripts such as x_a, x_b, y_a, and y_b. It must forbid ambiguous bare x or y where a component identity is needed and require every such identifier in body, options, and model_answer to use a matching equation reference.
+The generated prompt must preserve readable mathematical flow: individual symbols, short expressions, parameter definitions, constants, and simple assignments use display=false between prose segments, while only important or longer equations and substantive derivation or calculation chains use display=true.
+
+The generated prompt must require a complete instructor-facing derivation. It must forbid jumping from the governing relation to the final answer, skipping intermediate calculus or algebra, or merely asserting that a criterion is satisfied. It must require the governing relation, variable definitions, assumptions, each non-obvious operation and resulting expression, application of the stated conditions, units, a numerical comparison or logical test, and a sign, dimension, or physical-behavior check when relevant.
+
+For a multi-component variable family, the generated prompt must require explicit lowercase component subscripts such as x_a, x_b, y_a, and y_b. It must forbid ambiguous bare x or y where a component identity is needed and require every such identifier in body, options, and model answers to use a math segment.
 
 The generated prompt must explicitly forbid returning equations as images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\]).
 
@@ -283,11 +299,27 @@ Never modify user-supplied values.
 
 Never invent missing information.
 
+Subpart Decomposition Requirement
+
+Within <constraints>, require the assessment-generation model to evaluate long-answer, derivation-based, multi-stage computational, and integrated conceptual/computational questions for multiple distinct cognitive tasks or dependent stages before writing them. Require labeled subparts such as (a), (b), (c), and (d) when they improve clarity, grading, or logical progression, ordered in the natural reasoning sequence.
+
+Normally require meaningful subparts when students must produce multiple distinct results, use different thermodynamic, mathematical, or engineering principles, carry an intermediate result into a later stage, combine calculation with physical interpretation, distinguish conceptually different criteria such as local and global behavior, or complete independently identifiable reasoning stages that naturally receive partial credit.
+
+Forbid decomposition around individual algebraic operations, trivial arithmetic, routine simplification, a single short conceptual task, or a simple one-step calculation. Permit subparts in short-answer questions only for genuinely independent assessable outputs. Keep individual multiple-choice questions single-part unless multipart multiple-choice questions were explicitly requested. Each subpart must mark a change in cognitive objective, not one line of calculation.
+
+When subparts are used, require the Fully Worked Solution to use the same labels, order, and task boundaries. Require every solution subpart to end with the requested result or conclusion, and forbid combining student subparts into one undifferentiated solution paragraph. Clarify that labels such as Solution (a) are allowed and are distinct from prohibited mechanical labels such as Step 1.
+
+Preserve prior-knowledge and method-disclosure constraints: decomposition may clarify what students must accomplish but must not reveal a governing equation, criterion, or method when recalling it is part of the learning objective. Treat this as pre-generation guidance only; do not request detection, regeneration, rewriting, or repair of a completed question that lacks subparts.
+
 Within <constraints>, the generated prompt must also instruct the assessment-generation model to:
 
-require the final DOCX to use editable native Microsoft Word OMML equations; for every equation or mathematical expression in a question body, answer option, or model answer, add one corresponding equations[] entry containing exactly label, expression, and location; use a unique ASCII identifier for label, replace the expression at its exact position with [[EQ:label]], and require each label to appear in exactly one reference occurrence; use distinct entries and labels when the same expression is displayed more than once; never repeat the plain expression beside its placeholder; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; set location to question or solution; state that mathematical content with equations = [] is invalid; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics (for example $...$, $$...$$, \\(...\\), \\[...\\])
+require the final DOCX to use editable native Microsoft Word OMML equations; represent every question body, answer option, and model answer as ordered typed text and math segments; put every mathematical expression in a math segment containing type, expression, and display; forbid raw mathematical syntax in text segments; do not create labels, references, locations, or equations[] because the application constructs them; write expression using Microsoft Word linear equation syntax with Unicode math characters and plain operators, using / for fractions, _ for subscripts, ^ for superscripts, and sqrt(...) for radicals; and explicitly forbid images, screenshots, raw LaTeX, MathML, OMML XML, or Markdown-delimited mathematics
 
-use explicit lowercase component variables such as x_a, x_b, y_a, and y_b rather than ambiguous bare x or y when a component identity is needed; require every such identifier in body, options, and model_answer to use a matching equation reference
+keep individual symbols, short expressions, parameter definitions, constants, and simple assignments inline with prose using math segments with display=false; reserve display=true for important or longer equations and substantive derivation or calculation chains
+
+require complete instructor-facing derivations that show the governing relation, define variables, state assumptions, show each non-obvious calculus or algebra operation and its resulting expression, apply the stated conditions, retain units, perform the numerical comparison or logical test that establishes the conclusion, and check signs, dimensions, or physical behavior when relevant; forbid jumping from the governing relation to the final answer, omitting intermediate work, or merely asserting that a criterion is satisfied
+
+use explicit lowercase component variables such as x_a, x_b, y_a, and y_b rather than ambiguous bare x or y when a component identity is needed; require every such identifier in body, options, and model answers to use a math segment
 
 require one top-level assessment_metadata object for the complete assessment, distinct from question metadata, containing question_title, course, topic, question_type, number_of_questions, difficulty_level, cognitive_demand, intended_assessment_setting, mse202_concepts, mse302_concepts, concept_map_bridge, materials_science_context, numerical_computation, estimated_time, learning_objectives, prompt_design_factors, and additional_instructions; do not invent traceability IDs because the application adds prompt_template_id, actual_prompt_id, output_id, and final_question_id after generation; keep each question metadata object question-specific and never substitute questions[0].metadata for assessment_metadata
 JSON Output Requirements

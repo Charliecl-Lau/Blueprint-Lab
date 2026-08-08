@@ -49,20 +49,34 @@ LLM_MODEL=gpt-5.6-luna
 LLM_EVALUATION_MODEL=
 LLM_TEMPERATURE=0.2
 LLM_MAX_OUTPUT_TOKENS=32768
+LLM_REASONING_EFFORT=high
+LLM_PROVIDER_TIMEOUT_SECONDS=300
+ASSESSMENT_MAX_REPAIR_ATTEMPTS=3
+DOCX_TOOL_PROVIDER_TIMEOUT_SECONDS=300
+DOCX_TOOL_REASONING_EFFORT=medium
 LOCAL_REVIEWER_ID=local-reviewer
-DOCX_GENERATION_BACKEND=luna_direct
+DOCX_GENERATION_BACKEND=gemini_luna_pair
+DOCX_AUTO_DOWNLOAD_DIR=C:\Users\yeekw\Documents\Blueprint-Lab Run Result\Paper
 ```
+
+The default `gemini_luna_pair` document backend sends the same validated
+assessment manifest to the Gemini tool-authoring pipeline and the Luna direct
+DOCX pipeline. It automatically writes
+`blueprint-lab-run-<id>-gemini.docx` and
+`blueprint-lab-run-<id>-luna.docx` to `DOCX_AUTO_DOWNLOAD_DIR`; the verified
+Luna file remains the canonical artifact available through the application.
 
 The experimental `luna_direct` document backend keeps the established
 Actual-Prompt-driven assessment JSON workflow unchanged. After that JSON is
 validated and persisted as canonical content, a second `gpt-5.6-luna` Responses
-call uses an ephemeral Code Interpreter container to create a real DOCX. The
+call uses an ephemeral Code Interpreter container to create a real DOCX and
+makes the Image Generation tool available for optional supplementary solution
+figures. Equations and assessed prose always remain editable Word content. The
 worker downloads the file immediately, validates its OOXML package, canonical
 question and solution text, unresolved equation placeholders, and native OMML
 equations, then stores the verified artifact. This path intentionally does not
 invoke LibreOffice or perform PDF/image visual rendering. The selectable
-`legacy`, `self_hosted_code`, and `agentic_tools` backends remain available for
-comparison.
+`legacy`, `self_hosted_code`, and `agentic_tools` backends remain available.
 
 ### 2. Install dependencies
 
@@ -114,6 +128,11 @@ Celery worker (the `solo` pool is required on Windows):
 ```powershell
 python -m celery -A backend.celery_app worker --loglevel=info --pool=solo
 ```
+
+Keep the worker in a persistent terminal or process manager. Closing the
+launching terminal stops queue consumption. Worker availability is exposed at
+`http://localhost:8000/health/worker` and returns HTTP 503 when no worker
+responds.
 
 Frontend:
 

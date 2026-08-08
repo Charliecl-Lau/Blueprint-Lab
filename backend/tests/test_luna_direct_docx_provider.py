@@ -79,14 +79,18 @@ def test_generates_and_downloads_one_docx_before_container_cleanup():
     assert create["extra_body"] == {"memory_limit": "1g"}
     request = client.responses.create.call_args.kwargs
     assert request["model"] == LUNA_DIRECT_MODEL
+    assert request["reasoning"] == {"effort": "medium"}
     assert request["tools"] == [
-        {"type": "code_interpreter", "container": "container-1"}
+        {"type": "code_interpreter", "container": "container-1"},
+        {"type": "image_generation"},
     ]
     assert request["tool_choice"] == "required"
     assert "Student-Facing Questions" in request["instructions"]
     assert "Fully Worked Solutions" in request["instructions"]
     assert "never put source notation such as `x_a`" in request["instructions"]
     assert "Page X of Y" in request["instructions"]
+    assert "Image Generation Tool" in request["instructions"]
+    assert "Never rasterize an equation" in request["instructions"]
     client.containers.files.create.assert_called_once_with(
         "container-1",
         file=(
@@ -120,6 +124,39 @@ def test_includes_machine_feedback_for_a_repair_attempt():
     instructions = client.responses.create.call_args.kwargs["instructions"]
     assert "# Machine Verification Repair" in instructions
     assert "equation index 2: subscript" in instructions
+    assert "word/document.xml contains exactly one m:oMath per placeholder" in instructions
+    assert "never set m:jc to left or right" in instructions
+
+
+def test_reuses_one_container_and_upload_for_initial_and_repair_calls():
+    provider, client = configured_provider()
+    assessment = {"questions": []}
+    client.containers.files.content.retrieve.side_effect = [
+        BytesIO(docx_bytes()), BytesIO(docx_bytes())
+    ]
+    session = provider.create_session(assessment, run_id=42)
+
+    provider.generate(assessment, run_id=42, session=session)
+    provider.generate(
+        assessment,
+        run_id=42,
+        session=session,
+        verification_feedback=("header_missing: no header relationship",),
+    )
+
+    assert client.containers.create.call_count == 1
+    assert client.containers.files.create.call_count == 1
+    assert client.responses.create.call_count == 2
+    assert all(
+        call_.kwargs["tools"][0]["container"] == "container-1"
+        for call_ in client.responses.create.call_args_list
+    )
+    client.containers.delete.assert_not_called()
+    assert provider.close_session(session) is True
+    client.containers.delete.assert_called_once_with("container-1")
+    repair_text = client.responses.create.call_args.kwargs["input"][0]["content"][0]["text"]
+    assert canonical_json(assessment) not in repair_text
+    assert "existing named files" in repair_text
 
 
 def test_rejects_a_canonical_upload_without_a_mounted_path():

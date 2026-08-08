@@ -277,6 +277,16 @@ def test_docx_converts_flat_word_linear_equations_to_built_up_omml():
                     "expression": "sqrt(x_a)",
                     "location": "solution",
                 },
+                {
+                    "label": "Grouped",
+                    "expression": "R T (1/x_a + 1/x_b)",
+                    "location": "solution",
+                },
+                {
+                    "label": "Function",
+                    "expression": "ln(x_a)",
+                    "location": "solution",
+                },
             ],
         }],
     )
@@ -290,6 +300,8 @@ def test_docx_converts_flat_word_linear_equations_to_built_up_omml():
     assert document_xml.count(b"<m:sSub>") >= 2
     assert b"<m:sSup>" in document_xml
     assert b"<m:rad>" in document_xml
+    assert b"<m:d>" in document_xml
+    assert b"<m:func>" in document_xml
 
 
 def test_docx_keeps_complete_signed_exponent_inside_omml_superscript():

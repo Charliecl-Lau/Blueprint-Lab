@@ -118,6 +118,7 @@ async def test_terminal_snapshot_closes_without_waiting_for_redis(test_db, statu
 
 def test_run_detail_exposes_viewer_evaluation_and_grading_state(test_db):
     run = _run(test_db, status="complete")
+    run.started_at = run.created_at
     run.viewer_ready_at = run.created_at
     run.progress_message = "Complete"
     run.assessment = Assessment(
@@ -148,6 +149,7 @@ def test_run_detail_exposes_viewer_evaluation_and_grading_state(test_db):
 
     detail = run_detail(run)
 
+    assert detail["started_at"] == run.started_at
     assert detail["viewer_ready_at"] == run.viewer_ready_at
     assert detail["progress_message"] == "Complete"
     assert detail["evaluation_status"] == "complete"
@@ -165,3 +167,11 @@ def test_generation_failure_is_terminal_without_evaluation_state(test_db):
 
     assert detail["evaluation_status"] == "not_started"
     assert detail["grading_available"] is False
+
+
+def test_queued_run_detail_allows_missing_started_at(test_db):
+    run = _run(test_db, status="pending")
+
+    detail = run_detail(run)
+
+    assert detail["started_at"] is None

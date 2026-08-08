@@ -22,6 +22,7 @@ class ModelSettings(BaseModel):
     top_p: Optional[float] = None
     seed: Optional[int] = None
     max_output_tokens: Optional[int] = Field(default=None, alias="max_tokens")
+    reasoning_effort: Optional[Literal["low", "medium", "high"]] = None
     provider_settings: dict[str, object] = Field(default_factory=dict)
     model_config = {
         "extra": "forbid",
@@ -115,6 +116,7 @@ class RunDetail(BaseModel):
     condition_id: int
     run_number: int
     status: str
+    started_at: Optional[datetime] = None
     viewer_ready_at: Optional[datetime] = None
     progress_message: Optional[str] = None
     evaluation_status: Literal["not_started", "in_progress", "complete", "failed"]

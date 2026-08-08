@@ -15,3 +15,10 @@ celery_app.conf.task_serializer = "json"
 celery_app.conf.result_serializer = "json"
 celery_app.conf.accept_content = ["json"]
 celery_app.conf.task_ignore_result = True
+celery_app.conf.broker_transport_options = {
+    "visibility_timeout": settings.celery_visibility_timeout_seconds,
+}
+celery_app.conf.result_backend_transport_options = {
+    "visibility_timeout": settings.celery_visibility_timeout_seconds,
+}
+celery_app.conf.visibility_timeout = settings.celery_visibility_timeout_seconds

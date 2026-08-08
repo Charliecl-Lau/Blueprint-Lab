@@ -1,4 +1,4 @@
-"""Manual, bounded Luna turns for selecting trusted DOCX tools."""
+"""Manual, bounded Gemini turns for selecting trusted DOCX tools."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from backend.services.llm_client import LLMClient, LLMResult
 
 
 PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
-DOCX_TOOL_MODEL = "gpt-5.6-luna"
+DOCX_TOOL_MODEL = "gemini-3.5-flash-lite"
 REVIEW_REVISION_TOOLS = {
     "move_block",
     "update_block_style",
@@ -43,7 +43,7 @@ class AgentTurnResult:
 class GeminiDocxToolAgent:
     def __init__(self, client: Optional[LLMClient] = None, *, max_operations: int = 100, max_pages: int = 25):
         self.client = client or LLMClient(
-            provider="openai",
+            provider="google",
             model=DOCX_TOOL_MODEL,
             timeout_ms=settings.docx_tool_provider_timeout_seconds * 1000,
         )

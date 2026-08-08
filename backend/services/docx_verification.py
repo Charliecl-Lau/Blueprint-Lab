@@ -9,14 +9,24 @@ class VerificationIssue:
     severity: str = "error"
     repairable: bool = True
     evidence: str = ""
+    target: dict = field(default_factory=dict)
+    expected: dict = field(default_factory=dict)
+    actual: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
-        return {
+        result = {
             "code": self.code,
             "severity": self.severity,
             "repairable": self.repairable,
             "evidence": self.evidence[:1000],
         }
+        if self.target:
+            result["target"] = self.target
+        if self.expected:
+            result["expected"] = self.expected
+        if self.actual:
+            result["actual"] = self.actual
+        return result
 
 
 @dataclass(frozen=True)

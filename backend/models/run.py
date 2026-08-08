@@ -128,6 +128,9 @@ class Run(Base):
     model_call_usages: Mapped[list["ModelCallUsage"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
+    assessment_repair_attempts: Mapped[list["AssessmentRepairAttempt"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
     docx_authoring_attempts: Mapped[list["DocxAuthoringAttempt"]] = relationship(
         back_populates="run",
         foreign_keys="DocxAuthoringAttempt.run_id",
@@ -139,6 +142,9 @@ class Run(Base):
         foreign_keys="DocxToolSession.run_id",
         cascade="all, delete-orphan",
         overlaps="source_assessment,docx_tool_sessions",
+    )
+    luna_docx_sessions: Mapped[list["LunaDocxSession"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="LunaDocxSession.cycle_number"
     )
     reference_pdfs: Mapped[list["RunReferencePdf"]] = relationship(
         back_populates="run",
@@ -274,7 +280,7 @@ class Assessment(Base):
         UniqueConstraint("id", "run_id", name="uq_assessments_id_run"),
         CheckConstraint("version >= 1", name="ck_assessments_version_positive"),
         CheckConstraint(
-            "kind IN ('original_generation','full_rewrite')",
+            "kind IN ('original_generation','localized_repair','full_rewrite')",
             name="ck_assessments_kind",
         ),
     )
@@ -384,5 +390,7 @@ PromptRecord = Prompt
 
 from backend.models.source_document import RunSourceDocument  # noqa: E402,F401
 from backend.models.model_call_usage import ModelCallUsage  # noqa: E402,F401
+from backend.models.assessment_repair_attempt import AssessmentRepairAttempt  # noqa: E402,F401
 from backend.models.docx_authoring import DocxAuthoringAttempt  # noqa: E402,F401
 from backend.models.docx_tool_session import DocxToolSession  # noqa: E402,F401
+from backend.models.luna_docx_session import LunaDocxSession  # noqa: E402,F401

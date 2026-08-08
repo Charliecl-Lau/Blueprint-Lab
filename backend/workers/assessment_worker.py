@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 import redis
-from celery.exceptions import Retry
+from celery.exceptions import MaxRetriesExceededError, Retry
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -13,11 +13,17 @@ from backend.celery_app import celery_app
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models.experiment import utc_now
+from backend.models import AssessmentRepairAttempt, ModelCallUsage
 from backend.models.run import Assessment, Prompt, Run
 from backend.schemas.experiment_schema import PromptFactors
 from backend.schemas.assessment_schema import (
     ASSESSMENT_PROVIDER_SCHEMA,
+    ASSESSMENT_QUESTION_PROVIDER_SCHEMA,
+    ASSESSMENT_SEGMENT_REPLACEMENT_SCHEMA,
+    ASSESSMENT_CANONICAL_QUESTION_SCHEMA,
     AssessmentGenerationResponse,
+    ProviderSegmentReplacement,
+    QuestionResponse,
 )
 from backend.services.actual_prompt import (
     ACTUAL_PROMPT_GENERATOR_VERSION,
@@ -25,7 +31,8 @@ from backend.services.actual_prompt import (
     OPENAI_TEMPLATE_PROVENANCE,
     ActualPromptValidationError,
     build_assessment_repair_system_prompt,
-    build_assessment_repair_user_message,
+    build_question_repair_user_message,
+    build_segment_repair_user_message,
     build_structure_input,
     build_generation_system_prompt,
     render_openai_actual_prompt,
@@ -42,7 +49,23 @@ from backend.services.assessment_recovery_service import (
 )
 from backend.services.assessment_traceability import enrich_assessment_traceability
 from backend.services.generation_context import build_generation_context
-from backend.services.generator import generate_questions
+from backend.services.generator import (
+    generate_questions,
+    parse_segmented_question,
+)
+from backend.services.assessment_segment_compiler import (
+    AssessmentCompilationError,
+    audit_provider_question,
+    compile_provider_assessment,
+    compile_provider_question,
+)
+from backend.services.assessment_local_repair import (
+    LocalizedRepairRejected,
+    apply_segment_replacement,
+    content_hash,
+    extract_segment_replacement_from_question,
+    segment_target,
+)
 from backend.services.document_artifact import save_assessment_artifact
 from backend.services.document_generators import document_generator_registry
 from backend.services.docx_authoring_pipeline import DocxAuthoringPipeline
@@ -50,6 +73,7 @@ from backend.services.docx_sandbox_client import SandboxTransportError
 from backend.services.llm_client import (
     LLMClient,
     TruncatedResponseError,
+    _parse_json,
     is_retryable_provider_error,
 )
 from backend.services.reference_pdfs import (
@@ -70,7 +94,7 @@ redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 logger = logging.getLogger(__name__)
 _ASSESSMENT_SCHEMA_VERSION = "2"
 _MAX_ERROR_MESSAGE_LENGTH = 1000
-_MAX_ASSESSMENT_REPAIR_ATTEMPTS = 3
+_MAX_ASSESSMENT_REPAIR_ATTEMPTS = settings.assessment_max_repair_attempts
 
 
 def _publish_progress(experiment_id: int, run_id: int, condition_id: int, stage: str) -> None:
@@ -122,11 +146,33 @@ def _record_error(db: Session, run: Run, error_type: str, exc: Exception) -> Non
 def _retry_provider_failure(
     task, db: Session, run: Run, error_type: str, exc: Exception
 ) -> None:
-    _record_error(db, run, error_type, exc)
+    retries = getattr(task.request, "retries", 0)
+    max_retries = getattr(task, "max_retries", None)
+    if max_retries is not None and retries >= max_retries:
+        _record_error(db, run, error_type, exc)
+        _publish_progress(
+            run.experiment_id, run.id, run.condition_id, "error"
+        )
+        raise exc
+
+    db.rollback()
+    run.status = "pending"
+    run.progress_message = "Provider connection failed; retrying generation"
+    run.error_type = error_type
+    run.error_message = str(exc)[:_MAX_ERROR_MESSAGE_LENGTH]
+    run.completed_at = None
+    db.commit()
     _publish_progress(
-        run.experiment_id, run.id, run.condition_id, "error"
+        run.experiment_id, run.id, run.condition_id, "retrying"
     )
-    raise task.retry(exc=exc, countdown=10)
+    try:
+        raise task.retry(exc=exc, countdown=10)
+    except MaxRetriesExceededError:
+        _record_error(db, run, error_type, exc)
+        _publish_progress(
+            run.experiment_id, run.id, run.condition_id, "error"
+        )
+        raise
 
 
 def _call_gemini(
@@ -143,6 +189,7 @@ def _call_gemini(
     attachments=None,
 ):
     call_id = str(uuid.uuid4())
+    requested_at = utc_now()
     attempt = sum(1 for item in run.model_call_usages if item.stage == stage) + 1
     request = {
         "system_prompt": system_prompt,
@@ -163,6 +210,7 @@ def _call_gemini(
             stage=stage,
             attempt=attempt,
             result=exc.result,
+            requested_at=requested_at,
         )
         raise
     except Exception:
@@ -173,6 +221,7 @@ def _call_gemini(
             stage=stage,
             attempt=attempt,
             failed=True,
+            requested_at=requested_at,
         )
         raise
     record_model_call(
@@ -182,8 +231,324 @@ def _call_gemini(
         stage=stage,
         attempt=attempt,
         result=result,
+        requested_at=requested_at,
     )
     return result
+
+
+def _question_issues(error: ValidationError, ordinal: int) -> list[dict]:
+    return [
+        {
+            "code": str(item.get("type", "validation_error")),
+            "question_ordinal": ordinal,
+            "field_path": ".".join(str(value) for value in item.get("loc", ())),
+            "message": str(item.get("msg", "Question validation failed")),
+            "excerpt": None,
+            "repair_scope": "question",
+        }
+        for item in error.errors()
+    ]
+
+
+def _repair_segmented_questions(
+    task,
+    db: Session,
+    run: Run,
+    llm: LLMClient,
+    error: AssessmentCompilationError,
+    *,
+    actual_prompt: str,
+    model_settings: dict,
+    attachments,
+):
+    provider = error.provider.model_copy(deep=True)
+    last_result = None
+    issues = list(error.issues)
+    for repair_attempt in range(1, _MAX_ASSESSMENT_REPAIR_ATTEMPTS + 1):
+        if not issues:
+            break
+        selected = issues[0]
+        issue = selected.as_dict()
+        if selected.question_ordinal is None:
+            raise EvaluationValidationError(json.dumps([issue], ensure_ascii=False))
+        ordinal = selected.question_ordinal
+        target = segment_target(provider, selected.field_path)
+        if target is not None:
+            before_content = target.content
+            repair_scope = "content_block"
+            target_path = target.path
+            response_schema = ASSESSMENT_SEGMENT_REPLACEMENT_SCHEMA
+            user_message = build_segment_repair_user_message(
+                target_path=target_path,
+                segment_payload=before_content,
+                issue=issue,
+            )
+        else:
+            before_content = provider.questions[ordinal].model_dump(mode="json")
+            repair_scope = "question"
+            target_path = f"questions.{ordinal}"
+            response_schema = ASSESSMENT_QUESTION_PROVIDER_SCHEMA
+            user_message = build_question_repair_user_message(
+                ordinal, before_content, [item.as_dict() for item in issues if item.question_ordinal == ordinal]
+            )
+
+        evidence = AssessmentRepairAttempt(
+            run_id=run.id,
+            assessment_id=run.assessment.id if run.assessment is not None else None,
+            question_ordinal=ordinal,
+            attempt_number=repair_attempt,
+            issues=[issue],
+            status="pending",
+            repair_type="structural",
+            error_type=issue.get("error_type"),
+            validator_code=issue.get("code"),
+            validator_message=issue.get("message"),
+            target_path=target_path,
+            target_section=issue.get("target_section"),
+            question_id=issue.get("question_id"),
+            solution_id=issue.get("solution_id"),
+            equation_id=issue.get("equation_id"),
+            repair_scope=repair_scope,
+            before_content=before_content,
+            before_hash=content_hash(before_content),
+            prompt_version=run.prompt.structure_prompt_version if run.prompt else None,
+        )
+        db.add(evidence)
+        db.commit()  # Append-only intent exists before the external call starts.
+        run.progress_message = f"Repairing {target_path}"
+        db.commit()
+        _publish_progress(run.experiment_id, run.id, run.condition_id, "generating")
+        try:
+            last_result = _call_gemini(
+                task,
+                db,
+                run,
+                llm,
+                stage="repair",
+                system_prompt=build_assessment_repair_system_prompt(actual_prompt),
+                user_message=user_message,
+                model_settings=model_settings,
+                response_schema=response_schema,
+                attachments=attachments,
+            )
+        except Exception as exc:
+            usage = (
+                db.query(ModelCallUsage)
+                .filter_by(run_id=run.id, stage="repair")
+                .order_by(ModelCallUsage.id.desc())
+                .first()
+            )
+            if usage is not None:
+                evidence.model_call_usage_id = usage.id
+                evidence.model_call_id = usage.call_id
+            evidence.status = "invalid"
+            evidence.success = False
+            evidence.failure_reason = str(exc)[:_MAX_ERROR_MESSAGE_LENGTH]
+            evidence.completed_at = utc_now()
+            db.commit()
+            raise
+        evidence.status = "response"
+        evidence.model = last_result.model_name
+        usage = (
+            db.query(ModelCallUsage)
+            .filter_by(run_id=run.id, stage="repair")
+            .order_by(ModelCallUsage.id.desc())
+            .first()
+        )
+        if usage is not None:
+            evidence.model_call_usage_id = usage.id
+            evidence.model_call_id = usage.call_id
+            evidence.token_usage = {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+            }
+        try:
+            if target is not None:
+                try:
+                    replacement = ProviderSegmentReplacement.model_validate_json(
+                        last_result.raw_text
+                    )
+                except ValidationError:
+                    # Read old in-flight provider responses safely: extract only the
+                    # target fragment and reject any unrelated question mutation.
+                    candidate = parse_segmented_question(last_result.raw_text)
+                    replacement = extract_segment_replacement_from_question(
+                        provider, target, candidate
+                    )
+                evidence.after_content = replacement.model_dump(mode="json")
+                evidence.after_hash = content_hash(evidence.after_content)
+                patched = apply_segment_replacement(provider, target, replacement)
+            else:
+                repaired = parse_segmented_question(last_result.raw_text)
+                evidence.after_content = repaired.model_dump(mode="json")
+                evidence.after_hash = content_hash(evidence.after_content)
+                patched = provider.model_copy(deep=True)
+                patched.questions[ordinal] = repaired
+            compile_provider_assessment(patched)
+        except (ValidationError, ValueError, LocalizedRepairRejected, AssessmentCompilationError) as exc:
+            evidence.status = "invalid"
+            evidence.success = False
+            evidence.failure_reason = str(exc)[:_MAX_ERROR_MESSAGE_LENGTH]
+            evidence.completed_at = utc_now()
+            db.commit()
+            if isinstance(exc, AssessmentCompilationError):
+                issues = list(exc.issues)
+            elif target is None and isinstance(exc, ValidationError):
+                issues = []
+            if repair_attempt == _MAX_ASSESSMENT_REPAIR_ATTEMPTS:
+                raise EvaluationValidationError(evidence.failure_reason) from exc
+            continue
+        provider = patched
+        try:
+            generated = compile_provider_assessment(provider)
+            issues = []
+        except AssessmentCompilationError as exc:
+            issues = list(exc.issues)
+            generated = None
+        if generated is not None or all(
+            item.field_path != selected.field_path for item in issues
+        ):
+            evidence.status = "merged"
+            evidence.success = True
+        else:
+            evidence.status = "invalid"
+            evidence.success = False
+            evidence.failure_reason = "target validation error remains after patch"
+        evidence.completed_at = utc_now()
+        db.commit()
+        if not evidence.success and repair_attempt == _MAX_ASSESSMENT_REPAIR_ATTEMPTS:
+            raise EvaluationValidationError(evidence.failure_reason)
+
+    try:
+        generated = compile_provider_assessment(provider)
+    except AssessmentCompilationError as exc:
+        raise EvaluationValidationError(str(exc)) from exc
+    return generated, provider.model_dump_json(), last_result
+
+
+def _repair_legacy_question(
+    task,
+    db: Session,
+    run: Run,
+    llm: LLMClient,
+    raw_text: str,
+    validation_error: ValidationError,
+    *,
+    actual_prompt: str,
+    model_settings: dict,
+    attachments,
+):
+    payload = _parse_json(raw_text)
+    questions = payload.get("questions") if isinstance(payload, dict) else None
+    error_items = validation_error.errors()
+    location = error_items[0].get("loc", ()) if error_items else ()
+    if (
+        not isinstance(questions, list)
+        or len(location) < 2
+        or location[0] != "questions"
+        or not isinstance(location[1], int)
+        or location[1] >= len(questions)
+    ):
+        raise EvaluationValidationError(
+            f"structural repair target could not be localized: {validation_error}"
+        )
+    ordinal = location[1]
+    current = json.loads(json.dumps(payload))
+    last_result = None
+    for attempt_number in range(1, _MAX_ASSESSMENT_REPAIR_ATTEMPTS + 1):
+        issues = _question_issues(validation_error, ordinal)
+        for issue in issues:
+            issue["target_path"] = f"questions.{ordinal}"
+            issue["target_section"] = "question"
+            issue["error_type"] = "structural_validation_error"
+            issue["expected_structure"] = "QuestionResponse"
+            issue["observed_structure"] = current["questions"][ordinal]
+        before = current["questions"][ordinal]
+        evidence = AssessmentRepairAttempt(
+            run_id=run.id,
+            assessment_id=run.assessment.id if run.assessment else None,
+            question_ordinal=ordinal,
+            attempt_number=attempt_number,
+            issues=issues,
+            status="pending",
+            repair_type="structural",
+            error_type="structural_validation_error",
+            validator_code=issues[0]["code"],
+            validator_message=issues[0]["message"],
+            target_path=f"questions.{ordinal}",
+            target_section="question",
+            repair_scope="question",
+            before_content=before,
+            before_hash=content_hash(before),
+            prompt_version=run.prompt.structure_prompt_version if run.prompt else None,
+        )
+        db.add(evidence)
+        db.commit()
+        try:
+            last_result = _call_gemini(
+                task,
+                db,
+                run,
+                llm,
+                stage="repair",
+                system_prompt=build_assessment_repair_system_prompt(actual_prompt),
+                user_message=build_question_repair_user_message(ordinal, before, issues),
+                model_settings=model_settings,
+                response_schema=ASSESSMENT_CANONICAL_QUESTION_SCHEMA,
+                attachments=attachments,
+            )
+            usage = (
+                db.query(ModelCallUsage)
+                .filter_by(run_id=run.id, stage="repair")
+                .order_by(ModelCallUsage.id.desc())
+                .first()
+            )
+            if usage is not None:
+                evidence.model_call_usage_id = usage.id
+                evidence.model_call_id = usage.call_id
+                evidence.model = last_result.model_name
+                evidence.token_usage = {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "total_tokens": usage.total_tokens,
+                }
+            response_payload = _parse_json(last_result.raw_text)
+            if isinstance(response_payload, dict) and "questions" in response_payload:
+                response_payload = response_payload["questions"][ordinal]
+            repaired = QuestionResponse.model_validate(response_payload)
+            evidence.after_content = response_payload
+            evidence.after_hash = content_hash(evidence.after_content)
+            candidate = json.loads(json.dumps(current))
+            candidate["questions"][ordinal] = response_payload
+            generated = generate_questions(json.dumps(candidate))
+        except Exception as exc:
+            usage = (
+                db.query(ModelCallUsage)
+                .filter_by(run_id=run.id, stage="repair")
+                .order_by(ModelCallUsage.id.desc())
+                .first()
+            )
+            if usage is not None and evidence.model_call_usage_id is None:
+                evidence.model_call_usage_id = usage.id
+                evidence.model_call_id = usage.call_id
+            evidence.status = "invalid"
+            evidence.success = False
+            evidence.failure_reason = str(exc)[:_MAX_ERROR_MESSAGE_LENGTH]
+            evidence.completed_at = utc_now()
+            db.commit()
+            if isinstance(exc, ValidationError):
+                validation_error = exc
+            if attempt_number == _MAX_ASSESSMENT_REPAIR_ATTEMPTS:
+                raise EvaluationValidationError(str(exc)) from exc
+            continue
+        current = candidate
+        evidence.status = "merged"
+        evidence.success = True
+        evidence.completed_at = utc_now()
+        db.commit()
+        return generated, json.dumps(current), last_result
+    raise EvaluationValidationError("localized question repair limit exhausted")
 
 
 def _cleanup_provider_files(
@@ -231,7 +596,7 @@ def _create_document(
     """Create the configured artifact and return whether version 2 is canonical."""
     messages = {
         "documenting": "Creating assessment document",
-        "docx_authoring": "Luna is generating the Word document" if settings.docx_generation_backend == "luna_direct" else ("Gemini is designing the Word document" if settings.docx_generation_backend == "agentic_tools" else "Authoring assessment document"),
+        "docx_authoring": "Generating the Gemini and Luna Word documents" if settings.docx_generation_backend == "gemini_luna_pair" else ("Luna is generating the Word document" if settings.docx_generation_backend == "luna_direct" else ("Gemini is designing the Word document" if settings.docx_generation_backend == "agentic_tools" else "Authoring assessment document")),
         "docx_executing": "Applying document operations" if settings.docx_generation_backend == "agentic_tools" else "Executing DOCX program",
         "docx_validating": "Structurally verifying the Luna Word document" if settings.docx_generation_backend == "luna_direct" else ("Rendering and verifying the Word document" if settings.docx_generation_backend == "agentic_tools" else "Validating assessment document"),
         "docx_repairing": "Gemini is revising the rendered document" if settings.docx_generation_backend == "agentic_tools" else "Repairing assessment document",
@@ -593,89 +958,77 @@ def run_generation_pipeline(
             _publish_progress(
                 experiment.id, run.id, condition.id, "generating"
             )
-            generated = None
-            for repair_attempt in range(_MAX_ASSESSMENT_REPAIR_ATTEMPTS + 1):
-                try:
-                    generated = generate_questions(
-                        result.raw_text,
-                        expected_questions=experiment.number_of_questions,
-                    )
-                    break
-                except (ValidationError, ValueError) as exc:
-                    if repair_attempt == _MAX_ASSESSMENT_REPAIR_ATTEMPTS:
-                        validation_error = str(exc)
-                        break
-                    validation_error = str(exc)
-
-                run.progress_message = "Repairing Assessment"
+            accepted_assessment = assessment
+            try:
+                generated = generate_questions(
+                    result.raw_text,
+                    expected_questions=experiment.number_of_questions,
+                )
+            except AssessmentCompilationError as exc:
+                generated, compiled_raw, last_repair_result = _repair_segmented_questions(
+                    self,
+                    db,
+                    run,
+                    llm,
+                    exc,
+                    actual_prompt=prompt.actual_prompt,
+                    model_settings=run.model_settings,
+                    attachments=attachments,
+                )
+                accepted_assessment = Assessment(
+                    run_id=run.id,
+                    version=2,
+                    kind="localized_repair",
+                    source_assessment_id=assessment.id,
+                    raw_response_text=compiled_raw,
+                    parsed_json=None,
+                    output_hash=sha256_text(compiled_raw),
+                    schema_version=_ASSESSMENT_SCHEMA_VERSION,
+                    validation_status="invalid",
+                )
+                run.assessment = accepted_assessment
+                if last_repair_result is not None:
+                    run.request_id = last_repair_result.provider_request_id
+                    run.model = last_repair_result.model_name
+                    run.version = last_repair_result.model_version
+                    run.finish_reason = last_repair_result.finish_reason
+                run.duration_ms = int((time.perf_counter() - generation_started) * 1000)
                 db.commit()
-                _publish_progress(
-                    experiment.id, run.id, condition.id, "generating"
+            except ValidationError as exc:
+                generated, compiled_raw, last_repair_result = _repair_legacy_question(
+                    self,
+                    db,
+                    run,
+                    llm,
+                    result.raw_text,
+                    exc,
+                    actual_prompt=prompt.actual_prompt,
+                    model_settings=run.model_settings,
+                    attachments=attachments,
                 )
-                try:
-                    result = _call_gemini(
-                        self,
-                        db,
-                        run,
-                        llm,
-                        stage="repair",
-                        system_prompt=build_assessment_repair_system_prompt(
-                            prompt.actual_prompt
-                        ),
-                        user_message=build_assessment_repair_user_message(
-                            result.raw_text,
-                            validation_error,
-                        ),
-                        model_settings=run.model_settings,
-                        response_schema=ASSESSMENT_PROVIDER_SCHEMA,
-                        attachments=attachments,
-                    )
-                except Exception as exc:
-                    if attachments and _is_reference_pdf_unavailable(exc):
-                        exc = RuntimeError(
-                            "An attached reference PDF is unavailable. Upload fresh PDFs and retry."
-                        )
-                        error_type = "reference_pdf_unavailable"
-                    else:
-                        error_type = "assessment_repair_provider_error"
-                    _record_error(
-                        db,
-                        run,
-                        error_type,
-                        exc,
-                    )
-                    _publish_progress(
-                        experiment.id, run.id, condition.id, "error"
-                    )
-                    return
-
-                assessment.raw_response_text = result.raw_text
-                assessment.output_hash = sha256_text(result.raw_text)
-                run.request_id = result.provider_request_id
-                run.model = result.model_name
-                run.version = result.model_version
-                run.finish_reason = result.finish_reason
-                run.duration_ms = int(
-                    (time.perf_counter() - generation_started) * 1000
+                accepted_assessment = Assessment(
+                    run_id=run.id,
+                    version=2,
+                    kind="localized_repair",
+                    source_assessment_id=assessment.id,
+                    raw_response_text=compiled_raw,
+                    parsed_json=None,
+                    output_hash=sha256_text(compiled_raw),
+                    schema_version=_ASSESSMENT_SCHEMA_VERSION,
+                    validation_status="invalid",
                 )
+                run.assessment = accepted_assessment
                 db.commit()
-            if generated is None:
-                recovered = recover_saved_assessment(
-                    db, run, source="repair_limit_exhausted"
-                )
-                if recovered == "warning":
-                    set_warning_run_state(run)
-                    db.commit()
-                    _publish_progress(
-                        experiment.id, run.id, condition.id, "complete_with_warnings"
-                    )
-                    return
-                if recovered == "invalid":
-                    raise EvaluationValidationError(validation_error)
-            else:
-                mark_strictly_valid(assessment, generated.model_dump())
-            persist_assessment_questions(db, assessment)
-            enrich_assessment_traceability(db, assessment)
+            except ValueError as exc:
+                # Unlocatable document-level failures are retained for research but
+                # never sent through a full-response regeneration fallback.
+                raise EvaluationValidationError(
+                    f"structural repair target could not be localized: {exc}"
+                ) from exc
+
+            mark_strictly_valid(accepted_assessment, generated.model_dump())
+            persist_assessment_questions(db, accepted_assessment)
+            enrich_assessment_traceability(db, accepted_assessment)
             if not _create_document(db, run, attachments):
                 return
             run.viewer_ready_at = utc_now()
@@ -688,17 +1041,23 @@ def run_generation_pipeline(
                 self, db, run, "docx_sandbox_transport_error", exc
             )
         except (ValueError, ValidationError, EvaluationValidationError) as exc:
-            error_type = (
-                "document_generation_error"
-                if run.status in {
+            if run.status in {
                     "documenting",
                     "docx_authoring",
                     "docx_executing",
                     "docx_validating",
                     "docx_repairing",
-                }
-                else "assessment_parse_error"
-            )
+                }:
+                error_type = "document_generation_error"
+            elif run.assessment_repair_attempts:
+                error_type = "structural_repair_failed"
+            else:
+                try:
+                    json.loads(run.assessment.raw_response_text)
+                except (TypeError, json.JSONDecodeError):
+                    error_type = "assessment_parse_error"
+                else:
+                    error_type = "structural_repair_failed"
             _record_error(db, run, error_type, exc)
             _publish_progress(
                 experiment.id, run.id, condition.id, "error"

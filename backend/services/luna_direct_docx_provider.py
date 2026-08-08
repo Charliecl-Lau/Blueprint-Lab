@@ -38,6 +38,13 @@ class LunaDocxResult:
     prompt_sha256: str
 
 
+@dataclass
+class LunaContainerSession:
+    container_id: str
+    canonical_path: str
+    previous_response_id: str | None = None
+
+
 def _value(item: Any, name: str, default=None):
     if isinstance(item, dict):
         return item.get(name, default)
@@ -95,6 +102,8 @@ def _download_bytes(download) -> bytes:
 
 
 class LunaDirectDocxProvider:
+    supports_reusable_session = True
+
     def __init__(self, client=None, *, maximum_bytes: int | None = None):
         self.client = client or OpenAI(
             api_key=settings.openai_api_key,
@@ -106,27 +115,8 @@ class LunaDirectDocxProvider:
         )
         self.maximum_bytes = maximum_bytes or settings.docx_sandbox_max_response_bytes
 
-    def generate(
-        self,
-        assessment_json: dict,
-        *,
-        run_id: int,
-        verification_feedback: tuple[str, ...] = (),
-    ) -> LunaDocxResult:
-        instructions = _PROMPT_PATH.read_text(encoding="utf-8")
-        if verification_feedback:
-            findings = "\n".join(f"* {item}" for item in verification_feedback)
-            instructions += (
-                "\n\n# Machine Verification Repair\n\n"
-                "A previous DOCX attempt failed the authoritative verifier. Rebuild "
-                "the document from scratch and correct every finding below. Do not "
-                "weaken, omit, or work around any validation requirement.\n\n"
-                f"{findings}\n"
-            )
+    def create_session(self, assessment_json: dict, *, run_id: int) -> LunaContainerSession:
         canonical = canonical_json(assessment_json)
-        prompt_sha256 = hashlib.sha256(
-            (instructions + "\n" + canonical).encode("utf-8")
-        ).hexdigest()
         container = self.client.containers.create(
             name=f"blueprint-lab-run-{run_id}-docx",
             expires_after={"anchor": "last_active_at", "minutes": 20},
@@ -135,19 +125,68 @@ class LunaDirectDocxProvider:
         container_id = _value(container, "id")
         if not container_id:
             raise LunaDocxGenerationError("container_creation_invalid")
-
         try:
             uploaded = self.client.containers.files.create(
                 container_id,
-                file=(
-                    "assessment.json",
-                    canonical.encode("utf-8"),
-                    "application/json",
-                ),
+                file=("assessment.json", canonical.encode("utf-8"), "application/json"),
             )
             canonical_path = _value(uploaded, "path")
             if not canonical_path:
                 raise LunaDocxGenerationError("canonical_file_upload_invalid")
+            return LunaContainerSession(container_id, canonical_path)
+        except Exception:
+            self.close_session(LunaContainerSession(container_id, ""))
+            raise
+
+    def close_session(self, session: LunaContainerSession) -> bool:
+        try:
+            self.client.containers.delete(session.container_id)
+            return True
+        except Exception:
+            return False
+
+    def generate(
+        self,
+        assessment_json: dict,
+        *,
+        run_id: int,
+        verification_feedback: tuple[str, ...] = (),
+        session: LunaContainerSession | None = None,
+    ) -> LunaDocxResult:
+        owns_session = session is None
+        session = session or self.create_session(assessment_json, run_id=run_id)
+        instructions = _PROMPT_PATH.read_text(encoding="utf-8")
+        if verification_feedback:
+            findings = "\n".join(f"* {item}" for item in verification_feedback)
+            equation_repair = ""
+            if any(item.startswith("native_equation") for item in verification_feedback):
+                equation_repair = (
+                    "\nEquation repair is mandatory: enumerate every canonical "
+                    "placeholder and its equation entry before rebuilding. Confirm "
+                    "that the saved word/document.xml contains exactly one m:oMath "
+                    "per placeholder. A display equation must use "
+                    "m:oMathPara/m:oMath with m:oMathParaPr/m:jc set to center or "
+                    "centerGroup (or omit m:jc); never set m:jc to left or right. "
+                    "Plain Word text, Unicode math, and styled text do not count as "
+                    "native equations. Reopen the final DOCX as a ZIP and assert "
+                    "these conditions against word/document.xml before citing it.\n"
+                )
+            instructions += (
+                "\n\n# Machine Verification Repair\n\n"
+                "A previous DOCX attempt failed the authoritative verifier. Reuse "
+                "the existing /mnt/data/builder.py, /mnt/data/assessment.json, and "
+                "/mnt/data/assessment.docx in this container. Modify only the code "
+                "or tagged OOXML responsible for the findings, then save the revised "
+                "builder and DOCX. Do not "
+                "weaken, omit, or work around any validation requirement.\n\n"
+                f"{findings}\n{equation_repair}"
+            )
+        canonical = canonical_json(assessment_json)
+        prompt_sha256 = hashlib.sha256(
+            (instructions + "\n" + canonical).encode("utf-8")
+        ).hexdigest()
+        container_id = session.container_id
+        try:
             response = self.client.responses.create(
                 model=LUNA_DIRECT_MODEL,
                 instructions=instructions,
@@ -156,15 +195,30 @@ class LunaDirectDocxProvider:
                     "content": [{
                         "type": "input_text",
                         "text": (
-                            "The exact canonical JSON below is also mounted at "
-                            f"{canonical_path}. Load that file directly; "
-                            "do not retype its values into source code.\n\n"
-                            f"{canonical}"
+                            (
+                                "Load the exact canonical JSON from "
+                                f"{session.canonical_path}. Save the complete reusable "
+                                "generator as /mnt/data/builder.py and the final document "
+                                "as /mnt/data/assessment.docx. Do not retype canonical "
+                                "values into source code.\n\n"
+                                f"{canonical}"
+                            ) if not verification_feedback else (
+                                "Repair the existing named files in this container using "
+                                "the machine findings in the instructions. Do not recreate "
+                                "or re-upload canonical assessment data."
+                            )
                         ),
                     }],
                 }],
-                tools=[{"type": "code_interpreter", "container": container_id}],
+                tools=[
+                    {"type": "code_interpreter", "container": container_id},
+                    {"type": "image_generation"},
+                ],
                 tool_choice="required",
+                # The mathematical content is already canonical at this stage.
+                # Medium reasoning is sufficient for OOXML authoring and leaves
+                # more of the request budget for Code Interpreter and image work.
+                reasoning={"effort": settings.docx_tool_reasoning_effort},
             )
             status = _value(response, "status")
             if status != "completed":
@@ -201,6 +255,7 @@ class LunaDirectDocxProvider:
                 finish_reason=status,
                 usage=_usage(response),
             )
+            session.previous_response_id = provider_result.provider_request_id
             return LunaDocxResult(
                 content=content,
                 provider_result=provider_result,
@@ -210,7 +265,5 @@ class LunaDirectDocxProvider:
                 prompt_sha256=prompt_sha256,
             )
         finally:
-            try:
-                self.client.containers.delete(container_id)
-            except Exception:
-                pass
+            if owns_session:
+                self.close_session(session)

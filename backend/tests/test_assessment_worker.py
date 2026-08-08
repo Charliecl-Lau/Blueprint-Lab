@@ -7,8 +7,9 @@ from backend.models import Assessment, DocxAuthoringAttempt, Run
 from backend.tests.test_api_runs import _experiment_and_condition
 
 
-def test_docx_backend_defaults_to_luna_direct_and_supports_manual_opt_in():
-    assert Settings(_env_file=None).docx_generation_backend == "luna_direct"
+def test_docx_backend_defaults_to_pair_and_supports_manual_opt_in():
+    assert Settings(_env_file=None).docx_generation_backend == "gemini_luna_pair"
+    assert Settings(_env_file=None, docx_generation_backend="gemini_luna_pair").docx_generation_backend == "gemini_luna_pair"
     assert Settings(_env_file=None, docx_generation_backend="luna_direct").docx_generation_backend == "luna_direct"
     assert Settings(_env_file=None, docx_generation_backend="self_hosted_code").docx_generation_backend == "self_hosted_code"
     assert Settings(_env_file=None, docx_generation_backend="agentic_tools").docx_generation_backend == "agentic_tools"

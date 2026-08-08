@@ -28,6 +28,7 @@ ASSESSMENT = {
 
 def fixture_docx(
     *,
+    assessment=ASSESSMENT,
     question=True,
     solution=True,
     equation=True,
@@ -40,8 +41,38 @@ def fixture_docx(
     style_metadata_first_row=True,
     include_header_footer=True,
     equation_justification="center",
+    embed_placeholder_equation=False,
+    image=False,
+    image_alt_text="Illustration of the canonical solution relationship",
 ):
     document = Document()
+    equation_inserted = False
+
+    def append_equation(*, as_display):
+        nonlocal equation_inserted
+        container = OxmlElement("m:oMathPara") if as_display else None
+        if container is not None and equation_justification is not None:
+            properties = OxmlElement("m:oMathParaPr")
+            justification = OxmlElement("m:jc")
+            justification.set(
+                "{http://schemas.openxmlformats.org/officeDocument/2006/math}val",
+                equation_justification,
+            )
+            properties.append(justification)
+            container.append(properties)
+        math = OxmlElement("m:oMath")
+        run = OxmlElement("m:r")
+        text = OxmlElement("m:t")
+        text.text = "F_1=10N" if raw_linear_math else "F=10N"
+        run.append(text)
+        math.append(run)
+        if container is None:
+            document.paragraphs[-1]._p.append(math)
+        else:
+            container.append(math)
+            document._body._element.append(container)
+        equation_inserted = True
+
     if include_header_footer:
         document.sections[0].header.paragraphs[0].text = "Blueprint Lab"
         footer = document.sections[0].footer.paragraphs[0]
@@ -72,45 +103,50 @@ def fixture_docx(
         document.add_heading("2. Student-Facing Questions", level=1)
         document.add_heading("Question 1 - Equilibrium force", level=2)
         if question:
-            document.add_paragraph(ASSESSMENT["questions"][0]["body"])
+            document.add_paragraph(assessment["questions"][0]["body"])
         document.add_heading("3. Fully Worked Solutions", level=1)
         document.add_heading("Solution 1 - Equilibrium force", level=2)
         if solution:
-            document.add_paragraph(ASSESSMENT["questions"][0]["model_answer"])
+            answer = assessment["questions"][0]["model_answer"]
+            if embed_placeholder_equation and "[[EQ:force]]" in answer:
+                before, after = answer.split("[[EQ:force]]", 1)
+                paragraph = document.add_paragraph()
+                paragraph.add_run(before)
+                if display_equation:
+                    append_equation(as_display=True)
+                    document.add_paragraph(after)
+                else:
+                    append_equation(as_display=False)
+                    paragraph.add_run(after)
+            else:
+                document.add_paragraph(answer)
     else:
         document.add_heading("3. Fully Worked Solutions", level=1)
         document.add_heading("Solution 1 - Equilibrium force", level=2)
         if solution:
-            document.add_paragraph(ASSESSMENT["questions"][0]["model_answer"])
+            document.add_paragraph(assessment["questions"][0]["model_answer"])
         document.add_heading("2. Student-Facing Questions", level=1)
         document.add_heading("Question 1 - Equilibrium force", level=2)
         if question:
-            document.add_paragraph(ASSESSMENT["questions"][0]["body"])
+            document.add_paragraph(assessment["questions"][0]["body"])
     if placeholder:
         document.add_paragraph("[[EQ:force]]")
-    if equation:
-        container = OxmlElement("m:oMathPara") if display_equation else None
-        if container is not None:
-            if equation_justification is not None:
-                properties = OxmlElement("m:oMathParaPr")
-                justification = OxmlElement("m:jc")
-                justification.set(
-                    "{http://schemas.openxmlformats.org/officeDocument/2006/math}val",
-                    equation_justification,
-                )
-                properties.append(justification)
-                container.append(properties)
-        math = OxmlElement("m:oMath")
-        run = OxmlElement("m:r")
-        text = OxmlElement("m:t")
-        text.text = "F_1=10N" if raw_linear_math else "F=10N"
-        run.append(text)
-        math.append(run)
-        if container is None:
-            document.add_paragraph()._p.append(math)
-        else:
-            container.append(math)
-            document._body._element.append(container)
+    if equation and not equation_inserted:
+        if not display_equation:
+            document.add_paragraph()
+        append_equation(as_display=display_equation)
+    if image:
+        paragraph = document.add_paragraph()
+        drawing = OxmlElement("w:drawing")
+        inline = OxmlElement("wp:inline")
+        properties = OxmlElement("wp:docPr")
+        properties.set("id", "1")
+        properties.set("name", "Solution figure")
+        if image_alt_text is not None:
+            properties.set("descr", image_alt_text)
+        inline.append(properties)
+        drawing.append(inline)
+        paragraph._p.append(drawing)
     target = BytesIO()
     document.save(target)
     return target.getvalue()
@@ -253,6 +289,35 @@ def test_rejects_missing_structures_required_by_math_ast_without_expression():
     assert "fraction expected 1, found 0" in issue.evidence
 
 
+def test_rejects_missing_function_and_delimiter_required_by_math_ast():
+    assessment = deepcopy(ASSESSMENT)
+    assessment["questions"][0]["equations"][0].update(
+        {
+            "expression": None,
+            "math": {
+                "type": "function",
+                "name": "ln",
+                "argument": {
+                    "type": "delimiter",
+                    "opening": "(",
+                    "closing": ")",
+                    "content": {"type": "symbol", "name": "x"},
+                },
+            },
+        }
+    )
+
+    report = LunaDirectDocxVerifier().verify(fixture_docx(), assessment)
+
+    issue = next(
+        item
+        for item in report.issues
+        if item.code == "native_equation_structure_invalid"
+    )
+    assert "function expected 1, found 0" in issue.evidence
+    assert "delimiter expected 1, found 0" in issue.evidence
+
+
 def test_rejects_missing_named_greek_glyph_required_by_math_ast():
     assessment = deepcopy(ASSESSMENT)
     assessment["questions"][0]["equations"][0].update(
@@ -272,12 +337,66 @@ def test_rejects_missing_named_greek_glyph_required_by_math_ast():
     assert "greek glyph α" in issue.evidence
 
 
-def test_rejects_native_math_without_display_container():
+def test_rejects_legacy_display_math_without_display_container():
     report = LunaDirectDocxVerifier().verify(
         fixture_docx(display_equation=False), ASSESSMENT
     )
 
-    assert "native_equation_display_invalid" in codes(report)
+    assert "native_equation_placement_invalid" in codes(report)
+
+
+def test_accepts_inline_math_when_placeholder_is_embedded_in_prose():
+    assessment = deepcopy(ASSESSMENT)
+    assessment["questions"][0]["model_answer"] = (
+        "The equilibrium force is [[EQ:force]] for this case."
+    )
+
+    report = LunaDirectDocxVerifier().verify(
+        fixture_docx(
+            assessment=assessment,
+            display_equation=False,
+            embed_placeholder_equation=True,
+        ),
+        assessment,
+    )
+
+    assert report.valid is True
+
+
+def test_rejects_embedded_inline_placeholder_promoted_to_display_math():
+    assessment = deepcopy(ASSESSMENT)
+    assessment["questions"][0]["model_answer"] = (
+        "The equilibrium force is [[EQ:force]] for this case."
+    )
+
+    report = LunaDirectDocxVerifier().verify(
+        fixture_docx(
+            assessment=assessment,
+            display_equation=True,
+            embed_placeholder_equation=True,
+        ),
+        assessment,
+    )
+
+    assert "native_equation_placement_invalid" in codes(report)
+
+
+def test_rejects_standalone_placeholder_demoted_to_inline_math():
+    assessment = deepcopy(ASSESSMENT)
+    assessment["questions"][0]["model_answer"] = (
+        "The governing relation is\n[[EQ:force]]\nTherefore, the result follows."
+    )
+
+    report = LunaDirectDocxVerifier().verify(
+        fixture_docx(
+            assessment=assessment,
+            display_equation=False,
+            embed_placeholder_equation=True,
+        ),
+        assessment,
+    )
+
+    assert "native_equation_placement_invalid" in codes(report)
 
 
 def test_accepts_omitted_math_justification_as_center_group_default():
@@ -286,6 +405,22 @@ def test_accepts_omitted_math_justification_as_center_group_default():
     )
 
     assert report.valid is True
+
+
+def test_accepts_solution_image_with_descriptive_alt_text():
+    report = LunaDirectDocxVerifier().verify(
+        fixture_docx(image=True), ASSESSMENT
+    )
+
+    assert "image_alt_text_missing" not in codes(report)
+
+
+def test_rejects_solution_image_without_alt_text():
+    report = LunaDirectDocxVerifier().verify(
+        fixture_docx(image=True, image_alt_text=None), ASSESSMENT
+    )
+
+    assert "image_alt_text_missing" in codes(report)
 
 
 def test_rejects_explicitly_left_justified_display_math():

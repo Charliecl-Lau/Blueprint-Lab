@@ -223,8 +223,10 @@ class LLMClient:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         *,
-        timeout_ms: int = 60_000,
+        timeout_ms: Optional[int] = None,
     ):
+        if timeout_ms is None:
+            timeout_ms = settings.llm_provider_timeout_seconds * 1000
         if timeout_ms <= 0:
             raise ValueError("provider timeout must be positive")
         self.provider = (provider or settings.llm_provider).lower()
@@ -361,6 +363,11 @@ class LLMClient:
             "max_output_tokens": overrides.get(
                 "max_output_tokens", settings.llm_max_output_tokens
             ),
+            "reasoning": {
+                "effort": overrides.get(
+                    "reasoning_effort", settings.llm_reasoning_effort
+                )
+            },
         }
         if response_schema is None:
             response = self._client.responses.create(**request)
@@ -467,6 +474,11 @@ class LLMClient:
                 instructions=system_prompt,
                 input=[{"role": "user", "content": content}],
                 max_output_tokens=overrides.get("max_output_tokens", settings.llm_max_output_tokens),
+                reasoning={
+                    "effort": overrides.get(
+                        "reasoning_effort", settings.llm_reasoning_effort
+                    )
+                },
                 text_format=response_schema,
             )
             status = getattr(response, "status", None)

@@ -152,6 +152,10 @@ def _rewrite_state(run: Run) -> dict:
     canonical = run.canonical_assessment
     attempts = list(run.docx_authoring_attempts)
     tool_sessions = list(run.docx_tool_sessions)
+    luna_sessions = list(run.luna_docx_sessions)
+    latest_luna_session = max(
+        luna_sessions, key=lambda item: (item.cycle_number, item.id or 0), default=None
+    )
     latest_tool_session = max(tool_sessions, key=lambda item: (item.cycle_number, item.id or 0), default=None)
     has_luna_direct = any(
         usage.stage == "docx_direct_generation" for usage in run.model_call_usages
@@ -159,7 +163,7 @@ def _rewrite_state(run: Run) -> dict:
     backend = (
         "agentic_tools"
         if latest_tool_session is not None
-        else ("self_hosted_code" if attempts else ("luna_direct" if has_luna_direct else "legacy"))
+        else ("luna_direct" if latest_luna_session is not None else ("self_hosted_code" if attempts else ("luna_direct" if has_luna_direct else "legacy")))
     )
     latest_cycle = max((item.cycle_number for item in attempts), default=None)
     cycle_attempts = [
@@ -194,9 +198,12 @@ def _rewrite_state(run: Run) -> dict:
     if latest_tool_session is not None and not issue_codes and latest_tool_session.status == "failed":
         issue_codes.append(latest_tool_session.final_decision or "agentic_docx_failed")
     if backend == "luna_direct" and not issue_codes and run.status == "rewrite_failed":
-        issue_codes.extend(
-            code.strip() for code in (run.error_message or "").split(",") if code.strip()
-        )
+        if latest_luna_session is not None:
+            issue_codes.extend(latest_luna_session.final_issue_codes or [])
+        if not issue_codes:
+            issue_codes.extend(
+                code.strip() for code in (run.error_message or "").split(",") if code.strip()
+            )
 
     artifact_available = bool(
         canonical is not None
@@ -206,7 +213,12 @@ def _rewrite_state(run: Run) -> dict:
     return {
         "backend": backend,
         "status": status,
-        "attempt_count": len(cycle_attempts),
+        "attempt_count": latest_luna_session.attempt_count if latest_luna_session is not None else len(cycle_attempts),
+        **({
+            "repair_count": latest_luna_session.repair_count,
+            "outcome": latest_luna_session.outcome,
+            "evidence_available": bool(latest_luna_session.attempts),
+        } if latest_luna_session is not None else {}),
         "repair_available": bool(
             status == "failed"
             and original is not None
@@ -275,6 +287,15 @@ def run_detail(run: Run, include_raw_response: bool = False):
                 "execution_user_message": run.prompt.execution_user_message,
                 "execution_schema_version": run.prompt.execution_schema_version,
             })
+    repair_attempts = sorted(
+        run.assessment_repair_attempts, key=lambda item: (item.attempt_number, item.id)
+    )
+    successful_repairs = sum(item.success is True for item in repair_attempts)
+    failed_repairs = sum(item.success is False for item in repair_attempts)
+    original_generation = next(
+        (item for item in run.assessment_versions if item.kind == "original_generation"),
+        None,
+    )
     return {
         "id": run.id,
         "run_id": run.id,
@@ -282,6 +303,7 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "condition_id": run.condition_id,
         "run_number": run.run_number,
         "status": run.status,
+        "started_at": run.started_at,
         "viewer_ready_at": viewer_ready_at,
         "progress_message": run.progress_message,
         "viewer_available": bool(
@@ -301,6 +323,13 @@ def run_detail(run: Run, include_raw_response: bool = False):
         "prompt": prompt,
         "assessment": None if not run.assessment else {
             "id": run.assessment.id,
+            "kind": run.assessment.kind,
+            "original_generation_id": (
+                original_generation.id if original_generation is not None else None
+            ),
+            "original_output_hash": (
+                original_generation.output_hash if original_generation is not None else None
+            ),
             "question_ids": [question.id for question in questions],
             "parsed_json": run.assessment.parsed_json,
             "output_hash": run.assessment.output_hash,
@@ -320,8 +349,26 @@ def run_detail(run: Run, include_raw_response: bool = False):
                     and run.assessment.defects_accepted_at is None
                 ),
             },
+            "repair": {
+                "total_attempts": len(repair_attempts),
+                "successful_attempts": successful_repairs,
+                "failed_attempts": failed_repairs,
+                "any_repair": bool(repair_attempts),
+                "first_pass_valid": (
+                    not repair_attempts
+                    and run.assessment.validation_status == "valid"
+                ),
+                "final_status": (
+                    "not_needed" if not repair_attempts
+                    else "succeeded" if repair_attempts[-1].success is True
+                    else "failed" if repair_attempts[-1].success is False
+                    else "in_progress"
+                ),
+            },
             **({"raw_response_text": run.assessment.raw_response_text}
                if include_raw_response else {}),
+            **({"original_raw_response_text": original_generation.raw_response_text}
+               if include_raw_response and original_generation is not None else {}),
         },
         "sources": [
             {

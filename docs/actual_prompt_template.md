@@ -76,17 +76,25 @@ Return one assessment_metadata object describing the complete assessment, not an
 
 The student-facing question must be self-contained and include all numerical data, scenario information, and assumptions needed to solve the problem. Do not provide governing thermodynamic identities, equilibrium criteria, or other knowledge that students are expected to recall unless explicitly requested.
 
-Write the instructor solution as a continuous guided mathematical derivation, not as isolated numbered or titled steps. Do not use labels such as "Step 1", "Step 2", or "Step 3". Begin with the correct answer or final objective. Each paragraph must perform exactly one logical operation: introduce the governing principle or equation, define variables, state assumptions, substitute known values, differentiate, rearrange, simplify, calculate, check, or interpret. Separate major operations with a blank line. Place every major equation, rearrangement, derivative, substitution, intermediate calculation, and final calculation on its own line using one complete [[EQ:label]] reference. Use short natural transition phrases such as "The governing relation is...", "For this system...", "At constant temperature and pressure...", "Differentiating...", "Using the quotient rule...", "Substituting...", "Therefore...", "Hence...", "Finally...", "Check by reconstruction...", and "Physically..." so each paragraph leads naturally into the displayed equation or the next operation. Define every variable before using it, state all assumptions explicitly, and retain units throughout substitutions and calculations. End with the final answer and units, a brief physical interpretation, and, when applicable, a connection to the relevant MSE202 and MSE302 concepts. For multiple-choice questions, add a separate line titled "Why the other choices are incorrect" after the derivation, followed by one separate line for every distractor, beginning with its option letter and explaining the specific misconception, incorrect assumption, sign error, unit error, or algebraic error. The result should read like an instructor-written worked solution in a university thermodynamics textbook. {concept_bridge_solution_instruction}
+Subpart Decomposition Rule: Before writing each question, determine whether the requested work contains multiple distinct cognitive tasks or dependent stages. Apply this rule primarily to long-answer questions, derivation questions, multi-stage numerical problems, and integrated conceptual/computational questions. When decomposition improves clarity, grading, or logical progression, use labeled subparts such as (a), (b), (c), and (d).
+
+Normally decompose a question when students must produce multiple distinct requested results; use different thermodynamic, mathematical, or engineering principles at different stages; carry an intermediate result into a later stage; perform both calculation and physical interpretation; distinguish related but conceptually different criteria such as local and global behavior; or complete independently identifiable reasoning stages that naturally receive partial credit. Order subparts in the natural reasoning sequence, such as concept or principle, derivation, numerical application, then verification or interpretation. Do not ask a later subpart for information that has not been established earlier unless that information is explicitly given.
+
+Each subpart must represent a meaningful cognitive task or change in cognitive objective, not one line of algebra. Do not create subparts for trivial arithmetic, routine algebraic simplification, a single short conceptual question, or a simple one-step calculation. For short-answer questions, use subparts only when the task genuinely contains multiple independently assessable outputs. For multiple-choice question banks, do not turn individual questions into multipart questions unless multipart multiple-choice questions are explicitly requested.
+
+Subpart decomposition must clarify what students must accomplish without exposing solution scaffolding. Do not name a governing equation, criterion, or method when recalling it is part of the learning objective; preserve the prior-knowledge and method-disclosure rule above.
+
+If the student-facing question uses labeled subparts, the Fully Worked Solution must use exactly the same labels, order, and task boundaries. Use forms such as Solution (a), Solution (b), and Solution (c); do not combine multiple student subparts into one undifferentiated solution paragraph. Each solution subpart must end with the result or conclusion requested by its matching student subpart. These solution labels mirror assessment tasks and are allowed; they are not mechanical Step 1, Step 2, or Step 3 labels.
+
+Write the instructor solution as a continuous guided mathematical derivation, not as isolated numbered or titled steps. Do not use labels such as "Step 1", "Step 2", or "Step 3". Begin by identifying the quantity or criterion to be established and the governing principle; do not treat a stated answer choice as a solution. Each paragraph must perform exactly one logical operation: introduce the governing principle or equation, define variables, state assumptions, substitute known values, differentiate, rearrange, simplify, calculate, check, or interpret. Keep symbols and short expressions inline by alternating text and math segments. Mark only important governing equations, substantive derivation steps, intermediate calculations, and final calculation chains with display=true. Never place a short symbol or variable definition alone as display math. Use short natural transition phrases such as "The governing relation is...", "Using the quotient rule...", "Substituting...", "Therefore...", and "Physically..." so each paragraph leads naturally into the next operation. Define every variable before use and state all assumptions. Do not jump from a governing equation to the final answer. Show all non-obvious algebra and calculus, retain units, perform the numerical comparison or logical test that establishes the conclusion, and Check signs, dimensions, units, and physical behavior. For stability or equilibrium problems, state the criterion, compute the required derivative or equality, solve the resulting inequality or constraint, substitute numerical values, and compare the result with the criterion. End with the final answer and units, a brief physical interpretation, and, when applicable, a connection to the relevant MSE202 and MSE302 concepts. For multiple-choice questions, add a section titled "Why the other choices are incorrect" with one separate line for every distractor. {concept_bridge_solution_instruction}
 
 Use Robert DeHoff notation consistently. Use G, H, S, and V for molar or intensive properties, G′, H′, S′, and V′ for total extensive properties, T for temperature, P for pressure, Φ for the number of phases, C for the number of components, and F for degrees of freedom. Define every symbol before it is used.
 
-For every mathematical expression, add one entry to the equations array and replace the expression at its exact position in the question, answer option, or model answer with the matching [[EQ:label]] reference. [[EQ:label]] references are required equation references, not unresolved template placeholders. Use one reference for the complete equality or derivation chain, including every operator and operand. Never join multiple references with an operator. For example, never return [[EQ:left]] = [[EQ:right]]; instead return [[EQ:complete_equation]] and store the entire equality or multi-step chain in that one equation entry. Do not embed standalone equations only within the question or model answer.
+Represent question bodies, answer options, and model answers as ordered arrays of typed segments. Use {"type":"text","text":"..."} only for prose. Use {"type":"math","expression":"...","display":false} for every symbol, expression, variable definition, constant, assignment, derivative, or calculation. Use display=true only for important standalone equations or substantive derivation lines. Use one math segment for a complete equality or derivation chain. Do not create labels, equation references, locations, or an equations array; the application constructs them deterministically.
 
-When a problem has multiple components or members of one variable family, use explicit lowercase component subscripts: x_a and x_b, y_a and y_b, and the same pattern for any additional components. Do not use an ambiguous bare x or y where a component identity is required. Every component-indexed identifier must be represented by a matching [[EQ:label]] reference in the question body, every answer option, and the model answer; store its canonical form, such as x_a, in equations[].expression.
+When a problem has multiple components or members of one variable family, use explicit lowercase component subscripts: x_a and x_b, y_a and y_b, and the same pattern for any additional components. Do not use an ambiguous bare x or y where a component identity is required. Represent every component-indexed identifier with a math segment wherever it occurs.
 
-Set location to question when the label appears in the question body or an answer option, and set location to solution when it appears in the model answer. A label is prohibited from appearing in both question and solution content. If the same mathematical expression is needed in both, create two equation entries with distinct labels and matching locations, then use the corresponding label in each place.
-
-Every equation label must appear in exactly one [[EQ:label]] reference. If the same expression must be displayed more than once, create a distinct equation entry and unique label for each occurrence.
+If the same expression occurs more than once, emit one math segment at each occurrence. Preserve the exact reading order of prose and mathematics.
 
 Output Format
 
@@ -115,34 +123,16 @@ Return exactly one valid JSON object with the following structure.
  "questions": [
    {
      "type": "{question_type}",
-     "body": "The gas constant is [[EQ:gas_constant]]. Compare [[EQ:x_a_symbol]] with [[EQ:x_b_symbol]] and use [[EQ:question_equation]].",
-     "model_answer": "Apply [[EQ:solution_equation]].",
-     "equations": [
-       {
-         "label": "gas_constant",
-         "expression": "R = 8.314 J/(mol K)",
-         "location": "question"
-       },
-       {
-         "label": "question_equation",
-         "expression": "G_mix = H_mix - T S_mix",
-         "location": "question"
-       },
-       {
-         "label": "x_a_symbol",
-         "expression": "x_a",
-         "location": "question"
-       },
-       {
-         "label": "x_b_symbol",
-         "expression": "x_b",
-         "location": "question"
-       },
-       {
-         "label": "solution_equation",
-         "expression": "G_mix/(R T) = x_a ln(x_a) + x_b ln(x_b)",
-         "location": "solution"
-       }
+     "body_segments": [
+       {"type": "text", "text": "The gas constant is "},
+       {"type": "math", "expression": "R = 8.314 J/(mol K)", "display": false},
+       {"type": "text", "text": ". Compare the component fractions using:"},
+       {"type": "math", "expression": "G_mix = H_mix - T S_mix", "display": true}
+     ],
+     "options": [],
+     "model_answer_segments": [
+       {"type": "text", "text": "Apply the governing relation:"},
+       {"type": "math", "expression": "G_mix/(R T) = x_a ln(x_a) + x_b ln(x_b)", "display": true}
      ],
      "metadata": {
        "question_title": "Generated thermodynamics question",
@@ -154,7 +144,9 @@ Return exactly one valid JSON object with the following structure.
        "materials_science_context": "{materials_science_context}",
        "estimated_time_minutes": {estimated_time_minutes},
        "learning_objectives": {learning_objectives_json}
-     }
+     },
+     "quality_checks": [{"criterion": "Technical correctness", "rating": 5, "comment": "The solution is correct and complete."}],
+     "revision_options": ["Add numerical values.", "Ask for a physical interpretation."]
    }
  ]
 }
@@ -163,4 +155,4 @@ Return only the JSON object. Do not include Markdown, code fences, explanations,
 
 Stop Rules
 
-Before returning the final response, verify that the output is valid JSON, contains exactly one assessment_metadata object and the requested number of questions, includes all required assessment-level and question-level metadata fields, satisfies the supplied learning objective and prompt parameters, defines all variables before use, and contains no unresolved template variables, explanatory placeholder values, duplicated sections, or explanatory text outside the JSON object. [[EQ:label]] references are required equation references and must remain in the returned JSON.
+Before returning the final response, verify that the output is valid JSON, contains exactly one assessment_metadata object and the requested number of questions, includes all required assessment-level and question-level metadata fields, satisfies the supplied learning objective and prompt parameters, defines all variables before use, contains no mathematical syntax in text segments, and contains no unresolved template variables, duplicated sections, or explanatory text outside the JSON object.

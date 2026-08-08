@@ -26,6 +26,8 @@ Any full equation, derivation step, thermodynamic identity, chemical-potential e
 
 All displayed equations and important inline mathematical symbols must use native Word equation formatting.
 
+Keep individual symbols, short expressions, parameter definitions, constants, and simple assignments inline with the surrounding sentence. Reserve a separate centered display for important or longer governing equations, substantive derivation steps, multi-term substitutions, intermediate calculation chains, and final mathematical results. Do not place a short symbol or variable definition alone on a centered line.
+
 Do not:
 
 * Insert equations as images
@@ -120,7 +122,11 @@ The solution must:
 * Identify assumptions explicitly
 * Define all variables
 * Show algebraic steps clearly
+* Show every non-obvious calculus operation and the expression that results from it
+* Apply the problem's stated conditions explicitly rather than jumping directly to the final result
 * Include units where applicable
+* Include the numerical comparison or logical test that establishes the conclusion
+* Check signs, dimensions, units, and physical or limiting behavior when relevant
 * Explain the physical meaning of the result
 * Connect the solution back to the MSE202 and MSE302 concepts being bridged
 * Use native Word equations for all equations, derivation steps, and important mathematical expressions

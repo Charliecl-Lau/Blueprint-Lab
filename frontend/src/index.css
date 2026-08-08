@@ -37,6 +37,10 @@ body { margin: 0; background: #f5f5f7; color: #1d1d1f; font-family: Inter, syste
 .inline-action { margin-top: 12px; }
 @media (max-width: 650px) { .form-grid, .summary { grid-template-columns: 1fr; }.form-grid .wide { grid-column: auto; } }
 .generation-card { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #e5e5e7; }.generation-card div { display: flex; flex-direction: column; gap: 4px; }.generation-card small { color: #6e6e73; }.status { border-radius: 999px; padding: 5px 9px; font-size: 12px; background: #f0f0f2; }.status.complete { color: #137333; background: #e6f4ea; }.status.error { color: #b42318; background: #fce8e6; }
+.active-progress { margin-top: 16px; }
+.active-progress p { margin: 5px 0; }
+.activity-message { color: #1d1d1f; font-weight: 600; }
+.elapsed-time, .progress-reassurance { color: #6e6e73; font-size: 13px; }
 .viewer-shell { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 55px); }.viewer-shell aside { padding: 24px; border-right: 1px solid #e5e5e7; }.viewer-shell aside button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 10px; border-radius: 8px; }.viewer-shell aside button.selected { background: #eaf1ff; color: #1444b0; }.viewer-shell > article { padding: 30px 40px 90px; width: 100%; max-width: none; }
 .viewer-back-button { position: fixed; right: 24px; bottom: 20px; z-index: 30; border: 1px solid #d2d2d7; border-radius: 9px; padding: 10px 18px; background: white; color: #1d1d1f; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.08); }
 .retry-run-button { border: 0; background: transparent; color: #6e6e73; font-weight: 600; cursor: pointer; }
